@@ -758,3 +758,41 @@ failure.
 - Multiple runtime owners shut down safely only after the last owner leaves.
 - This milestone proves backend operation, not a public listener/client API,
   wire handshake, identity, authentication or replication.
+
+## ADR-0024: Fixed bounded three-message connection handshake
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+The live transport needs to reject incompatible or malicious peers before any
+gameplay schema is decoded. Protobuf is a private dependency of the selected
+transport and does not by itself define Easy3D compatibility, roles, resource
+limits or safe disconnect diagnostics. A server also needs evidence that a
+client received and retained the negotiated limit before treating it as ready.
+
+### Decision
+
+Use an Easy3D-owned 12-byte little-endian envelope with fixed magic, wire-format
+version, message type, zero reserved flags and exact payload length. Cap every
+handshake frame at 512 bytes. Exchange a client hello, server acceptance and
+client confirmation over reliable transport messages. Each peer declaration
+contains exact application protocol/schema versions, an explicit client/server
+role and a message-size limit; negotiate the smaller limit and cap declarations
+at 1 MiB. Encode rejections as stable numeric disconnect codes with 1–256 bytes
+of validated UTF-8 text that excludes control characters. Treat local API
+misuse as a programming error, but convert every untrusted parse/state failure
+into a bounded rejection.
+
+### Consequences
+
+- Compatibility and resource bounds are established before application data.
+- The server does not reach established state until it verifies the client's
+  confirmation of the accepted limit.
+- The codec is independent of GameNetworkingSockets, addresses and clocks, so
+  it can be tested deterministically and reused by future transports.
+- Wire-format or schema evolution requires an explicit versioned policy; format
+  1 intentionally supports exact matches only.
+- Transport encryption does not authenticate a player identity, and the
+  handshake does not claim authentication, discovery, sockets or replication.

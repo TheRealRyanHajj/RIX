@@ -539,3 +539,13 @@ build it reports GameNetworkingSockets 1.6.1 with Windows BCrypt.
 `backend_smoke_test()` temporarily owns the process-global native runtime and
 performs a bounded reliable loopback round trip. It is a build/runtime
 diagnostic, not a public client connection or network security test.
+
+The native `easy3d::detail::ProtocolHandshake` is an internal contract for the
+future `Client` and `Server` owners, not a Python gameplay API. It must be
+started once, consumes one complete reliable transport message at a time, and
+returns an optional outbound reply plus establishment/rejection state. It
+negotiates a maximum application payload no larger than either peer's declared
+limit. Peer bytes never raise parsing exceptions; malformed, incompatible,
+out-of-order or oversized input returns a stable disconnect code and bounded
+safe-text reason. Addresses, timeout clocks and socket ownership remain outside
+this codec.

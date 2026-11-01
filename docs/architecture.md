@@ -322,6 +322,16 @@ Phase 3.2 links GameNetworkingSockets 1.6.1 and a source-matched Protobuf 5.29.3
 runtime statically. Windows BCrypt supplies platform crypto, ICE/WebRTC remains
 off, and a reference-counted process owner serializes native initialization and
 shutdown. A real reliable socket-pair smoke test validates that private backend.
-The Phase 3.3 handshake and Phase 3.4 live connection adapter will place its
-callbacks behind the existing bounded queue; they will not call Python or
-mutate scenes from the native callback path.
+The Phase 3.4 live connection adapter will place backend callbacks behind the
+existing bounded queue; it will not call Python or mutate scenes from the
+native callback path.
+
+The Phase 3.3 handshake is now a native transport-independent state machine.
+Its 12-byte fixed envelope and peer declaration use explicit little-endian
+fields, exact protocol/schema compatibility, client/server role checks and a
+negotiated minimum payload limit. The three-message client hello/server
+accept/client confirm exchange prevents the server from declaring completion
+before it verifies the client's negotiated limit. Malformed peer data produces
+stable bounded disconnect codes rather than exceptions escaping the network
+input path. Phase 3.4 will own timeout policy and feed only reliable GNS
+messages into this state machine.

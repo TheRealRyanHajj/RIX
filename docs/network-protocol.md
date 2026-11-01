@@ -45,16 +45,65 @@ message.
 - `easy3d.network.backend_info()` exposes immutable build diagnostics and
   `backend_smoke_test()` repeats the loopback check on demand.
 
+## Implemented in Phase 3.3
+
+The internal handshake is a transport-independent state machine. All integer
+fields use little-endian byte order. A handshake frame is capped at 512 bytes
+and begins with this 12-byte envelope:
+
+| Offset | Size | Field | Required value |
+|---:|---:|---|---|
+| 0 | 4 | Magic | ASCII `E3DN` |
+| 4 | 2 | Wire-format version | `1` |
+| 6 | 1 | Message type | `1` hello, `2` accept, `3` confirm, `4` reject |
+| 7 | 1 | Reserved flags | `0` |
+| 8 | 4 | Payload byte count | Exact remaining frame size, at most 500 |
+
+Hello, accept and confirm carry the same fixed 12-byte peer declaration:
+
+| Offset | Size | Field | Rule |
+|---:|---:|---|---|
+| 0 | 2 | Application protocol version | Exact match, currently `1` |
+| 2 | 4 | Schema version | Exact match, currently `1` |
+| 6 | 1 | Role | `1` client or `2` server |
+| 7 | 1 | Reserved | `0` |
+| 8 | 4 | Maximum application message size | `1..1,048,576` bytes |
+
+The reliable sequence is client hello → server accept → client confirm.
+The server accept advertises the smaller of both peer limits; the client cannot
+raise that limit and must echo it unchanged in its confirmation. The server
+accepts only a client role and the client accepts only a server role. The
+client is established after producing its confirmation; the server is
+established only after verifying it.
+
+A rejection payload contains a stable 16-bit disconnect code, a 16-bit byte
+length and 1–256 bytes of validated UTF-8 text. C0/C1 control characters,
+overlong sequences, surrogates and invalid Unicode are rejected so a peer
+cannot inject control text into diagnostics. Defined protocol codes are:
+
+- `1000` malformed message
+- `1001` protocol version mismatch
+- `1002` schema version mismatch
+- `1003` role mismatch
+- `1004` limit violation
+- `1005` unexpected message/state
+- `1006` message too large
+
+Parsing checks the outer 512-byte cap and declared length before reading or
+copying payload data. Local state-machine misuse raises a C++ logic error;
+untrusted peer input becomes a bounded rejection and stable disconnect code.
+No Python object serialization is used.
+
 ## Not implemented yet
 
-There is no public socket address, listener, client, server, wire frame,
-handshake, schema/version negotiation, timeout, discovery, firewall behavior,
-replication or RPC yet. Python bytes leave the process only in later concrete
-transport APIs; the current backend exercise is an in-process native socket
-pair. Phase 3.3 defines the first bounded wire header and handshake, and Phase
-3.4 adapts live connections to the transport contract. Until those milestones
-pass, no application interoperability, identity or authentication claim is
-made.
+There is no public socket address, listener, client, server, timeout, discovery,
+firewall behavior, replication or RPC yet. Python bytes leave the process only
+in later concrete transport APIs; the current backend exercise is an in-process
+native socket pair. Phase 3.4 adapts live connections to the transport and
+handshake contracts. Until that milestone passes, the handshake has no public
+IP/port path and no application interoperability claim is made. Transport
+encryption also does not establish account or player identity; authentication
+remains a separate extension boundary.
 
 ## Threading and ownership
 

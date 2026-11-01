@@ -62,9 +62,16 @@ does not eliminate the documented extreme-angular-motion case.
 
 Phase 3.2 adds the real GameNetworkingSockets runtime and a reliable native
 socket-pair smoke test, but it does not yet expose a listener, address, client,
-server, timeout policy, or Easy3D wire handshake. Those are Phase 3.3–3.5
-requirements. Simulated loss still applies to both delivery labels because the
-deterministic simulator models the datagram link beneath reliability.
+server or timeout policy. Those remain Phase 3.4–3.5 requirements. Simulated
+loss still applies to both delivery labels because the deterministic simulator
+models the datagram link beneath reliability.
+
+Phase 3.3 defines and tests the bounded version/schema/role handshake, but the
+state machine is not connected to a public socket owner yet. It therefore does
+not currently enforce a wall-clock handshake timeout or let Python connect to
+an IP/port. Those are explicit Phase 3.4 responsibilities. Exact version and
+schema equality is the only compatibility policy in wire format 1; migrations
+or version ranges are not implied.
 
 The supported Windows build uses MSVC. A diagnostic attempt with MinGW GCC
 15.1 reaches an upstream Protobuf `musttail` compile failure in

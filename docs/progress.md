@@ -2422,3 +2422,106 @@ Phase 3.2: **DONE**. Immediate next task: Phase 3.3 — define the bounded
 binary wire envelope and versioned connection handshake, including malformed,
 oversize and incompatible-peer tests. No public client/server or replication
 API is claimed by this checkpoint.
+
+## 2026-11-01 — Phase 3.3 bounded protocol handshake (complete)
+
+### Bounded approach
+
+Define a transport-independent, fixed little-endian handshake envelope with a
+small immutable wire-format version. Use an explicit three-message sequence:
+client hello, server accept, client confirm. Every peer declaration carries an
+application protocol version, schema version, role and maximum message size;
+the server and client accept exact version/schema matches, opposite roles and a
+nonzero bounded limit, then negotiate the minimum message size. Rejects carry a
+stable numeric disconnect code plus bounded validated UTF-8 text.
+
+Keep the state machine native and independent of addresses, sockets, timeouts
+or callbacks so Phase 3.4 can drive it over either GNS or the deterministic
+transport. Add regressions for compatible peers, every mismatch, malformed and
+truncated frames, oversized length declarations, invalid roles/limits/reasons,
+unexpected state transitions and rejection propagation. No public `Client`,
+`Server`, authentication, replication or arbitrary application payload codec is
+part of this milestone.
+
+### Implemented
+
+- Added an Easy3D-owned 12-byte little-endian envelope with `E3DN` magic,
+  immutable wire-format version, typed message byte, zero reserved flags and an
+  exact 32-bit payload length. The complete handshake frame is capped at 512
+  bytes and length is checked before payload parsing.
+- Added fixed peer declarations carrying application protocol version, schema
+  version, explicit client/server role and a nonzero message limit capped at 1
+  MiB. Compatibility is exact for format 1; the negotiated application limit is
+  the smaller peer declaration, 64 KiB by default.
+- Added a transport-independent client hello → server accept → client
+  confirm state machine. The client cannot accept a server-selected limit above
+  its own or change the value in confirmation; the server establishes only
+  after validating that confirmation.
+- Added stable wire disconnect codes for malformed, version, schema, role,
+  limit, state and oversize failures. Reasons are 1–256 bytes of strictly
+  validated UTF-8 with C0/C1 controls, overlong sequences, surrogates and
+  out-of-range code points rejected.
+- Added native regressions covering the successful three-message sequence,
+  negotiated minimum, repeated local start, protocol/schema/role mismatch,
+  invalid local and peer limits, bad magic/reserved bytes/types/lengths,
+  truncation, declared and actual oversize frames, out-of-order messages,
+  malicious accept/confirm limits, invalid rejection UTF-8, post-establishment
+  messages, rejection propagation and stable reason names. The complete
+  exchange also runs as reliable messages across the bounded simulated
+  `NetworkTransport`, not only as direct state-machine calls.
+- Documented the exact wire fields, state transitions, limits and non-claims in
+  the protocol, architecture, API and known-issues docs, with ADR-0024.
+
+### Failures found and corrected
+
+No implementation or regression failure occurred in this milestone. The first
+targeted build and test passed. Existing upstream configure diagnostics remain
+the optional Protobuf Zlib absence and dependency CMake deprecation notices;
+they are unchanged from Phase 3.2 and do not affect the handshake.
+
+### Exact final verification evidence
+
+```text
+cmake --build build\windows-headless --config Debug --target easy3d_network_protocol_tests --parallel 4
+ctest --test-dir build\windows-headless -C Debug -R easy3d.network_protocol --output-on-failure
+1/1 Test #12: easy3d.network_protocol ..........   Passed    0.03 sec
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 0.07 sec
+
+cmake --build build\windows-headless --config Debug --parallel 4
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 14
+Total Test time (real) = 2.17 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 15
+Total Test time (real) = 1.20 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 15
+Total Test time (real) = 1.02 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3891419
+sha256=86abe724302219e0c539b067f3b18a368dfb4ea94f82315c56f53e958f18922f
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 66%]
+.....................................                                    [100%]
+109 passed in 0.37s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+Phase 3.3: **DONE**. Immediate next task: Phase 3.4 — adapt real GNS
+listen/connect connections to the bounded transport queue and handshake, with
+IP/port validation, timeouts, callbacks, errors and native metrics. No public
+client/server or entity replication is claimed by this checkpoint.
