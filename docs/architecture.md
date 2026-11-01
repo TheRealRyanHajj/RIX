@@ -191,3 +191,19 @@ Callback profiling uses Python's monotonic high-resolution clock and records
 calls, total, maximum, and latest duration per hook. Fail-fast exceptions cross
 the C++ frame bridge and unwind normal renderer/window RAII. Tolerant mode logs
 the traceback once and quarantines that entity for the rest of its lifetime.
+
+## Standalone gameplay utilities
+
+State machines, timers, cooldowns, event dispatch and tweens are pure Python and
+do not import the native extension directly. They are deliberately caller
+driven: the scheduler does not keep a global timer list or hidden event bus.
+Scripts advance simulation-domain objects in `fixed_update`, render-domain
+objects in `update`, and explicitly poll wall-domain objects. This preserves
+world ownership and makes the utilities usable in headless tests and later
+server contexts.
+
+All dispatch is synchronous on the calling gameplay thread. State-machine
+callbacks have a reentrancy guard; event dispatch snapshots ordered listeners
+and bounds recursive depth. These constraints avoid partially nested state
+transitions and unbounded event recursion without introducing worker threads or
+an implicit process-global service.

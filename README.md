@@ -199,6 +199,33 @@ dropped catch-up time, overruns, and per-hook call timing. Development defaults
 to fail-fast callback errors; pass `fail_fast=False` to quarantine a failing
 script and inspect `game.script_errors`.
 
+## Gameplay utilities
+
+The standalone utility layer has no window, renderer, or scene dependency:
+
+```python
+from easy3d import ClockDomain, Cooldown, EventBus, StateMachine, Tween
+
+states = StateMachine()
+states.add_state("idle")
+states.add_state("running", on_update=lambda dt: print(dt))
+states.add_transition("idle", "running", "move")
+states.start("idle")
+states.trigger("move")
+
+fire = Cooldown(0.25, time_domain=ClockDomain.SIMULATION)
+events = EventBus()
+hit_subscription = events.subscribe("hit", lambda damage: print(damage))
+fade = Tween(0.0, 1.0, 0.5, autostart=True,
+             time_domain=ClockDomain.RENDER)
+```
+
+Advance simulation timers/cooldowns from `fixed_update`, render tweens/timers
+from `update`, and wall-clock objects with `poll()`. Mixing clock domains raises
+instead of silently changing gameplay timing. State callbacks cannot reenter
+the same machine; event listeners are synchronous, priority ordered, and safe
+to add/remove while a snapshot is being dispatched.
+
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
 

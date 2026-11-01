@@ -30,14 +30,30 @@ from .math import Quat, Vec2, Vec3
 from .primitives import Cube, Model, Plane, Sphere
 from .scene import Scene
 from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
+from .utilities import (
+    ClockDomain,
+    Cooldown,
+    Easing,
+    EventBus,
+    State,
+    StateMachine,
+    Subscription,
+    Timer,
+    Transition,
+    Tween,
+)
 
 __all__ = [
     "EngineError",
     "AssetError",
     "Camera",
     "CallbackStats",
+    "ClockDomain",
+    "Cooldown",
     "Cube",
     "Entity",
+    "Easing",
+    "EventBus",
     "Game",
     "InvalidEntityError",
     "ImageInfo",
@@ -62,6 +78,12 @@ __all__ = [
     "SchedulerStats",
     "ScriptCallbackError",
     "Sphere",
+    "State",
+    "StateMachine",
+    "Subscription",
+    "Timer",
+    "Transition",
+    "Tween",
     "Vec2",
     "Vec3",
     "TextureCache",

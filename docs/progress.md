@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.2 passed;
-Phase 2.3 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.3 passed;
+Phase 2.4 is next. Live pointer lock and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -1654,3 +1654,51 @@ Total Test time (real) = 0.17 sec
 
 Phase 2.2: **DONE**. Phase 1 exit gate: **PASSED**. Immediate next task: Phase
 2.3 — standalone state machine, timers, cooldowns, event bus, and tween utilities.
+
+## 2026-11-01 — Phase 2.3 standalone gameplay utilities
+
+### Implemented
+
+- Added a named `StateMachine` with lifecycle callbacks, guarded event-driven
+  transitions, direct transitions, state-time accounting and callback
+  reentrancy rejection.
+- Added caller-owned `Timer` and `Cooldown` with one-shot/repeat behavior,
+  pause/resume/cancel/reset, completion counters, explicit simulation/render/
+  wall clock domains, injected wall clocks and bounded callback bursts.
+- Added synchronous `EventBus` subscriptions with stable priority/order,
+  one-shot delivery, mutation-safe snapshot dispatch and bounded recursive
+  emission.
+- Added generic `Tween` interpolation for numeric/vector-like values and tuples,
+  built-in/custom easing, completion callbacks, looping/ping-pong and the same
+  explicit clock-domain policy.
+- Exported the typed utilities at package top level and documented their
+  headless ownership, timing, ordering and exception contracts in README, API,
+  architecture and ADR-0016.
+
+### Exact verification evidence
+
+Focused graphics-independent suite:
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests\python\test_utilities.py -q
+..........                                                               [100%]
+10 passed in 0.08s
+```
+
+Full Python regression suite after final validation tightening:
+
+```text
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 97%]
+..                                                                       [100%]
+74 passed in 0.18s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests
+# exit code 0, no output
+```
+
+This milestone changes no C++ or renderer code. The immediately preceding
+Phase 2.2 final native recheck remains 11/11 Debug, 11/11 Release and 10/10
+headless. Phase 2.3: **DONE**. Immediate next task: Phase 2.4 — pinned Jolt
+integration, per-world collision layers/gravity/body lifetime and headless fixed
+stepping.

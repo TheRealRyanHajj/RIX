@@ -261,6 +261,33 @@ quarantined from later hooks, and the summary appears in `game.script_errors`.
 `game.scheduler_stats` exposes fixed tick/drop/overrun totals and immutable
 per-hook call/total/maximum/last durations.
 
+## Standalone gameplay utilities
+
+`StateMachine` registers named `State` objects, validates event transition
+endpoints up front, calls `on_exit(target)` before `on_enter(source)`, resets
+`time_in_state` on transition, and evaluates guarded transitions in registration
+order. Direct `transition_to` is available for unconditional control. Public
+machine operations from inside enter/update/exit/guard callbacks raise a
+reentrancy error rather than nesting a partial transition. Callback exceptions
+propagate to the caller; if an enter callback fails, the target remains current
+so state is never reported as the already-exited source.
+
+`Timer`, `Cooldown`, and `Tween` each declare a `ClockDomain`: `simulation`,
+`render`, or `wall`. Simulation/render objects advance only through
+`advance(dt, time_domain=...)`; passing the wrong explicit domain raises.
+Wall-clock objects use `poll()` and accept an injectable monotonic clock for
+tests. Negative/non-finite deltas are rejected. Timers support pause/resume,
+one-shot/repeat completion counts and a bounded repeat-callback burst.
+Cooldown activation is rejected until ready unless `restart=True`. Tween
+supports scalar/vector arithmetic, equal-sized tuples, custom interpolators,
+linear/ease-in/ease-out/ease-in-out curves, looping and ping-pong.
+
+`EventBus` dispatches synchronously by descending priority and then subscription
+order. One-shot listeners are removed before invocation, so recursive emission
+cannot call them twice. Unsubscribing a listener before its turn suppresses it;
+new listeners wait for the next emission. Nested dispatch is supported up to a
+configurable bound. Listener exceptions propagate without being hidden.
+
 ## Texture assets
 
 ```python

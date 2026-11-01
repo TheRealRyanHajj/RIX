@@ -29,6 +29,11 @@ scheduler callback is active. Other threads remain rejected while `Game.run()`
 is traversing the scene; bypassing the public API through the private extension
 is outside the supported contract.
 
+Phase 2.3 utilities are caller-owned and are not automatically advanced by the
+scheduler: simulation objects belong in `fixed_update`, render objects in
+`update`, and wall objects require `poll()`. This is an explicit ownership rule,
+not an engine-managed timer service.
+
 ## Input hardware validation
 
 Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,

@@ -492,3 +492,32 @@ not concurrent.
 - The scheduler defines ordering, not deterministic arbitrary Python behavior.
 - Physics and networking must insert their owned stages into this boundary or
   communicate through queues; they must not invoke Python from worker threads.
+
+## ADR-0016: Caller-owned utilities use explicit clock domains
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Timers and interpolation become ambiguous once render frames, fixed simulation
+ticks, headless servers, pause behavior, and real elapsed time coexist. A global
+utility manager would also hide ownership and complicate scene teardown.
+
+### Decision
+
+Keep `StateMachine`, `Timer`, `Cooldown`, `EventBus`, and `Tween` as pure-Python,
+caller-owned objects. Timing objects declare `wall`, `render`, or `simulation`
+ownership and reject incompatible advancement. Wall time is explicitly polled;
+render/simulation time is explicitly advanced by its owning callback. Event
+dispatch remains synchronous and deterministic, with stable priority order and
+bounded recursion. State transitions reject callback reentrancy.
+
+### Consequences
+
+- Utilities run in headless tests without SDL, bgfx, a scene, or native setup.
+- Pause and time-scale policy remains explicit at the call site instead of
+  leaking wall time into deterministic fixed-step mechanics.
+- There is no implicit global bus or timer lifecycle to leak across worlds.
+- Later engine-managed conveniences can wrap these primitives without changing
+  their timing and exception semantics.
