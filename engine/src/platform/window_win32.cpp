@@ -1,19 +1,15 @@
 #include "platform/window.hpp"
+#include "renderer/bgfx_renderer.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
 
 #include <SDL3/SDL.h>
-#include <bgfx/bgfx.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <iomanip>
-#include <iostream>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <thread>
 
@@ -39,89 +35,6 @@ public:
 
 struct WindowDeleter {
     void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
-};
-
-class BgfxContext final {
-public:
-    BgfxContext(void* native_window,
-                const std::uint32_t width,
-                const std::uint32_t height,
-                const bool vsync) {
-        // Keep device and swap-chain work on the SDL/window thread. Calling
-        // renderFrame before init selects bgfx's supported single-threaded
-        // mode, which is important for externally owned Win32 HWNDs.
-        bgfx::renderFrame();
-
-        bgfx::Init init;
-        init.type = bgfx::RendererType::Direct3D11;
-        init.fallback = false;
-        init.swapChain.nwh = native_window;
-        init.swapChain.width = width;
-        init.swapChain.height = height;
-
-        // Preserve bgfx::Init's complete swap-chain defaults (including the
-        // BGRA8/D24S8 formats and double buffering) for later resize resets.
-        // A standalone bgfx::SwapChain defaults its formats to Count and is
-        // not a complete primary swap-chain description.
-        swap_chain_ = init.swapChain;
-        reset_flags_ = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
-        init.reset = reset_flags_;
-
-        if (!bgfx::init(init)) {
-            throw EngineError("bgfx failed to initialize the Direct3D 11 renderer");
-        }
-        initialized_ = true;
-
-        const bgfx::Caps* caps = bgfx::getCaps();
-        std::ostringstream message;
-        message << "Easy3D renderer: " << bgfx::getRendererName(bgfx::getRendererType())
-                << ", vendor=0x" << std::hex << std::setw(4) << std::setfill('0')
-                << caps->vendorId << ", device=0x" << std::setw(4) << caps->deviceId;
-        std::cout << message.str() << std::dec << std::endl;
-
-        bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x28344bff, 1.0F, 0);
-        width_ = std::max(width, 1U);
-        height_ = std::max(height, 1U);
-        bgfx::setViewRect(0,
-                          0,
-                          0,
-                          static_cast<std::uint16_t>(width_),
-                          static_cast<std::uint16_t>(height_));
-    }
-
-    ~BgfxContext() {
-        if (initialized_) {
-            bgfx::shutdown();
-        }
-    }
-
-    BgfxContext(const BgfxContext&) = delete;
-    BgfxContext& operator=(const BgfxContext&) = delete;
-
-    void resize(const std::uint32_t width, const std::uint32_t height) {
-        width_ = std::max(width, 1U);
-        height_ = std::max(height, 1U);
-        swap_chain_.width = width_;
-        swap_chain_.height = height_;
-        bgfx::reset(reset_flags_, &swap_chain_);
-        bgfx::setViewRect(0,
-                          0,
-                          0,
-                          static_cast<std::uint16_t>(width_),
-                          static_cast<std::uint16_t>(height_));
-    }
-
-    void present() {
-        bgfx::touch(0);
-        bgfx::frame();
-    }
-
-private:
-    bool initialized_{false};
-    std::uint32_t reset_flags_{BGFX_RESET_NONE};
-    std::uint32_t width_{1};
-    std::uint32_t height_{1};
-    bgfx::SwapChain swap_chain_{};
 };
 
 } // namespace
@@ -164,10 +77,11 @@ void run_window_loop(const EngineConfig& config,
         throw EngineError(sdl_error("SDL could not query the window pixel size"));
     }
 
-    BgfxContext renderer(native_window,
-                         static_cast<std::uint32_t>(std::max(pixel_width, 1)),
-                         static_cast<std::uint32_t>(std::max(pixel_height, 1)),
-                         config.vsync);
+    renderer::BgfxRenderer renderer(native_window,
+                                    static_cast<std::uint32_t>(std::max(pixel_width, 1)),
+                                    static_cast<std::uint32_t>(std::max(pixel_height, 1)),
+                                    config.vsync,
+                                    config.geometry_diagnostic);
 
     using Clock = std::chrono::steady_clock;
     const auto minimum_frame = config.fps_limit > 0.0

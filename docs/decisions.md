@@ -155,3 +155,39 @@ orientation equality is quaternion-based because Euler triples are not unique.
 - Direct component mutation on entity vector properties is persistent.
 - Keep-world TRS decomposition cannot represent arbitrary shear exactly; future
   APIs must not imply general affine/shear support without changing storage.
+
+## ADR-0007: Backend-neutral mesh data and reviewed D3D11 shader artifacts
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Phase 1.3 requires genuine indexed GPU geometry and deterministic resource
+lifetime without leaking bgfx handles into beginner or stable native APIs. The
+pinned bgfx CMake integration can build `shaderc`, but enabling it adds roughly
+690 shader-tool dependency compilation steps per fresh configuration, including
+SPIR-V, glslang, and Tint code not needed by the current D3D11 runtime.
+
+### Decision
+
+Keep `MeshData`, `Material`, and related values backend-neutral. A private
+`BgfxRenderer` owns a mesh lifetime manager, programs, uniforms, and submission.
+Normal Windows builds consume reviewed Shader Model 5 DXBC headers committed
+beside Easy3D-owned `.sc` sources. `EASY3D_REGENERATE_SHADERS=ON` explicitly
+builds the immutable-pinned bgfx `shaderc` and regenerates those headers for
+review. Only the supported D3D11 profile is generated at this stage.
+
+The Phase 1.3 geometry scene is an opt-in native diagnostic, not a hidden default
+world or a substitute for the Phase 1.4 camera and Phase 1.7 render components.
+
+### Consequences
+
+- Clean editable, Debug, and Release runtime builds avoid compiling unused
+  shader tooling while remaining independent of a globally installed compiler.
+- Source changes require explicit regeneration and review of deterministic
+  binary-header diffs.
+- GPU buffers and shaders cannot escape the renderer lifetime, and shutdown
+  orders all releases before bgfx/device destruction.
+- Additional renderer backends require their own generated artifacts and
+  runtime evidence before they can be claimed.

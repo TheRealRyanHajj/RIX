@@ -44,8 +44,10 @@ except InvalidEntityError:
 
 Implemented entity properties include `id`, `name`, `enabled`, `visible`,
 `scene`, `is_alive`, local/world transforms, `parent`, and `children`. Component
-attachment, rendering, physics, and network identity are later checklist items
-and are not available yet.
+attachment, scene-to-renderer submission, physics, and network identity are
+later checklist items and are not available yet. The native renderer does have
+validated mesh/material data and indexed D3D11 submission, but Phase 1.3 does
+not expose premature Python primitive or camera APIs.
 
 ## Math and transform conventions
 

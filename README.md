@@ -2,9 +2,10 @@
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. The current implementation includes the validated Phase 0 native
-foundation, generation-safe scene/entity lifetimes, and native transform
-hierarchies with Easy3D-owned vector/quaternion APIs. Rendering remains the
-Phase 0 blank D3D11 window until later Phase 1 milestones are completed.
+foundation, generation-safe scene/entity lifetimes, native transform
+hierarchies, and an indexed D3D11 geometry/material path. Scene render
+components and the public camera API remain later Phase 1 milestones, so the
+ordinary `Game` window stays blank until a renderable scene is attached.
 
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
@@ -67,6 +68,20 @@ from `pytest` and CTest.
 For a short visible open/close lifecycle diagnostic (still requiring a real
 Windows desktop/GPU), run `python tests/manual/window_lifecycle.py`.
 
+To exercise the Phase 1 indexed mesh path, build the native preset and run:
+
+```powershell
+cmake --build --preset windows-release --target easy3d_geometry_lifecycle
+.\build\windows-release\Release\easy3d_geometry_lifecycle.exe
+```
+
+The ten-second diagnostic renders a vertex-colored triangle, solid-color cube,
+plane, and UV sphere with indexed GPU buffers and depth testing. It is manual
+and deliberately excluded from CTest. The D3D11 shader headers are reviewed
+build inputs generated from the adjacent `.sc` sources. Maintainers can rebuild
+them using the pinned bgfx compiler with
+`cmake --preset windows-debug -DEASY3D_REGENERATE_SHADERS=ON`.
+
 ## Scene and entity lifecycle
 
 Entities belong to an explicit scene, either through a context or a `scene=`
@@ -101,7 +116,7 @@ performance claim.
 
 ## Scope and license
 
-Renderable components, physics, assets, and multiplayer systems remain
+Renderable scene components, physics, assets, and multiplayer systems remain
 incomplete. The repository is private and proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 

@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.2 PASSED; Phase 1.3 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.3 PASSED; Phase 1.4 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -671,3 +671,100 @@ cycle/self/cross-scene rejection, keep-world reparenting, and parent destruction
 Phase 1.2: **DONE**. Immediate next task: Phase 1.3 — renderer abstraction,
 mesh/material handles, GPU resource lifetime, shaders, and indexed triangle/cube/
 plane/sphere rendering with depth testing.
+
+## 2026-11-01 — Phase 1.3 indexed geometry and GPU resource lifetime
+
+### Implemented
+
+- Backend-neutral `Color`, `Vertex`, `Bounds`, `MeshData`, and `Material`
+  abstractions with finite/range/index validation and bounds/triangle queries.
+- Counter-clockwise triangle, 24-vertex cube, +Y horizontal plane, and
+  configurable UV-sphere generators with positions, normals, UVs, and colors.
+- Private bgfx renderer extracted from the Win32 event loop. Its move-only GPU
+  mesh resources own immutable vertex and 32-bit index buffers; all buffers,
+  program, and uniform handles release before bgfx/device shutdown.
+- Easy3D-owned solid-color vertex/fragment shaders, material color uniform,
+  depth writes, `LESS` depth testing, and back-face culling.
+- Reviewed D3D11 SM5 DXBC headers plus explicit pinned-shaderc regeneration via
+  `EASY3D_REGENERATE_SHADERS=ON`; ordinary builds do not compile shader tools.
+- An opt-in native geometry diagnostic that leaves the ordinary Python window
+  blank and avoids claiming the Phase 1.4 public camera or Phase 1.7 components.
+
+### Failure and correction evidence
+
+The first shader-tool configure inherited an unset include variable and invoked
+both Debug compiler processes with `-i /src`; both produced zero-byte headers
+and stalled. The build was interrupted without accepting those outputs.
+Resolving the nested FetchContent `bgfx` source directory produced valid SM5
+headers. The full tool build also demonstrated that enabling shaderc adds 713
+first-build Ninja steps on this revision, so ADR-0007 records the reviewed,
+committed-artifact approach and opt-in regeneration path.
+
+### Verification evidence
+
+Debug and Release native suites:
+
+```text
+cmake --build --preset windows-debug
+ctest --preset windows-debug --output-on-failure
+1/4 easy3d.core             Passed
+2/4 easy3d.scene            Passed
+3/4 easy3d.math_transform   Passed
+4/4 easy3d.mesh             Passed
+100% tests passed, 0 tests failed out of 4
+Total Test time (real) = 0.28 sec
+
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+1/4 easy3d.core             Passed
+2/4 easy3d.scene            Passed
+3/4 easy3d.math_transform   Passed
+4/4 easy3d.mesh             Passed
+100% tests passed, 0 tests failed out of 4
+Total Test time (real) = 0.28 sec
+```
+
+Release GPU diagnostic on the interactive Windows desktop:
+
+```text
+.\build\windows-release\Release\easy3d_geometry_lifecycle.exe
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+Easy3D geometry: GPU meshes=4, indexed triangles=783, depth-test=less
+easy3d_geometry_lifecycle: PASS frames=1032
+EXIT_CODE=0
+```
+
+A live Windows.Graphics.Capture screenshot was inspected while the Debug
+diagnostic was rendering. It visibly showed the colored triangle, cyan cube,
+yellow sphere, and gray floor plane; foreground geometry correctly occluded the
+plane. This is genuine interactive evidence on the NVIDIA GeForce RTX 3070 Ti,
+not an inference from process exit.
+
+Python 3.11 packaging regression:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3209650
+sha256=ca09e59f61b10c050928f8b61bc2087e1f0f4b4cd19867449efdbf851a666c75
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+............................                                             [100%]
+28 passed in 0.07s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples
+# exit code 0, no output
+```
+
+The native mesh tests cover primitive counts, bounds, front-face winding,
+sphere radii and unit normals, invalid indices/sizes, and RGBA8 packing. The GPU
+diagnostic remains intentionally excluded from CTest because it opens a visible
+window and requires a real D3D11 desktop.
+
+Phase 1.3: **DONE**. Immediate next task: Phase 1.4 — scene-facing camera data,
+configurable near/far projection, aspect ratio, and resize behavior tests.

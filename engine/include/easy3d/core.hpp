@@ -21,6 +21,9 @@ struct EngineConfig {
     std::uint32_t height{720};
     bool vsync{true};
     double fps_limit{0.0};
+    // Native validation scene used by renderer diagnostics. Ordinary Game
+    // instances leave this disabled and retain the blank-window behavior.
+    bool geometry_diagnostic{false};
 };
 
 class Engine final {

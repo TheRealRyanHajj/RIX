@@ -5,11 +5,12 @@ machine.
 
 ## Phase 1 is incomplete
 
-Phase 1.1 scene/entity lifetime semantics and Phase 1.2 math/transform hierarchy
-are implemented. Component attachment, meshes, cameras, materials, textures,
-model loading, lighting, culling, and instancing remain unimplemented checklist
-work. The loaded scene therefore owns entity and transform state but is not yet
-submitted to the renderer.
+Phase 1.1 scene/entity lifetime semantics, Phase 1.2 math/transform hierarchy,
+and Phase 1.3 native mesh/material/indexed rendering are implemented. Component
+attachment, public cameras, textures, model loading, lighting, culling, and
+instancing remain unimplemented checklist work. The loaded Python scene
+therefore owns entity and transform state but is not yet submitted to the
+renderer; Phase 1.3 rendering is exercised by a native diagnostic scene only.
 
 ## Visual Studio 2022 minimum is not independently exercised here
 
@@ -37,6 +38,21 @@ FetchContent checkout, but fully offline clean setup is not yet provided.
 Debug builds emit bgfx capability diagnostics and benign optional-tool notices
 for components such as RenderDoc or AMD AGS when those tools are absent. Release
 builds provide the concise selected-renderer and adapter log used by the example.
+
+On this machine, Debug D3D11 shutdown also logs an upstream bgfx diagnostic for
+the `ID3D11InfoQueue` COM debug interface (`RefCount is 2 (expected 0)`). The
+warning is emitted at `renderer_d3d11.cpp:1784`, after Easy3D has queued release
+of every mesh/program/uniform handle. Release runs are clean. No formal PIX or
+RenderDoc leak capture has been performed yet, so the evidence is deterministic
+Easy3D handle teardown and repeated clean process exit rather than a general GPU
+driver leak claim.
+
+## Shader artifacts currently target D3D11 only
+
+Easy3D's source shaders are present and reproducibly regenerable with the pinned
+bgfx compiler, but only reviewed DXBC Shader Model 5 headers are committed and
+runtime-tested. This matches the explicit Windows D3D11 backend. Vulkan,
+Direct3D 12, OpenGL, Metal, and WebGPU shader artifacts are not claimed.
 
 ## Pinned GLM emits CMake policy deprecation warnings
 

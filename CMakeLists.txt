@@ -8,6 +8,7 @@ include(FetchContent)
 option(EASY3D_ENABLE_GRAPHICS "Build the SDL3/bgfx Windows window backend" ${WIN32})
 option(EASY3D_BUILD_PYTHON "Build the Python extension" ON)
 option(EASY3D_BUILD_BENCHMARKS "Build the tiny native benchmark harness" ON)
+option(EASY3D_REGENERATE_SHADERS "Build shaderc and regenerate committed D3D11 shaders" OFF)
 
 if(EASY3D_ENABLE_GRAPHICS AND NOT WIN32)
     message(FATAL_ERROR "The Phase 0 graphics backend currently supports Windows only")
@@ -34,6 +35,7 @@ FetchContent_MakeAvailable(glm)
 set(easy3d_core_sources
     engine/src/core/engine.cpp
     engine/src/math/math.cpp
+    engine/src/renderer/mesh.cpp
     engine/src/scene/scene.cpp
 )
 
@@ -54,7 +56,13 @@ if(EASY3D_ENABLE_GRAPHICS)
     FetchContent_MakeAvailable(SDL3)
 
     # Official bgfx CMake integration. This commit pins bgfx, bx and bimg too.
-    set(BGFX_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    # Runtime builds consume reviewed DXBC headers committed beside their
+    # source. Maintainers can explicitly rebuild them with the pinned shaderc.
+    set(BGFX_BUILD_TOOLS ${EASY3D_REGENERATE_SHADERS} CACHE BOOL "" FORCE)
+    set(BGFX_BUILD_TOOLS_BIN2C OFF CACHE BOOL "" FORCE)
+    set(BGFX_BUILD_TOOLS_SHADER ${EASY3D_REGENERATE_SHADERS} CACHE BOOL "" FORCE)
+    set(BGFX_BUILD_TOOLS_GEOMETRY OFF CACHE BOOL "" FORCE)
+    set(BGFX_BUILD_TOOLS_TEXTURE OFF CACHE BOOL "" FORCE)
     set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
@@ -68,7 +76,45 @@ if(EASY3D_ENABLE_GRAPHICS)
         GIT_SHALLOW FALSE
     )
     FetchContent_MakeAvailable(bgfx_cmake)
-    list(APPEND easy3d_core_sources engine/src/platform/window_win32.cpp)
+    list(APPEND easy3d_core_sources
+        engine/src/platform/window_win32.cpp
+        engine/src/renderer/bgfx_renderer.cpp
+    )
+
+    set(EASY3D_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/engine/src/renderer/shaders")
+    if(EASY3D_REGENERATE_SHADERS)
+        FetchContent_GetProperties(bgfx SOURCE_DIR EASY3D_BGFX_SOURCE_DIR)
+        set(BGFX_SHADER_INCLUDE_PATH "${EASY3D_BGFX_SOURCE_DIR}/src")
+        set(EASY3D_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders/dxbc")
+        bgfx_compile_shaders(
+            TYPE VERTEX
+            SHADERS "${EASY3D_SHADER_SOURCE_DIR}/vs_solid_color.sc"
+            VARYING_DEF "${EASY3D_SHADER_SOURCE_DIR}/varying.def.sc"
+            OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders"
+            OUT_FILES_VAR EASY3D_VERTEX_SHADER_HEADERS
+            PROFILES s_5_0
+            AS_HEADERS
+        )
+        bgfx_compile_shaders(
+            TYPE FRAGMENT
+            SHADERS "${EASY3D_SHADER_SOURCE_DIR}/fs_solid_color.sc"
+            VARYING_DEF "${EASY3D_SHADER_SOURCE_DIR}/varying.def.sc"
+            OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders"
+            OUT_FILES_VAR EASY3D_FRAGMENT_SHADER_HEADERS
+            PROFILES s_5_0
+            AS_HEADERS
+        )
+        list(APPEND easy3d_core_sources
+            ${EASY3D_VERTEX_SHADER_HEADERS}
+            ${EASY3D_FRAGMENT_SHADER_HEADERS}
+        )
+    else()
+        set(EASY3D_SHADER_INCLUDE_DIR "${EASY3D_SHADER_SOURCE_DIR}/generated/dxbc")
+        list(APPEND easy3d_core_sources
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_solid_color.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/fs_solid_color.sc.bin.h"
+        )
+    endif()
 else()
     list(APPEND easy3d_core_sources engine/src/platform/window_stub.cpp)
 endif()
@@ -97,6 +143,9 @@ endif()
 
 if(EASY3D_ENABLE_GRAPHICS)
     target_compile_definitions(easy3d_core PRIVATE EASY3D_HAS_GRAPHICS=1)
+    target_include_directories(easy3d_core PRIVATE
+        "${EASY3D_SHADER_INCLUDE_DIR}"
+    )
     target_link_libraries(easy3d_core PRIVATE SDL3::SDL3-static bgfx)
 endif()
 
@@ -143,6 +192,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_math_transform_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_math_transform_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.math_transform COMMAND easy3d_math_transform_tests)
+
+    add_executable(easy3d_mesh_tests tests/cpp/test_mesh.cpp)
+    target_compile_features(easy3d_mesh_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_mesh_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.mesh COMMAND easy3d_mesh_tests)
 endif()
 
 if(EASY3D_BUILD_BENCHMARKS)
@@ -156,5 +210,9 @@ if(EASY3D_ENABLE_GRAPHICS)
     add_executable(easy3d_window_lifecycle tests/cpp/window_lifecycle.cpp)
     target_compile_features(easy3d_window_lifecycle PRIVATE cxx_std_20)
     target_link_libraries(easy3d_window_lifecycle PRIVATE Easy3D::core)
+
+    add_executable(easy3d_geometry_lifecycle tests/cpp/geometry_lifecycle.cpp)
+    target_compile_features(easy3d_geometry_lifecycle PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_geometry_lifecycle PRIVATE Easy3D::core)
 endif()
 
