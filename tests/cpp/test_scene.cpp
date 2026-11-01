@@ -64,12 +64,19 @@ int main() {
     easy3d::Scene scene("main");
     scene.set_active(true);
     const easy3d::EntityHandle scene_entity = scene.create_entity("scene entity");
+    easy3d::PhysicsBodySettings body_settings{};
+    body_settings.shape = easy3d::PhysicsShape::Sphere;
+    body_settings.radius = 0.5F;
+    const easy3d::PhysicsBodyHandle physics_body = scene.physics().create_body(body_settings);
+    scene.set_physics_gravity({0.0F, -2.0F, 0.0F});
+    scene.step_physics(1.0F / 60.0F);
     if (!scene.active() || scene.entity_count() != 1 || !scene.is_alive(scene_entity)) {
         return fail(9, "scene ownership state is invalid");
     }
     scene.clear();
-    if (scene.entity_count() != 0 || scene.is_alive(scene_entity)) {
-        return fail(10, "scene clear did not invalidate entities");
+    if (scene.entity_count() != 0 || scene.is_alive(scene_entity) ||
+        scene.physics().is_alive(physics_body) || scene.physics().body_count() != 0) {
+        return fail(10, "scene clear did not invalidate entities and physics bodies");
     }
 
     try {

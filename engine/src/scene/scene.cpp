@@ -583,6 +583,9 @@ void Scene::destroy_entity(const EntityHandle handle) {
 void Scene::clear() noexcept {
     world_.clear();
     debug_lines_.clear();
+    if (physics_) {
+        physics_->clear();
+    }
 }
 
 bool Scene::is_alive(const EntityHandle handle) const noexcept {
@@ -728,6 +731,35 @@ void Scene::clear_debug_lines() noexcept {
 
 const std::vector<DebugLine>& Scene::debug_lines() const noexcept {
     return debug_lines_;
+}
+
+Vec3 Scene::physics_gravity() const noexcept {
+    return physics_ ? physics_->gravity() : Vec3{0.0F, -9.81F, 0.0F};
+}
+
+void Scene::set_physics_gravity(const Vec3 gravity) {
+    physics().set_gravity(gravity);
+}
+
+void Scene::step_physics(const float delta_seconds) {
+    if (physics_) {
+        physics_->step(delta_seconds);
+    }
+}
+
+std::uint64_t Scene::physics_step_count() const noexcept {
+    return physics_ ? physics_->step_count() : 0;
+}
+
+PhysicsWorld& Scene::physics() {
+    if (!physics_) {
+        physics_ = std::make_unique<PhysicsWorld>();
+    }
+    return *physics_;
+}
+
+const PhysicsWorld* Scene::physics_if_initialized() const noexcept {
+    return physics_.get();
 }
 
 World& Scene::world() noexcept {

@@ -3,11 +3,13 @@
 #include "easy3d/core.hpp"
 #include "easy3d/assets.hpp"
 #include "easy3d/math.hpp"
+#include "easy3d/physics.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -221,6 +223,13 @@ public:
     void clear_debug_lines() noexcept;
     [[nodiscard]] const std::vector<DebugLine>& debug_lines() const noexcept;
 
+    [[nodiscard]] Vec3 physics_gravity() const noexcept;
+    void set_physics_gravity(Vec3 gravity);
+    void step_physics(float delta_seconds);
+    [[nodiscard]] std::uint64_t physics_step_count() const noexcept;
+    [[nodiscard]] PhysicsWorld& physics();
+    [[nodiscard]] const PhysicsWorld* physics_if_initialized() const noexcept;
+
     [[nodiscard]] World& world() noexcept;
     [[nodiscard]] const World& world() const noexcept;
 
@@ -232,6 +241,7 @@ private:
     World world_;
     Camera camera_;
     std::vector<DebugLine> debug_lines_;
+    std::unique_ptr<PhysicsWorld> physics_;
 };
 
 } // namespace easy3d

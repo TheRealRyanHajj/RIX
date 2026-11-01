@@ -110,6 +110,22 @@ class Scene:
         return self._native.debug_line_count
 
     @property
+    def gravity(self) -> Vec3:
+        """Gravity for this scene's lazily-created native physics world."""
+
+        return Vec3(self._native.physics_gravity())
+
+    @gravity.setter
+    def gravity(self, value: Vec3 | tuple[float, float, float]) -> None:
+        gravity = Vec3.from_value(value)
+        self._require_mutable()
+        self._native.set_physics_gravity(tuple(gravity))
+
+    @property
+    def physics_step_count(self) -> int:
+        return self._native.physics_step_count
+
+    @property
     def entities(self) -> tuple[Entity, ...]:
         from .entity import Entity
 

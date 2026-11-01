@@ -34,6 +34,13 @@ scheduler: simulation objects belong in `fixed_update`, render objects in
 `update`, and wall objects require `poll()`. This is an explicit ownership rule,
 not an engine-managed timer service.
 
+The Phase 2.4 Jolt job backend is deliberately single-threaded. It establishes
+correct headless ownership/fixed stepping but is not a physics throughput claim.
+Python collider/rigid-body components, entity transform synchronization,
+forces/materials, queries and collision/trigger callbacks remain Phase 2.5–2.6
+work. Only the native foundation and per-scene gravity/step diagnostic are
+public at this checkpoint.
+
 ## Input hardware validation
 
 Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,

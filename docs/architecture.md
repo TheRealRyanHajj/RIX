@@ -207,3 +207,26 @@ callbacks have a reentrancy guard; event dispatch snapshots ordered listeners
 and bounds recursive depth. These constraints avoid partially nested state
 transitions and unbounded event recursion without introducing worker threads or
 an implicit process-global service.
+
+## Physics ownership and fixed stepping
+
+Jolt 5.6.0 is statically linked behind a Pimpl boundary, with CPU/GPU compute,
+object streams, debug renderer and profiler disabled. The build uses baseline
+SSE2 rather than producing an AVX-specific wheel. Easy3D registers Jolt's global
+allocator/factory/types once, while each lazily initialized `Scene` owns a
+separate `PhysicsSystem`, layer filters, fixed temporary allocator and
+single-threaded Jolt job system. The latter is a correctness-first foundation;
+an engine job-system adapter can replace it only after owned worker shutdown and
+profiling requirements are defined.
+
+Physics body handles repeat the entity handle safety model with world ID, slot
+and generation. A scene clear destroys every added Jolt body before its physics
+system and invalidates all handles. Jolt resources contain no renderer state and
+the complete falling-body/collision/lifetime regression runs in the
+graphics-disabled build.
+
+The scheduler's fixed phase is currently `Python fixed_update → deferred
+mutation commit → Jolt PhysicsSystem::Update`. Collision callback dispatch will
+be inserted after the native update in Phase 2.6. Render updates remain after
+all catch-up physics ticks. Entity/body transform synchronization belongs to the
+Phase 2.5 component layer and is intentionally not inferred yet.

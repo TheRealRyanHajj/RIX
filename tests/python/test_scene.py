@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from easy3d import Cube, Entity, Game, InvalidEntityError, Scene
+from easy3d import Cube, Entity, Game, InvalidEntityError, Scene, Vec3
 
 
 def test_explicit_scene_context_owns_entities() -> None:
@@ -136,3 +136,16 @@ def test_repeated_scene_loading_clears_resources_and_invalidates_handles() -> No
     assert all(not entity.is_alive for entity in stale_entities)
     with pytest.raises(InvalidEntityError):
         _ = stale_entities[0].name
+
+
+def test_scene_gravity_is_per_scene_and_validated() -> None:
+    first = Scene("first")
+    second = Scene("second")
+    assert first.gravity.almost_equal(Vec3(0.0, -9.81, 0.0))
+    assert second.gravity.almost_equal(Vec3(0.0, -9.81, 0.0))
+
+    first.gravity = (0.0, -3.0, 1.0)
+    assert first.gravity.almost_equal(Vec3(0.0, -3.0, 1.0))
+    assert second.gravity.almost_equal(Vec3(0.0, -9.81, 0.0))
+    with pytest.raises(ValueError, match="finite"):
+        first.gravity = (0.0, float("nan"), 0.0)

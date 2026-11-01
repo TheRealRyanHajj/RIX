@@ -226,6 +226,23 @@ instead of silently changing gameplay timing. State callbacks cannot reenter
 the same machine; event listeners are synchronous, priority ordered, and safe
 to add/remove while a snapshot is being dispatched.
 
+## Physics foundation
+
+Each `Scene` lazily owns an isolated Jolt Physics world. Gravity is already a
+typed scene property and the scheduler advances initialized worlds exactly once
+after every `fixed_update` phase:
+
+```python
+scene.gravity = (0, -9.81, 0)
+print(scene.physics_step_count)
+```
+
+The native C++ foundation provides generation- and world-checked body handles,
+static/dynamic/sensor/character collision layers, box/sphere storage, gravity,
+fixed stepping and complete clear/destruction ownership in graphics-disabled
+builds. Python entity collider and rigid-body components, forces/materials and
+trigger callbacks arrive in Phases 2.5–2.6; they are not claimed by this layer.
+
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
 

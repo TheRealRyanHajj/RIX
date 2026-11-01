@@ -1,5 +1,6 @@
 #include "easy3d/core.hpp"
 #include "easy3d/assets.hpp"
+#include "easy3d/physics.hpp"
 #include "easy3d/renderer.hpp"
 #include "easy3d/scene.hpp"
 
@@ -25,6 +26,7 @@ PYBIND11_MODULE(_easy3d, module) {
         module, "MissingAssetError", asset_error.ptr());
     py::register_exception<easy3d::InvalidEntityError>(
         module, "InvalidEntityError", PyExc_ReferenceError);
+    py::register_exception<easy3d::PhysicsError>(module, "PhysicsError", engine_error.ptr());
 
     module.def("engine_version", &easy3d::engine_version);
     module.def("native_add", &easy3d::native_add, py::arg("a"), py::arg("b"));
@@ -631,6 +633,17 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("color"),
              py::arg("depth_test") = true)
         .def("clear_debug_lines", &easy3d::Scene::clear_debug_lines)
+        .def("physics_gravity", [](const easy3d::Scene& scene) {
+            const easy3d::Vec3 gravity = scene.physics_gravity();
+            return py::make_tuple(gravity.x, gravity.y, gravity.z);
+        })
+        .def("set_physics_gravity",
+             [](easy3d::Scene& scene, const std::array<float, 3>& gravity) {
+                 scene.set_physics_gravity({gravity[0], gravity[1], gravity[2]});
+             },
+             py::arg("gravity"))
+        .def("step_physics", &easy3d::Scene::step_physics, py::arg("delta_seconds"))
+        .def_property_readonly("physics_step_count", &easy3d::Scene::physics_step_count)
         .def_property_readonly("debug_line_count", [](const easy3d::Scene& scene) {
             return scene.debug_lines().size();
         });

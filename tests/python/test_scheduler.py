@@ -203,3 +203,16 @@ def test_unload_with_clear_runs_destroy_before_detaching_scheduler() -> None:
     assert events == ["awake", "destroy"]
     assert not actor.is_alive
     assert not game._scheduler._lifecycle
+
+
+def test_fixed_scheduler_tick_steps_scene_physics_once() -> None:
+    game = Game(fixed_hz=60)
+    scene = Scene()
+    scene.gravity = (0.0, -9.81, 0.0)
+    game.load_scene(scene)
+    game._scheduler.begin_run()
+
+    _advance(game, 1.0 / 60.0)
+
+    assert game.scheduler_stats.fixed_ticks == 1
+    assert scene.physics_step_count == 1

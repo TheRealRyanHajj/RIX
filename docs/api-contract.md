@@ -288,6 +288,29 @@ cannot call them twice. Unsubscribing a listener before its turn suppresses it;
 new listeners wait for the next emission. Nested dispatch is supported up to a
 configurable bound. Listener exceptions propagate without being hidden.
 
+## Physics foundation
+
+Jolt Physics is private behind `easy3d::PhysicsWorld`; no Jolt type crosses the
+public engine boundary. `PhysicsBodyHandle` contains physics-world identity,
+slot and generation, so stale and cross-world access raises `PhysicsError`.
+World configuration bounds bodies, broadphase pairs, contact constraints and
+temporary allocation. Capacity update errors are surfaced rather than ignored.
+
+The baseline object layers are `Static`, `Dynamic`, `Sensor`, and `Character`.
+Static/static and sensor/sensor pairs do not collide; other baseline pairs do.
+Static objects use Jolt's non-moving broadphase; all other layers use the moving
+broadphase. The native body foundation accepts box and sphere shapes plus
+static, kinematic and dynamic motion for lifecycle/step validation. This is not
+yet the Phase 2.5 Python component API.
+
+Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
+`(0, -9.81, 0)` without allocation and creates the world when changed. During a
+simulation tick the scheduler runs all eligible Python `fixed_update(dt)` hooks,
+commits deferred mutations, then advances the initialized Jolt world once with
+that same fixed `dt`. `scene.physics_step_count` is a diagnostic. Scene clear
+destroys all native bodies and invalidates their handles. A scene with no
+physics use pays no Jolt-world/temp-buffer allocation.
+
 ## Texture assets
 
 ```python

@@ -42,12 +42,49 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyobjloader)
 
+# Jolt Physics 5.6.0. The native integration remains private behind Easy3D's
+# world/body handles and is built as a static, CPU-only library.
+set(JPH_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(CPP_EXCEPTIONS_ENABLED ON CACHE BOOL "" FORCE)
+set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "" FORCE)
+set(USE_SSE4_1 OFF CACHE BOOL "" FORCE)
+set(USE_SSE4_2 OFF CACHE BOOL "" FORCE)
+set(USE_AVX OFF CACHE BOOL "" FORCE)
+set(USE_AVX2 OFF CACHE BOOL "" FORCE)
+set(USE_AVX512 OFF CACHE BOOL "" FORCE)
+set(USE_LZCNT OFF CACHE BOOL "" FORCE)
+set(USE_TZCNT OFF CACHE BOOL "" FORCE)
+set(USE_F16C OFF CACHE BOOL "" FORCE)
+set(USE_FMADD OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    JoltPhysics
+    GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+    GIT_TAG e77f175595e64cb44218cc9d9d56fc365ad0e36a
+    GIT_SHALLOW FALSE
+    SOURCE_SUBDIR Build
+)
+FetchContent_MakeAvailable(JoltPhysics)
+
 set(easy3d_core_sources
     engine/src/assets/image.cpp
     engine/src/assets/model.cpp
     engine/src/core/engine.cpp
     engine/src/input/input.cpp
     engine/src/math/math.cpp
+    engine/src/physics/physics.cpp
     engine/src/renderer/camera.cpp
     engine/src/renderer/mesh.cpp
     engine/src/scene/scene.cpp
@@ -157,7 +194,7 @@ target_include_directories(easy3d_core
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine/src"
 )
-target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader)
+target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader Jolt)
 
 if(MSVC)
     target_compile_options(easy3d_core PRIVATE /W4 /permissive- /EHsc /Zc:__cplusplus)
@@ -251,6 +288,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_input_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_input_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.input COMMAND easy3d_input_tests)
+
+    add_executable(easy3d_physics_tests tests/cpp/test_physics.cpp)
+    target_compile_features(easy3d_physics_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_physics_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.physics COMMAND easy3d_physics_tests)
 
     if(EASY3D_ENABLE_GRAPHICS)
         add_executable(easy3d_texture_tests tests/cpp/test_texture.cpp)

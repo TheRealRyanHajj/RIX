@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.3 passed;
-Phase 2.4 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.4 passed;
+Phase 2.5 is next. Live pointer lock and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -1702,3 +1702,72 @@ Phase 2.2 final native recheck remains 11/11 Debug, 11/11 Release and 10/10
 headless. Phase 2.3: **DONE**. Immediate next task: Phase 2.4 — pinned Jolt
 integration, per-world collision layers/gravity/body lifetime and headless fixed
 stepping.
+
+## 2026-11-01 — Phase 2.4 Jolt physics foundation
+
+### Implemented
+
+- Pinned Jolt Physics 5.6.0 to immutable commit
+  `e77f175595e64cb44218cc9d9d56fc365ad0e36a`, kept it a private static CMake
+  dependency, and added its MIT license and third-party notice.
+- Added a lazily allocated, scene-owned `PhysicsWorld` with independently
+  configurable gravity, a documented static/dynamic/sensor/character collision
+  matrix, box and sphere bodies, validated capacity and finite inputs, and a
+  single-threaded fixed-step backend suitable for headless tests.
+- Added generation- and world-checked body handles, deterministic destruction
+  and scene-clear teardown, cross-world alias rejection, and Jolt error
+  propagation without leaking allocator-specific strings across the API.
+- Integrated one Jolt step after each Python fixed-update/deferred-mutation
+  boundary. Exposed scene gravity and physics step count through the typed
+  Python API while deliberately deferring public collider/rigid-body components,
+  forces, triggers and queries to Phase 2.5/2.6.
+
+### Failures found and fixed
+
+The first native physics run ended with `91% tests passed, 1 failed` and
+`easy3d.physics ***Exception: SegFault`. Jolt's global allocator/type runtime
+was being initialized after objects that depend on it; making that runtime the
+first physics implementation member fixed construction and guaranteed reverse
+destruction order. The final shape-validation change then failed compilation
+because `ShapeResult::GetError()` uses Jolt's allocator. Copying its bytes into
+`std::string` at the Easy3D boundary fixed the type/allocator mismatch. Neither
+failure was bypassed.
+
+### Exact final verification evidence
+
+```text
+cmake --build build/windows-headless --parallel
+ctest --test-dir build/windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.70 sec
+
+cmake --build build/windows-debug --config Debug --parallel
+ctest --test-dir build/windows-debug -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 1.60 sec
+
+cmake --build build/windows-release --config Release --parallel
+ctest --test-dir build/windows-release -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.96 sec
+
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3224401
+sha256=30ec5f4a21cea7356f5a647896c6c51aae6c0650de6ac3349af3d58d990f47f1
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 94%]
+....                                                                     [100%]
+76 passed in 0.17s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; s=easy3d.Scene(); print(easy3d.engine_version(), s.gravity, s.physics_step_count, isinstance(easy3d.PhysicsError('ok'), easy3d.EngineError))"
+0.1.0 Vec3(0.0, -9.8100004196167, 0.0) 0 True
+```
+
+Phase 2.4: **DONE**. Immediate next task: Phase 2.5 — public collider and rigid
+body components, forces/impulses, physical materials and trigger behavior.

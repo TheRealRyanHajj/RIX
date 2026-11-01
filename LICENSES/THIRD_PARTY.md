@@ -16,6 +16,7 @@ applicable notices.
 | stb_image (bundled by bimg) | bimg pin above | MIT (selected alternative) | JPEG decoding |
 | GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Private native math implementation |
 | tinyobjloader | `2945a967c5303b2c8c14174117c45f3302591150` (`v2.0.0rc13`) | MIT | OBJ/MTL parsing |
+| Jolt Physics | `e77f175595e64cb44218cc9d9d56fc365ad0e36a` (`v5.6.0`) | MIT ([text](JoltPhysics.txt)) | Native rigid-body simulation |
 | pybind11 | `3.1.0` | BSD-3-Clause | Python native binding |
 | scikit-build-core | `1.1.1` | Apache-2.0 | Python build backend |
 | pytest | `9.2.0` (development extra only) | MIT | Python tests |

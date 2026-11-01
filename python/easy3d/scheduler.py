@@ -140,6 +140,7 @@ class SimulationScheduler:
                 self._overrun_count += 1
                 break
             self._run_hook(scene, "fixed_update", self.fixed_dt)
+            scene._native.step_physics(self.fixed_dt)
             self._fixed_ticks += 1
             self._accumulator -= self.fixed_dt
             steps += 1

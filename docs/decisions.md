@@ -521,3 +521,36 @@ bounded recursion. State transitions reject callback reentrancy.
 - There is no implicit global bus or timer lifecycle to leak across worlds.
 - Later engine-managed conveniences can wrap these primitives without changing
   their timing and exception semantics.
+
+## ADR-0017: Lazy per-scene Jolt worlds behind Easy3D handles
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Physics must work in headless servers, stay independent of renderer lifetime,
+reject stale/cross-world references and advance on simulation time rather than
+render time. Creating Jolt's default buffers for every render-only scene would
+also impose avoidable memory cost.
+
+### Decision
+
+Pin Jolt 5.6.0 by immutable commit and statically link a CPU-only baseline-SSE2
+build. Register Jolt process support once, but lazily give each used `Scene` an
+independent `PhysicsWorld`. Keep Jolt types private behind Pimpl and expose
+world/generation-checked Easy3D body handles. Begin with Jolt's single-threaded
+job system so `PhysicsSystem::Update` completes on the simulation thread before
+the scheduler proceeds. Step after Python `fixed_update` using the exact fixed
+delta; scene clear owns body teardown.
+
+### Consequences
+
+- Physics tests run without SDL/bgfx/GPU and scenes that never use physics do
+  not allocate a physics system or its temporary buffer.
+- Different scenes have independent gravity, bodies, capacities and handles.
+- Baseline CPU compatibility is favored over AVX-specific optimization.
+- The initial single-threaded job backend is safe and predictable but not a
+  final performance claim; parallelism requires an owned engine job adapter.
+- Entity collider/body components and transform synchronization remain the next
+  milestone rather than leaking Jolt objects into Python now.

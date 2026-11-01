@@ -5,6 +5,7 @@ from ._easy3d import (
     EngineError,
     InvalidEntityError,
     MissingAssetError,
+    PhysicsError,
     engine_version,
     native_add,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "Light",
     "LightComponent",
     "MissingAssetError",
+    "PhysicsError",
     "MeshRenderer",
     "Model",
     "ModelCache",
