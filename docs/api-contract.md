@@ -173,6 +173,30 @@ and overlay lines are batched separately into frame-local transient GPU buffers.
 They persist until `scene.clear_debug_lines()` or `scene.clear()`; debug drawing
 does not create entities and does not cross into Python once per rendered frame.
 
+## Renderer visibility and counters
+
+```python
+game.run()
+print(game.renderer_stats)
+# RendererStats(draw_calls=..., visible_instances=..., culled_instances=...,
+#               instanced_draw_calls=...)
+```
+
+Before submission, the renderer tests a conservative transformed bounding sphere
+derived from each mesh's cached local AABB against the current scene-camera
+frustum. `visible_instances` and `culled_instances` count mesh parts, so a
+multi-part OBJ may contribute more than one. Disabled, invisible, and
+non-renderable entities contribute neither. `draw_calls` counts submitted 3D
+and debug batches; `instanced_draw_calls` is the subset using instance data.
+
+Visible items with identical mesh, material state/color, and texture/sampler are
+grouped. Two or more compatible items with uniform absolute XYZ scale use one or
+more bgfx instance buffers; non-uniformly scaled items fall back to individual
+draws to preserve exact inverse-transpose normals. `Game.renderer_stats` returns
+a coherent, immutable `RendererStats` snapshot from the latest completed frame
+and is safe to sample from a monitoring thread while `Game.run()` has released
+the GIL.
+
 ## Texture assets
 
 ```python

@@ -6,6 +6,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -63,6 +64,21 @@ Vec3 Matrix4::transform_point(const Vec3 point) const {
         throw std::domain_error("matrix point has an invalid homogeneous coordinate");
     }
     return {x / w, y / w, z / w};
+}
+
+Matrix4 operator*(const Matrix4& left, const Matrix4& right) noexcept {
+    Matrix4 result;
+    for (std::size_t column = 0; column < 4; ++column) {
+        for (std::size_t row = 0; row < 4; ++row) {
+            float value = 0.0F;
+            for (std::size_t inner = 0; inner < 4; ++inner) {
+                value += left.values[inner * 4 + row] *
+                         right.values[column * 4 + inner];
+            }
+            result.values[column * 4 + row] = value;
+        }
+    }
+    return result;
 }
 
 void Camera::validate() const {
@@ -145,6 +161,82 @@ Camera Camera::look_at(const Vec3 camera_position, const Vec3 target, const Vec3
                                                   to_glm(normalized_up)))
                           .normalized();
     return camera;
+}
+
+Frustum Frustum::from_view_projection(const Matrix4& matrix,
+                                      const bool homogeneous_depth) {
+    const auto make_plane = [](const std::array<float, 4>& coefficients) {
+        const Vec3 normal{coefficients[0], coefficients[1], coefficients[2]};
+        const float length = normal.length();
+        if (!std::isfinite(length) || length <= 1.0e-12F ||
+            !std::isfinite(coefficients[3])) {
+            throw std::invalid_argument("view-projection matrix produces an invalid frustum");
+        }
+        return FrustumPlane{normal / length, coefficients[3] / length};
+    };
+    const auto row = [&matrix](const std::size_t index) {
+        return std::array<float, 4>{matrix.at(index, 0),
+                                    matrix.at(index, 1),
+                                    matrix.at(index, 2),
+                                    matrix.at(index, 3)};
+    };
+    const auto add = [](const std::array<float, 4>& left,
+                        const std::array<float, 4>& right) {
+        return std::array<float, 4>{left[0] + right[0],
+                                    left[1] + right[1],
+                                    left[2] + right[2],
+                                    left[3] + right[3]};
+    };
+    const auto subtract = [](const std::array<float, 4>& left,
+                             const std::array<float, 4>& right) {
+        return std::array<float, 4>{left[0] - right[0],
+                                    left[1] - right[1],
+                                    left[2] - right[2],
+                                    left[3] - right[3]};
+    };
+
+    const auto first = row(0);
+    const auto second = row(1);
+    const auto third = row(2);
+    const auto fourth = row(3);
+    Frustum result;
+    result.planes = {
+        make_plane(add(fourth, first)),
+        make_plane(subtract(fourth, first)),
+        make_plane(add(fourth, second)),
+        make_plane(subtract(fourth, second)),
+        make_plane(homogeneous_depth ? add(fourth, third) : third),
+        make_plane(subtract(fourth, third)),
+    };
+    return result;
+}
+
+Frustum Frustum::from_camera(const Camera& camera,
+                             const float aspect,
+                             const bool homogeneous_depth) {
+    return from_view_projection(camera.projection_matrix(aspect, homogeneous_depth) *
+                                    camera.view_matrix(),
+                                homogeneous_depth);
+}
+
+bool Frustum::intersects(const Bounds local_bounds,
+                         const Transform& transform) const {
+    const Vec3 center = (local_bounds.minimum + local_bounds.maximum) * 0.5F;
+    const Vec3 extent = (local_bounds.maximum - local_bounds.minimum) * 0.5F;
+    const Vec3 scaled_center{center.x * transform.scale.x,
+                             center.y * transform.scale.y,
+                             center.z * transform.scale.z};
+    const Vec3 scaled_extent{std::abs(extent.x * transform.scale.x),
+                             std::abs(extent.y * transform.scale.y),
+                             std::abs(extent.z * transform.scale.z)};
+    const Vec3 world_center = transform.position + transform.rotation.rotate(scaled_center);
+    const float radius = scaled_extent.length();
+    for (const FrustumPlane& plane : planes) {
+        if (plane.normal.dot(world_center) + plane.distance < -radius) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace easy3d

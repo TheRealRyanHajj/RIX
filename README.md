@@ -137,6 +137,10 @@ lit by default and accept `lit=False` for emissive-style unlit color. Persistent
 native debug lines are available through `easy3d.debug.line` and
 `easy3d.debug.axes`.
 
+The renderer conservatively culls transformed mesh bounds and hardware-instances
+matching shared meshes/materials/textures when their scale is uniform. Read the
+latest completed frame through `game.renderer_stats`.
+
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
 
@@ -177,10 +181,21 @@ python benchmarks/native_add.py --iterations 1000000
 It measures Python-to-native call overhead; it is infrastructure, not an engine
 performance claim.
 
+For a visible renderer workload with frame-time distributions, process memory,
+frustum counters, and instancing counters, run:
+
+```powershell
+python benchmarks/render_cubes.py --count 10000 --seconds 10
+```
+
+The benchmark validates that every requested cube is either visible or culled
+and that multiple visible compatible cubes use instancing. Results are
+hardware/workload measurements, not general capacity guarantees.
+
 ## Scope and license
 
-Advanced lighting, culling/instancing, physics, broader asset pipelines, and
-multiplayer systems remain incomplete. The repository is private and
+Advanced lighting, physics, broader asset pipelines, and multiplayer systems
+remain incomplete. The repository is private and
 proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 

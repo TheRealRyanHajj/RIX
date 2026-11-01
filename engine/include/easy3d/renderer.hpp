@@ -48,6 +48,7 @@ struct Material final {
     bool cull_back_faces{true};
 
     void validate() const;
+    friend bool operator==(const Material&, const Material&) = default;
 };
 
 struct DebugLine final {
@@ -73,6 +74,7 @@ struct Matrix4 final {
     [[nodiscard]] Vec3 transform_point(Vec3 point) const;
 
     friend bool operator==(const Matrix4&, const Matrix4&) = default;
+    friend Matrix4 operator*(const Matrix4& left, const Matrix4& right) noexcept;
 };
 
 struct Camera final {
@@ -95,6 +97,23 @@ struct Camera final {
     [[nodiscard]] static Camera look_at(Vec3 position,
                                         Vec3 target,
                                         Vec3 up = {0.0F, 1.0F, 0.0F});
+};
+
+struct FrustumPlane final {
+    Vec3 normal{};
+    float distance{0.0F};
+};
+
+struct Frustum final {
+    std::array<FrustumPlane, 6> planes{};
+
+    [[nodiscard]] bool intersects(Bounds local_bounds,
+                                  const Transform& world_transform) const;
+    [[nodiscard]] static Frustum from_view_projection(const Matrix4& view_projection,
+                                                      bool homogeneous_depth);
+    [[nodiscard]] static Frustum from_camera(const Camera& camera,
+                                             float aspect_ratio,
+                                             bool homogeneous_depth);
 };
 
 [[nodiscard]] MeshData make_triangle_mesh();

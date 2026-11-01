@@ -103,7 +103,9 @@ if(EASY3D_ENABLE_GRAPHICS)
             TYPE VERTEX
             SHADERS
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_solid_color.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_solid_color_instanced.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_textured.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_textured_instanced.sc"
             VARYING_DEF "${EASY3D_SHADER_SOURCE_DIR}/varying.def.sc"
             OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders"
             OUT_FILES_VAR EASY3D_VERTEX_SHADER_HEADERS
@@ -129,8 +131,10 @@ if(EASY3D_ENABLE_GRAPHICS)
         set(EASY3D_SHADER_INCLUDE_DIR "${EASY3D_SHADER_SOURCE_DIR}/generated/dxbc")
         list(APPEND easy3d_core_sources
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_solid_color.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_solid_color_instanced.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_solid_color.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_textured.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_textured_instanced.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_textured.sc.bin.h"
         )
     endif()
@@ -236,6 +240,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_lighting_debug_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_lighting_debug_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.lighting_debug COMMAND easy3d_lighting_debug_tests)
+
+    add_executable(easy3d_frustum_tests tests/cpp/test_frustum.cpp)
+    target_compile_features(easy3d_frustum_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_frustum_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.frustum COMMAND easy3d_frustum_tests)
 
     if(EASY3D_ENABLE_GRAPHICS)
         add_executable(easy3d_texture_tests tests/cpp/test_texture.cpp)

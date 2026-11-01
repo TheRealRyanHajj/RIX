@@ -27,6 +27,29 @@ struct EngineConfig {
     bool geometry_diagnostic{false};
 };
 
+struct RendererStats final {
+    std::uint64_t draw_calls{0};
+    std::uint64_t visible_instances{0};
+    std::uint64_t culled_instances{0};
+    std::uint64_t instanced_draw_calls{0};
+
+    friend bool operator==(const RendererStats&, const RendererStats&) = default;
+};
+
+class RendererStatsAtomic final {
+public:
+    void reset() noexcept;
+    void store(RendererStats stats) noexcept;
+    [[nodiscard]] RendererStats load() const noexcept;
+
+private:
+    std::atomic_uint64_t sequence_{0};
+    std::atomic_uint64_t draw_calls_{0};
+    std::atomic_uint64_t visible_instances_{0};
+    std::atomic_uint64_t culled_instances_{0};
+    std::atomic_uint64_t instanced_draw_calls_{0};
+};
+
 class Engine final {
 public:
     explicit Engine(EngineConfig config = {});
@@ -44,6 +67,7 @@ public:
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] std::uint64_t frame_count() const noexcept;
     [[nodiscard]] double last_frame_seconds() const noexcept;
+    [[nodiscard]] RendererStats renderer_stats() const noexcept;
     [[nodiscard]] const EngineConfig& config() const noexcept;
 
 private:
@@ -52,6 +76,7 @@ private:
     std::atomic_bool stop_requested_{false};
     std::atomic_uint64_t frame_count_{0};
     std::atomic<double> last_frame_seconds_{0.0};
+    RendererStatsAtomic renderer_stats_;
     Scene* scene_{nullptr};
 };
 

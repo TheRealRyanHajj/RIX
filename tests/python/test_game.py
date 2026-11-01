@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from easy3d import Game
+from easy3d import Game, RendererStats
 
 
 def test_game_construction_does_not_initialize_graphics() -> None:
@@ -12,6 +12,7 @@ def test_game_construction_does_not_initialize_graphics() -> None:
     assert not game.is_running
     assert game.frame_count == 0
     assert game.last_frame_seconds == 0.0
+    assert game.renderer_stats == RendererStats()
     game.stop()
 
 

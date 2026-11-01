@@ -1,5 +1,7 @@
 #pragma once
 
+#include "easy3d/core.hpp"
+
 #include <cstdint>
 #include <memory>
 
@@ -26,6 +28,7 @@ public:
 
     void resize(std::uint32_t width, std::uint32_t height);
     void present();
+    [[nodiscard]] RendererStats stats() const noexcept;
 
 private:
     class Impl;

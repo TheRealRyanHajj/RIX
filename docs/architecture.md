@@ -74,6 +74,16 @@ immutable and shared; private GPU buffers are cached by resource identity, while
 GPU textures are keyed by image identity plus sampler settings. No per-frame
 Python draw loop is involved.
 
+Mesh AABBs are cached beside renderer resource identity. Each frame builds a
+frustum from the capability-correct projection × view matrix and conservatively
+tests a transformed bounding sphere before any texture upload or draw. Visible
+items are grouped by mesh/material/texture. Groups of at least two uniformly
+scaled instances use transient 4×4 model-matrix instance data and dedicated
+instanced vertex programs; non-uniform scale uses the normal single-draw program
+with an inverse-transpose matrix. Frame counters are published through a
+sequence-protected set of atomics so Python monitoring cannot observe fields
+from different frames.
+
 ## Camera and projection
 
 The native `Camera` stores finite position, normalized quaternion orientation,

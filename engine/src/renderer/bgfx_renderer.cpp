@@ -14,12 +14,16 @@
 #include "fs_solid_color.sc.bin.h"
 #include "fs_textured.sc.bin.h"
 #include "vs_solid_color.sc.bin.h"
+#include "vs_solid_color_instanced.sc.bin.h"
 #include "vs_textured.sc.bin.h"
+#include "vs_textured_instanced.sc.bin.h"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -155,6 +159,16 @@ public:
         return handle;
     }
 
+    [[nodiscard]] Bounds bounds_cached(const MeshData& mesh) {
+        const auto found = bounds_.find(&mesh);
+        if (found != bounds_.end()) {
+            return found->second;
+        }
+        const Bounds result = mesh.bounds();
+        bounds_.emplace(&mesh, result);
+        return result;
+    }
+
     void bind(const Handle handle) const {
         if (handle >= meshes_.size()) {
             throw EngineError("invalid GPU mesh handle");
@@ -166,6 +180,7 @@ public:
         meshes_.clear();
         triangle_count_ = 0;
         shared_.clear();
+        bounds_.clear();
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return meshes_.size(); }
@@ -176,6 +191,7 @@ private:
     std::vector<GpuMesh> meshes_;
     std::size_t triangle_count_{0};
     std::unordered_map<const MeshData*, Handle> shared_;
+    std::unordered_map<const MeshData*, Bounds> bounds_;
 };
 
 [[nodiscard]] std::uint64_t texture_flags(const TextureColorSpace color_space,
@@ -315,6 +331,14 @@ struct DrawItem final {
     std::optional<TextureLifetimeManager::Handle> texture;
 };
 
+struct SceneBatch final {
+    MeshLifetimeManager::Handle mesh;
+    Material material;
+    std::optional<TextureLifetimeManager::Handle> texture;
+    std::vector<glm::mat4> transforms;
+    bool instancing_eligible{true};
+};
+
 struct LightingState final {
     std::array<float, 4> ambient{0.25F, 0.25F, 0.25F, 1.0F};
     std::array<float, 4> directional_direction{0.45F, -1.0F, 0.25F, 0.0F};
@@ -344,6 +368,14 @@ struct LightingState final {
 
 [[nodiscard]] glm::mat4 translated(const float x, const float y, const float z) {
     return glm::translate(glm::mat4(1.0F), glm::vec3(x, y, z));
+}
+
+[[nodiscard]] bool has_uniform_scale(const Transform& transform) noexcept {
+    const float x = std::abs(transform.scale.x);
+    const float y = std::abs(transform.scale.y);
+    const float z = std::abs(transform.scale.z);
+    constexpr float tolerance = 1.0e-5F;
+    return std::abs(x - y) <= tolerance && std::abs(x - z) <= tolerance;
 }
 
 } // namespace
@@ -431,6 +463,14 @@ public:
             mesh_resources_->reset();
             mesh_resources_.reset();
         }
+        if (bgfx::isValid(textured_instanced_program_)) {
+            bgfx::destroy(textured_instanced_program_);
+            textured_instanced_program_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(solid_instanced_program_)) {
+            bgfx::destroy(solid_instanced_program_);
+            solid_instanced_program_ = BGFX_INVALID_HANDLE;
+        }
         if (bgfx::isValid(textured_program_)) {
             bgfx::destroy(textured_program_);
             textured_program_ = BGFX_INVALID_HANDLE;
@@ -484,12 +524,15 @@ public:
     }
 
     void present() {
+        stats_ = {};
         bgfx::touch(main_view);
         if (!draw_items_.empty() || scene_ != nullptr) {
             submit_geometry();
         }
         bgfx::frame();
     }
+
+    [[nodiscard]] RendererStats stats() const noexcept { return stats_; }
 
 private:
     [[nodiscard]] static bgfx::ProgramHandle make_program(const std::uint8_t* vertex_bytes,
@@ -529,6 +572,18 @@ private:
                                          fs_textured_dxbc,
                                          static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
                                          "textured");
+        solid_instanced_program_ = make_program(
+            vs_solid_color_instanced_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_solid_color_instanced_dxbc)),
+            fs_solid_color_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_solid_color_dxbc)),
+            "instanced solid-color");
+        textured_instanced_program_ = make_program(
+            vs_textured_instanced_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_textured_instanced_dxbc)),
+            fs_textured_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
+            "instanced textured");
         material_color_ = bgfx::createUniform("u_materialColor", bgfx::UniformType::Vec4);
         material_params_ = bgfx::createUniform("u_materialParams", bgfx::UniformType::Vec4);
         normal_matrix_ = bgfx::createUniform("u_normalMatrix", bgfx::UniformType::Vec4, 3);
@@ -694,33 +749,122 @@ private:
         }
         bgfx::setState(render_state(material));
         bgfx::submit(main_view, texture.has_value() ? textured_program_ : solid_program_);
+        ++stats_.draw_calls;
     }
 
-    void submit_scene() {
+    static void add_to_batch(std::vector<SceneBatch>& batches,
+                             const MeshLifetimeManager::Handle mesh,
+                             const Material& material,
+                             const std::optional<TextureLifetimeManager::Handle> texture,
+                             const glm::mat4& transform,
+                             const bool instancing_eligible) {
+        const auto found = std::find_if(
+            batches.begin(), batches.end(),
+            [&](const SceneBatch& batch) {
+                return batch.mesh == mesh && batch.material == material &&
+                       batch.texture == texture &&
+                       batch.instancing_eligible == instancing_eligible;
+            });
+        if (found != batches.end()) {
+            found->transforms.push_back(transform);
+            return;
+        }
+        SceneBatch batch{mesh, material, texture, {}, instancing_eligible};
+        batch.transforms.push_back(transform);
+        batches.push_back(std::move(batch));
+    }
+
+    void submit_instanced_batch(const SceneBatch& batch) {
+        constexpr std::uint16_t instance_stride = sizeof(float) * 16;
+        std::size_t offset = 0;
+        while (offset < batch.transforms.size()) {
+            const auto requested = static_cast<std::uint32_t>(std::min(
+                batch.transforms.size() - offset,
+                static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())));
+            const std::uint32_t available =
+                bgfx::getAvailInstanceDataBuffer(requested, instance_stride);
+            if (available < 2) {
+                for (; offset < batch.transforms.size(); ++offset) {
+                    submit_draw(batch.mesh,
+                                batch.material,
+                                batch.transforms[offset],
+                                batch.texture);
+                }
+                return;
+            }
+
+            bgfx::InstanceDataBuffer instances;
+            bgfx::allocInstanceDataBuffer(&instances, available, instance_stride);
+            std::uint8_t* destination = instances.data;
+            for (std::uint32_t index = 0; index < available; ++index) {
+                std::memcpy(destination,
+                            glm::value_ptr(batch.transforms[offset + index]),
+                            instance_stride);
+                destination += instance_stride;
+            }
+
+            const glm::mat4 identity{1.0F};
+            apply_draw_uniforms(batch.material, identity);
+            mesh_resources_->bind(batch.mesh);
+            if (batch.texture.has_value()) {
+                texture_resources_->bind(*batch.texture, texture_sampler_);
+            }
+            bgfx::setInstanceDataBuffer(&instances);
+            bgfx::setState(render_state(batch.material));
+            bgfx::submit(main_view,
+                         batch.texture.has_value() ? textured_instanced_program_
+                                                   : solid_instanced_program_);
+            ++stats_.draw_calls;
+            ++stats_.instanced_draw_calls;
+            offset += available;
+        }
+    }
+
+    void submit_scene(const Frustum& frustum) {
         if (scene_ == nullptr || !scene_->active()) {
             return;
         }
+        std::vector<SceneBatch> batches;
         for (const EntityHandle handle : scene_->entity_handles()) {
             if (!scene_->entity_enabled(handle) || !scene_->entity_visible(handle) ||
                 !scene_->has_render_component(handle)) {
                 continue;
             }
             const RenderComponent& component = scene_->render_component(handle);
-            const glm::mat4 transform = model_matrix(scene_->world_transform(handle));
+            const Transform world_transform = scene_->world_transform(handle);
+            const glm::mat4 transform = model_matrix(world_transform);
+            const bool instancing_eligible = has_uniform_scale(world_transform);
             if (component.mesh) {
+                if (!frustum.intersects(mesh_resources_->bounds_cached(*component.mesh),
+                                        world_transform)) {
+                    ++stats_.culled_instances;
+                    continue;
+                }
+                ++stats_.visible_instances;
                 const auto mesh = mesh_resources_->upload_cached(*component.mesh);
                 std::optional<TextureLifetimeManager::Handle> texture;
                 if (component.texture) {
                     texture = texture_resources_->upload_cached(
                         *component.texture, component.sampler);
                 }
-                submit_draw(mesh, component.material, transform, texture);
+                add_to_batch(batches,
+                             mesh,
+                             component.material,
+                             texture,
+                             transform,
+                             instancing_eligible);
                 continue;
             }
             if (!component.model) {
                 throw EngineError("render component has no mesh or model resource");
             }
             for (const ModelPart& part : component.model->parts) {
+                if (!frustum.intersects(mesh_resources_->bounds_cached(part.mesh),
+                                        world_transform)) {
+                    ++stats_.culled_instances;
+                    continue;
+                }
+                ++stats_.visible_instances;
                 Material material = component.material;
                 const ModelMaterial& source = component.model->materials[part.material_index];
                 material.color = {
@@ -734,10 +878,22 @@ private:
                     const auto image = scene_textures_.load(*source.diffuse_texture);
                     texture = texture_resources_->upload_cached(*image);
                 }
-                submit_draw(mesh_resources_->upload_cached(part.mesh),
-                            material,
-                            transform,
-                            texture);
+                add_to_batch(batches,
+                             mesh_resources_->upload_cached(part.mesh),
+                             material,
+                             texture,
+                             transform,
+                             instancing_eligible);
+            }
+        }
+
+        for (const SceneBatch& batch : batches) {
+            if (batch.instancing_eligible && batch.transforms.size() > 1) {
+                submit_instanced_batch(batch);
+                continue;
+            }
+            for (const glm::mat4& transform : batch.transforms) {
+                submit_draw(batch.mesh, batch.material, transform, batch.texture);
             }
         }
     }
@@ -766,6 +922,7 @@ private:
         bgfx::setVertexBuffer(0, &buffer, 0, vertex_count);
         bgfx::setState(render_state(material) | BGFX_STATE_PT_LINES);
         bgfx::submit(main_view, solid_program_);
+        ++stats_.draw_calls;
     }
 
     void submit_debug_lines() {
@@ -800,11 +957,14 @@ private:
         const Matrix4 projection = active_camera.projection_matrix(
             Camera::aspect_ratio(width_, height_), bgfx::getCaps()->homogeneousDepth);
         bgfx::setViewTransform(main_view, view.data(), projection.data());
+        const Frustum frustum = Frustum::from_view_projection(
+            projection * view, bgfx::getCaps()->homogeneousDepth);
 
         for (const DrawItem& item : draw_items_) {
+            ++stats_.visible_instances;
             submit_draw(item.mesh, item.material, item.transform, item.texture);
         }
-        submit_scene();
+        submit_scene(frustum);
         submit_debug_lines();
     }
 
@@ -816,6 +976,8 @@ private:
     bgfx::VertexLayout layout_{};
     bgfx::ProgramHandle solid_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle solid_instanced_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle textured_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_params_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle normal_matrix_{BGFX_INVALID_HANDLE};
@@ -828,6 +990,7 @@ private:
     std::vector<DrawItem> draw_items_;
     Camera camera_{};
     LightingState lighting_{};
+    RendererStats stats_{};
     const Scene* scene_{nullptr};
     TextureCache scene_textures_;
 };
@@ -852,6 +1015,10 @@ void BgfxRenderer::resize(const std::uint32_t width, const std::uint32_t height)
 
 void BgfxRenderer::present() {
     impl_->present();
+}
+
+RendererStats BgfxRenderer::stats() const noexcept {
+    return impl_->stats();
 }
 
 } // namespace easy3d::renderer

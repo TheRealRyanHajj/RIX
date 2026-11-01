@@ -43,7 +43,8 @@ void run_window_loop(const EngineConfig& config,
                      const Scene* const scene,
                      const std::atomic_bool& stop_requested,
                      std::atomic_uint64_t& frame_count,
-                     std::atomic<double>& last_frame_seconds) {
+                     std::atomic<double>& last_frame_seconds,
+                     RendererStatsAtomic& renderer_stats) {
     SdlVideo sdl;
 
     const auto flags = static_cast<SDL_WindowFlags>(SDL_WINDOW_RESIZABLE |
@@ -119,6 +120,7 @@ void run_window_loop(const EngineConfig& config,
         }
 
         renderer.present();
+        renderer_stats.store(renderer.stats());
         frame_count.fetch_add(1);
 
         if (minimum_frame != Clock::duration::zero()) {

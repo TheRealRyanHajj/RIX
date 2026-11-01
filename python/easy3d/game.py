@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Final
 
 from ._easy3d import Engine
 from .scene import Scene
+
+
+@dataclass(frozen=True, slots=True)
+class RendererStats:
+    """Counters for the most recently completed rendered frame."""
+
+    draw_calls: int = 0
+    visible_instances: int = 0
+    culled_instances: int = 0
+    instanced_draw_calls: int = 0
 
 
 class Game:
@@ -62,6 +73,12 @@ class Game:
     @property
     def last_frame_seconds(self) -> float:
         return self._engine.last_frame_seconds
+
+    @property
+    def renderer_stats(self) -> RendererStats:
+        """Return an atomic snapshot of the most recently completed frame."""
+
+        return RendererStats(*self._engine.renderer_stats)
 
     def run(self) -> None:
         """Open the native window and run until close or ``stop``."""

@@ -5,13 +5,22 @@ machine.
 
 ## Phase 1 is incomplete
 
-Phase 1.1–1.8 are implemented, including native scene traversal, public
+Phase 1.1–1.9 are implemented, including native scene traversal, public
 primitive/model render entities, scene camera ownership, directional/ambient
-lighting, and debug lines. Orthographic cameras, culling, batching/instancing,
-renderer counters, and the first-world/stress acceptance scene remain
-unimplemented checklist work. The baseline lighting intentionally supports
-ambient accumulation and one directional light; shadows, PBR, multiple
+lighting, debug lines, conservative frustum culling, compatible-mesh hardware
+instancing, and frame counters. Orthographic cameras and the first-world/stress
+acceptance recording remain unimplemented checklist work. The baseline
+lighting intentionally supports ambient accumulation and one directional light;
+shadows, PBR, multiple
 directional-light blending, and transparent sorting remain later work.
+
+Instancing currently requires identical mesh, material, texture/sampler, and
+uniform absolute scale. Non-uniform scale falls back to individual draws so the
+inverse-transpose normal path remains exact. Culling uses a conservative sphere
+derived from each cached local AABB; it can retain edge objects but must not
+reject visible ones. The instanced D3D11 programs compiled and ran with correct
+frame counters, but their last dedicated computer-use image inspection was
+interrupted, so that specific image is not claimed as visually verified.
 
 Public scene mutation is intentionally rejected while `Game.run()` is active.
 Phase 2 must add a documented scheduler and safe mutation boundaries before

@@ -29,6 +29,17 @@ int main() {
         std::cerr << "new Engine has invalid state\n";
         return 4;
     }
+    easy3d::RendererStatsAtomic counters;
+    counters.store({7, 120, 80, 2});
+    if (counters.load() != easy3d::RendererStats{7, 120, 80, 2}) {
+        std::cerr << "renderer counter snapshot failed\n";
+        return 5;
+    }
+    counters.reset();
+    if (counters.load() != easy3d::RendererStats{}) {
+        std::cerr << "renderer counter reset failed\n";
+        return 6;
+    }
 
     std::cout << "easy3d_core_tests: PASS\n";
     return 0;

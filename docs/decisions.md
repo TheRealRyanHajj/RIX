@@ -376,3 +376,43 @@ mutation retains the Phase 1 running-game guard.
   cleared. A later diagnostics system can add per-frame lifetimes and shapes.
 - Cameras are scene values rather than entities for now; future multi-camera or
   editor requirements require a separate reviewed ownership decision.
+
+## ADR-0013: Conservative bounds culling and compatibility-keyed instancing
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Phase 1.9 must reduce avoidable CPU/GPU submission while retaining correct
+transforms, lighting normals, resource sharing, and a measurable public result.
+Exact oriented-box culling is unnecessary for the initial static-scene target,
+while unconditionally instancing non-uniform scale would invalidate the existing
+inverse-transpose normal transform.
+
+### Decision
+
+Cache each immutable mesh's local AABB and derive a conservative world-space
+bounding sphere from its center, extents, hierarchy transform, and scale. Build
+six normalized planes from projection × view using the active backend's depth
+convention, then reject only spheres wholly outside a plane.
+
+Group visible mesh parts by GPU mesh handle, complete material value, and GPU
+texture handle. Groups of at least two with uniform absolute XYZ scale use a
+transient bgfx instance buffer containing one column-major model matrix per
+instance and dedicated instanced vertex programs. Other groups retain the exact
+single-draw path. Publish coherent latest-frame draw/visibility/instancing
+counters through a sequence-protected atomic store.
+
+### Consequences
+
+- Frustum testing is cheap and conservative; edge objects may remain visible,
+  but visible objects are not intentionally rejected.
+- Common static primitives collapse to one draw per compatibility group, while
+  material/texture differences correctly split batches.
+- Non-uniform scale remains correct at the cost of individual submission.
+- Batches are rebuilt each frame and use transient memory. Persistent instance
+  buffers, spatial trees, occlusion culling, and parallel visibility remain
+  possible later optimizations after profiling.
+- Renderer counters count mesh parts, not high-level entities, and are suitable
+  for diagnostics rather than gameplay synchronization.

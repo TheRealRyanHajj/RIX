@@ -244,7 +244,14 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("scene") = nullptr)
         .def_property_readonly("is_running", &easy3d::Engine::is_running)
         .def_property_readonly("frame_count", &easy3d::Engine::frame_count)
-        .def_property_readonly("last_frame_seconds", &easy3d::Engine::last_frame_seconds);
+        .def_property_readonly("last_frame_seconds", &easy3d::Engine::last_frame_seconds)
+        .def_property_readonly("renderer_stats", [](const easy3d::Engine& engine) {
+            const easy3d::RendererStats stats = engine.renderer_stats();
+            return py::make_tuple(stats.draw_calls,
+                                  stats.visible_instances,
+                                  stats.culled_instances,
+                                  stats.instanced_draw_calls);
+        });
 
     py::class_<easy3d::EntityHandle>(module, "EntityHandle")
         .def_property_readonly("world_id",

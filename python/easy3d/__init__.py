@@ -23,7 +23,7 @@ from .components import LightComponent, MeshRenderer
 from . import debug
 from .entity import Entity
 from ._version import __version__
-from .game import Game
+from .game import Game, RendererStats
 from .lights import Light
 from .math import Quat, Vec2, Vec3
 from .primitives import Cube, Model, Plane, Sphere
@@ -48,6 +48,7 @@ __all__ = [
     "ModelMaterialInfo",
     "ModelPartInfo",
     "Quat",
+    "RendererStats",
     "Plane",
     "Scene",
     "Sphere",

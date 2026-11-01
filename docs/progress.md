@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.8 PASSED; Phase 1.9 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.9 PASSED; Phase 1.10 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -1214,3 +1214,106 @@ cleanly. This is hardware evidence on the NVIDIA GeForce RTX 3070 Ti/D3D11 only.
 
 Phase 1.8: **DONE**. Immediate next task: Phase 1.9 — frustum culling,
 instancing/batching, renderer counters, and benchmark scenes.
+
+## 2026-11-01 — Phase 1.9 culling, instancing, and counters
+
+### Bounded approach
+
+Add native frustum extraction for both bgfx depth conventions, conservative
+transformed-mesh bounds, compatibility-keyed D3D11 instancing, coherent frame
+counters, and repeatable public-API diagnostics. Preserve exact non-uniform-scale
+normal handling by falling back to individual draws. Validate mathematical edge
+cases in graphics-independent C++ tests and require live D3D11 diagnostics to
+account for every renderable as visible or culled and to prove instanced draw
+submission through counters.
+
+### Implemented
+
+- Normalized six-plane frusta from projection × view for D3D `[0,1]` and
+  homogeneous `[-1,1]` depth, plus conservative transformed bounds tests.
+- Per-mesh local AABB caching and culling before texture upload or draw
+  submission.
+- Compatibility grouping by GPU mesh, complete material, and texture/sampler;
+  matching uniform-scale groups use transient model-matrix instance buffers and
+  dedicated solid/textured instanced vertex programs.
+- Exact single-draw fallback for non-uniform scale or transient-buffer pressure.
+- Coherent latest-frame `RendererStats` published from native atomics and exposed
+  as a frozen Python value on `Game`.
+- `benchmarks/render_cubes.py` with instance accounting, wall-clock FPS,
+  sampled median/p95/p99 frame time, and Windows working/private-set memory.
+- A five-cube live diagnostic that requires two visible cubes, three culled
+  cubes, and one instanced draw.
+
+### Exact verification evidence
+
+```text
+cmake --build --preset windows-debug -j 8
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 3.00 sec
+
+cmake --build --preset windows-release -j 8
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 0.63 sec
+
+cmake --build build\windows-headless -j 8
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 9
+Total Test time (real) = 0.61 sec
+```
+
+Python 3.11 editable package and public API:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=2747035
+sha256=f2644d41f678362ec98ad7fbaeacdd217511a6d0873ca41767d2686c867b722b
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+..............................................                           [100%]
+46 passed in 0.23s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version(), easy3d.RendererStats())"
+0.1.0 RendererStats(draw_calls=0, visible_instances=0, culled_instances=0, instanced_draw_calls=0)
+```
+
+Short D3D11 benchmark validation on the RTX 3070 Ti:
+
+```text
+build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 200 --seconds 2
+requested_instances=200
+frames=8470
+overall_fps=4154.22
+frame_ms_median=0.16135
+frame_ms_p95=0.5571
+frame_ms_p99=2.4534
+renderer: draw_calls=1, visible_instances=200, culled_instances=0,
+          instanced_draw_calls=1
+# exit code 0
+```
+
+Targeted live culling/instancing diagnostic:
+
+```text
+build\venv311\Scripts\python.exe tests\manual\renderer_optimization.py --seconds 60
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+renderer_optimization: PASS frames=354589
+RendererStats(draw_calls=1, visible_instances=2, culled_instances=3,
+              instanced_draw_calls=1)
+# exit code 0
+```
+
+The D3D11 programs compiled, linked, ran for 60 seconds, and returned internally
+consistent live counters. The attempted dedicated computer-use image inspection
+was interrupted with Escape, so the instanced image itself remains explicitly
+**UNVERIFIED** rather than being overstated. Prior Phase 1.8 D3D11 output remains
+visually verified; this does not block the counter/culling acceptance evidence.
+
+Phase 1.9: **DONE**. Immediate next task: Phase 1.10 — first-world example and
+the recorded 10,000-static-cube acceptance workload.

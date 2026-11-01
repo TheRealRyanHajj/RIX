@@ -17,6 +17,37 @@ int native_add(const int left, const int right) noexcept {
     return left + right;
 }
 
+void RendererStatsAtomic::reset() noexcept {
+    store({});
+}
+
+void RendererStatsAtomic::store(const RendererStats stats) noexcept {
+    sequence_.fetch_add(1, std::memory_order_acq_rel);
+    draw_calls_.store(stats.draw_calls, std::memory_order_relaxed);
+    visible_instances_.store(stats.visible_instances, std::memory_order_relaxed);
+    culled_instances_.store(stats.culled_instances, std::memory_order_relaxed);
+    instanced_draw_calls_.store(stats.instanced_draw_calls, std::memory_order_relaxed);
+    sequence_.fetch_add(1, std::memory_order_release);
+}
+
+RendererStats RendererStatsAtomic::load() const noexcept {
+    for (;;) {
+        const std::uint64_t before = sequence_.load(std::memory_order_acquire);
+        if ((before & 1U) != 0) {
+            continue;
+        }
+        const RendererStats result{
+            draw_calls_.load(std::memory_order_relaxed),
+            visible_instances_.load(std::memory_order_relaxed),
+            culled_instances_.load(std::memory_order_relaxed),
+            instanced_draw_calls_.load(std::memory_order_relaxed),
+        };
+        if (before == sequence_.load(std::memory_order_acquire)) {
+            return result;
+        }
+    }
+}
+
 Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     if (config_.title.empty()) {
         throw std::invalid_argument("window title must not be empty");
@@ -47,8 +78,9 @@ void Engine::run() {
     stop_requested_.store(false);
     frame_count_.store(0);
     last_frame_seconds_.store(0.0);
+    renderer_stats_.reset();
     platform::run_window_loop(
-        config_, scene_, stop_requested_, frame_count_, last_frame_seconds_);
+        config_, scene_, stop_requested_, frame_count_, last_frame_seconds_, renderer_stats_);
 }
 
 void Engine::stop() noexcept {
@@ -72,6 +104,10 @@ std::uint64_t Engine::frame_count() const noexcept {
 
 double Engine::last_frame_seconds() const noexcept {
     return last_frame_seconds_.load();
+}
+
+RendererStats Engine::renderer_stats() const noexcept {
+    return renderer_stats_.load();
 }
 
 const EngineConfig& Engine::config() const noexcept {
