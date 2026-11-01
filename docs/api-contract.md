@@ -549,3 +549,26 @@ limit. Peer bytes never raise parsing exceptions; malformed, incompatible,
 out-of-order or oversized input returns a stable disconnect code and bounded
 safe-text reason. Addresses, timeout clocks and socket ownership remain outside
 this codec.
+
+## Direct-IP client
+
+`easy3d.network.Client(...)` accepts a finite positive `timeout`, positive
+bounded queue/message/version values, and optional `on_connect(client)` and
+`on_disconnect(client, event)` callables. `connect(address, port)` accepts a
+numeric IPv4/IPv6 address and port `1..65535`, starts asynchronously, and rejects
+an already-active client. DNS names are not accepted. `state` is one of
+`disconnected`, `connecting`, `handshaking`, or `connected`; `connection` is an
+opaque `ConnectionId` while active and `None` after close.
+
+`poll(maximum_events=256)` must be called by one owning thread. It advances the
+transport and handshake, enforces the deadline, returns immutable events, and
+then dispatches Python callbacks in event order on that same thread. Callback
+exceptions propagate to the caller after the native event has been drained.
+They are never invoked on a GNS callback or worker thread.
+
+`send(bytes_like, delivery=...)` returns `SendStatus`; it does not block or
+raise for normal inactive/oversize/backpressure outcomes. `disconnect(reason)`
+requires an active connection. Reason text is at most 120 UTF-8 bytes with no
+control/NUL characters. `stats` contains application counters. `metrics` adds
+state, GNS ping/recent rates/pending bytes and the negotiated payload limit;
+unavailable live values retain documented zero/`-1` defaults.

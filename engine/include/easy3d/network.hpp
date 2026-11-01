@@ -51,6 +51,7 @@ struct TransportEvent final {
     std::vector<std::uint8_t> payload;
     std::string reason;
     std::uint64_t sequence{0};
+    std::uint16_t disconnect_code{0};
 };
 
 struct TransportStats final {
@@ -70,6 +71,32 @@ struct NetworkBackendInfo final {
     std::string name;
     std::string version;
     std::string crypto_provider;
+};
+
+enum class NetworkClientState : std::uint8_t {
+    Disconnected,
+    Connecting,
+    Handshaking,
+    Connected,
+};
+
+struct NetworkClientConfig final {
+    double connection_timeout_seconds{5.0};
+    std::size_t event_queue_capacity{1024};
+    std::size_t maximum_message_size{64 * 1024};
+    std::uint16_t protocol_version{1};
+    std::uint32_t schema_version{1};
+};
+
+struct NetworkConnectionMetrics final {
+    NetworkClientState state{NetworkClientState::Disconnected};
+    int ping_milliseconds{-1};
+    double outgoing_bytes_per_second{0.0};
+    double incoming_bytes_per_second{0.0};
+    std::uint64_t pending_reliable_bytes{0};
+    std::uint64_t pending_unreliable_bytes{0};
+    std::uint32_t negotiated_maximum_message_size{0};
+    TransportStats transport;
 };
 
 [[nodiscard]] NetworkBackendInfo network_backend_info();
@@ -122,6 +149,36 @@ public:
     [[nodiscard]] virtual std::vector<TransportEvent> poll(
         std::size_t maximum_events) = 0;
     [[nodiscard]] virtual TransportStats stats() const = 0;
+};
+
+class NetworkClient final : public NetworkTransport {
+public:
+    explicit NetworkClient(NetworkClientConfig config = {});
+    ~NetworkClient() override;
+
+    NetworkClient(const NetworkClient&) = delete;
+    NetworkClient& operator=(const NetworkClient&) = delete;
+    NetworkClient(NetworkClient&&) = delete;
+    NetworkClient& operator=(NetworkClient&&) = delete;
+
+    // Numeric IPv4 or IPv6 only. DNS and discovery remain separate policies.
+    void connect(std::string address, std::uint16_t port);
+    [[nodiscard]] ConnectionId connection() const noexcept;
+    [[nodiscard]] NetworkClientState state() const noexcept;
+    [[nodiscard]] std::string remote_address() const;
+    [[nodiscard]] NetworkConnectionMetrics metrics() const;
+
+    [[nodiscard]] SendStatus send(ConnectionId connection,
+                                  std::span<const std::uint8_t> payload,
+                                  NetworkDelivery delivery) override;
+    void disconnect(ConnectionId connection, std::string reason) override;
+    [[nodiscard]] std::vector<TransportEvent> poll(
+        std::size_t maximum_events) override;
+    [[nodiscard]] TransportStats stats() const override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 struct SimulatedNetworkConfig final {

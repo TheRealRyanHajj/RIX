@@ -2525,3 +2525,158 @@ Phase 3.3: **DONE**. Immediate next task: Phase 3.4 — adapt real GNS
 listen/connect connections to the bounded transport queue and handshake, with
 IP/port validation, timeouts, callbacks, errors and native metrics. No public
 client/server or entity replication is claimed by this checkpoint.
+
+## 2026-11-01 — Phase 3.4 live client connection adapter (complete)
+
+### Bounded approach
+
+Add a single-owner asynchronous native client over direct numeric IPv4/IPv6
+GameNetworkingSockets addresses. Drive GNS callbacks and message receipt only
+from `poll()`, feed reliable pre-connection messages through the Phase 3.3
+handshake, enforce a monotonic handshake deadline and publish only copied,
+bounded events. Map local, remote, timeout, protocol and transport failures to
+stable disconnect codes; never invoke Python from the GNS callback.
+
+Expose a typed Python `Client` facade with nonblocking `connect`, `send`,
+`disconnect`, `poll`, state, connection ID, counters and GNS ping/rate/pending
+metrics. Dispatch optional Python connect/disconnect callbacks synchronously
+from the caller's `poll()`. Validate with a real ephemeral localhost GNS test
+listener that performs the handshake and echoes reliable/unreliable payloads,
+plus timeout, invalid address/port, oversize, queue and lifecycle regressions.
+The public authoritative `Server` owner remains Phase 3.5; the native test
+listener is not a gameplay server API.
+
+### Implemented
+
+- Added a native `NetworkClient` implementing `NetworkTransport` over one GNS
+  direct-IP connection. Numeric IPv4 and IPv6 addresses are normalized, ports
+  must be nonzero, repeated active connects are rejected, and opaque local
+  connection generations are invalidated on close rather than exposing GNS
+  handles.
+- Made `poll()` the sole native pump. It runs connection callbacks, consumes at
+  most 256 messages, sends/validates the reliable Phase 3.3 handshake, enforces
+  one monotonic connection/handshake deadline, applies the negotiated payload
+  limit, surfaces bounded queue overflow, and drains copied events. GNS user
+  data is cleared before close/destruction so stale callbacks cannot target a
+  destroyed client.
+- Added stable timeout/transport disconnect codes and a code field on every
+  transport event. Clean local close, remote close, protocol rejection,
+  oversize input, transport errors and silent-peer timeout each converge on one
+  disconnected event. Backend codes outside Easy3D's app range remain raw
+  integers for accurate diagnosis.
+- Added application message/byte/rejection/overflow counters and GNS
+  observational ping, recent byte-rate and pending-byte metrics. Reliable and
+  unreliable send status maps explicit inactive, oversize and backpressure
+  outcomes without blocking.
+- Added typed `easy3d.network.Client`, `ClientState`, `ClientMetrics` and
+  `DisconnectCode` APIs. Python connect/disconnect callbacks are dispatched in
+  event order only by the Python caller's `poll()`; native callbacks never call
+  Python. The networking-disabled fallback compiles and fails construction
+  explicitly.
+- Added a real localhost native listener fixture that validates IPv4 and IPv6
+  connection/handshake, exact reliable and unreliable echo, negotiated limits,
+  normalized address, clean disconnect, invalid address/port/reason handling,
+  metrics/counters, a deliberately silent peer timeout and event-queue overflow
+  recovery. The fixture is linked only into native tests and is not a hidden
+  public server API.
+- Documented lifecycle, ownership, callbacks, metrics, limitations and the
+  direct-IP decision in the README, protocol/API/architecture/known-issues docs
+  and ADR-0025.
+
+### Failures found and corrected
+
+- The first native client-test compile failed with
+  `fatal error C1083: Cannot open include file: 'steam/steamnetworkingsockets.h'`
+  because Easy3D correctly keeps backend includes private. The test fixture now
+  explicitly links `GameNetworkingSockets::static`; production consumers still
+  receive no third-party headers.
+- The first localhost fixture run failed with
+  `could not create the localhost test listener`. GNS direct-IP listen sockets
+  require an explicit nonzero port rather than port `0`; the test now probes a
+  bounded 100-port localhost-only range and rejects collisions instead of
+  assuming OS ephemeral binding.
+- A final editable-install retry from ordinary PowerShell selected the
+  unsupported MinGW GCC 15.1 toolchain and reproduced upstream Protobuf's
+  `cannot tail-call: callee required more stack slots` failure. The derived
+  cache was preserved as
+  `build/scikit-build/cp311-cp311-win_amd64-mingw-failed-phase34`. Running the
+  acceptance command verbatim from the documented Visual Studio x64 developer
+  environment selected MSVC and succeeded; MinGW is still not claimed as a
+  supported Windows compiler.
+- No product regression failed after those fixture corrections. The live
+  client test passed 20 consecutive repetitions, and the focused Python suite
+  passed five consecutive repetitions before the final matrices.
+
+### Exact final verification evidence
+
+```text
+# Negative compiler-selection check from ordinary PowerShell:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+The C compiler identification is GNU 15.1.0
+generated_message_tctable_lite.cc:256:37: error: cannot tail-call: callee required more stack slots than the caller
+ERROR: Failed building editable for easy3d
+# exit code 1; unsupported MinGW path, retained and followed by the supported MSVC run below
+
+ctest --preset windows-debug -R easy3d.network_client --output-on-failure
+1/1 Test #14: easy3d.network_client ............   Passed    0.20 sec
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 0.23 sec
+
+ctest --test-dir build\windows-headless -C Debug -R easy3d.network_client --repeat until-fail:20 --output-on-failure
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 3.35 sec
+
+cmake --build build\windows-headless --config Debug --parallel 4
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 15
+Total Test time (real) = 1.45 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.45 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.56 sec
+
+# From the documented Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3905584
+sha256=fe809fd23afbf1c2eb6dae5e5a49f1719c3d86379b0c79fc3140cec135cc5253
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py -q
+...................                                                      [100%]
+19 passed in 0.17s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 61%]
+.............................................                            [100%]
+117 passed in 0.43s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.network.backend_info()); c=easy3d.network.Client(); print(c.state.value, c.connection, c.metrics.ping_milliseconds)"
+0.1.0
+NetworkBackendInfo(available=True, name='GameNetworkingSockets', version='1.6.1', crypto_provider='Windows BCrypt')
+disconnected None -1
+
+cl /nologo /std:c++20 /EHsc /Iengine\include /c engine\src\network\client_stub.cpp /Fobuild\network_client_stub.obj
+client_stub.cpp
+# exit code 0
+
+build\venv311\Scripts\python.exe -m pip show -f easy3d
+# editable metadata plus easy3d/_easy3d.cp311-win_amd64.pyd; no private dependency artifacts
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+Phase 3.4: **DONE**. Immediate next task: Phase 3.5 — implement the public
+authoritative headless `Server`, multi-connection handshake ownership and
+fixed-step Python server logic without SDL or bgfx. No replication or entity
+synchronization is claimed by this checkpoint.

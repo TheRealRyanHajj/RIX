@@ -60,18 +60,19 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
-Phase 3.2 adds the real GameNetworkingSockets runtime and a reliable native
-socket-pair smoke test, but it does not yet expose a listener, address, client,
-server or timeout policy. Those remain Phase 3.4–3.5 requirements. Simulated
-loss still applies to both delivery labels because the deterministic simulator
-models the datagram link beneath reliability.
+Phase 3.4 exposes a numeric direct-IP client with timeout and the Phase 3.3
+handshake. There is not yet a public authoritative listener/server, DNS, LAN
+discovery, automatic firewall rule, or complete two-process sample; those are
+Phase 3.5–3.8 work. The client advances only when its owning thread calls
+`poll()`, so a stalled game loop also stalls callbacks and deadline enforcement.
+Exact protocol/schema equality is the only compatibility policy in wire format
+1; migrations or version ranges are not implied.
 
-Phase 3.3 defines and tests the bounded version/schema/role handshake, but the
-state machine is not connected to a public socket owner yet. It therefore does
-not currently enforce a wall-clock handshake timeout or let Python connect to
-an IP/port. Those are explicit Phase 3.4 responsibilities. Exact version and
-schema equality is the only compatibility policy in wire format 1; migrations
-or version ranges are not implied.
+Python connect/disconnect callbacks are synchronous `poll()` callbacks. If one
+raises, the exception propagates after its event was drained and the callback
+is not replayed. GNS rate/ping metrics can be zero or `-1` before enough live
+traffic exists. Direct transport encryption is unauthenticated and is not a
+player/account identity guarantee.
 
 The supported Windows build uses MSVC. A diagnostic attempt with MinGW GCC
 15.1 reaches an upstream Protobuf `musttail` compile failure in

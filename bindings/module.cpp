@@ -68,6 +68,40 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "message";
     };
+    const auto client_state_name = [](const easy3d::NetworkClientState value) {
+        switch (value) {
+        case easy3d::NetworkClientState::Disconnected:
+            return "disconnected";
+        case easy3d::NetworkClientState::Connecting:
+            return "connecting";
+        case easy3d::NetworkClientState::Handshaking:
+            return "handshaking";
+        case easy3d::NetworkClientState::Connected:
+            return "connected";
+        }
+        return "disconnected";
+    };
+    const auto transport_event_tuple =
+        [network_delivery_name, event_type_name](const easy3d::TransportEvent& event) {
+            return py::make_tuple(
+                event_type_name(event.type),
+                event.connection.value,
+                network_delivery_name(event.delivery),
+                py::bytes(reinterpret_cast<const char*>(event.payload.data()),
+                          event.payload.size()),
+                event.reason,
+                event.sequence,
+                event.disconnect_code);
+        };
+    const auto transport_stats_tuple = [](const easy3d::TransportStats& value) {
+        return py::make_tuple(value.messages_sent,
+                              value.messages_received,
+                              value.messages_lost,
+                              value.bytes_sent,
+                              value.bytes_received,
+                              value.queue_rejections,
+                              value.event_overflows);
+    };
     module.def("_network_backend_info", []() {
         const easy3d::NetworkBackendInfo info = easy3d::network_backend_info();
         return py::make_tuple(
@@ -144,41 +178,110 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("connection"),
              py::arg("reason") = "")
         .def("poll",
-             [network_delivery_name, event_type_name](easy3d::SimulatedNetwork& network,
-                                                      const bool first,
-                                                      const std::size_t maximum_events) {
+             [transport_event_tuple](easy3d::SimulatedNetwork& network,
+                                     const bool first,
+                                     const std::size_t maximum_events) {
                  easy3d::SimulatedNetwork::Endpoint& endpoint =
                      first ? network.first() : network.second();
                  py::list result;
                  for (easy3d::TransportEvent& event : endpoint.poll(maximum_events)) {
-                     result.append(py::make_tuple(
-                         event_type_name(event.type),
-                         event.connection.value,
-                         network_delivery_name(event.delivery),
-                         py::bytes(reinterpret_cast<const char*>(event.payload.data()),
-                                   event.payload.size()),
-                         event.reason,
-                         event.sequence));
+                     result.append(transport_event_tuple(event));
                  }
                  return result;
              },
              py::arg("first"),
              py::arg("maximum_events") = 256)
-        .def("stats", [](easy3d::SimulatedNetwork& network, const bool first) {
+        .def("stats", [transport_stats_tuple](easy3d::SimulatedNetwork& network,
+                                               const bool first) {
             const easy3d::TransportStats value =
                 (first ? network.first() : network.second()).stats();
-            return py::make_tuple(value.messages_sent,
-                                  value.messages_received,
-                                  value.messages_lost,
-                                  value.bytes_sent,
-                                  value.bytes_received,
-                                  value.queue_rejections,
-                                  value.event_overflows);
+            return transport_stats_tuple(value);
         })
         .def("advance", &easy3d::SimulatedNetwork::advance, py::arg("elapsed_seconds"))
         .def_property_readonly("time_seconds", &easy3d::SimulatedNetwork::time_seconds)
         .def_property_readonly("in_flight_count",
                                &easy3d::SimulatedNetwork::in_flight_count);
+    py::class_<easy3d::NetworkClient>(module, "_NetworkClient")
+        .def(py::init([](const double connection_timeout_seconds,
+                         const std::size_t event_queue_capacity,
+                         const std::size_t maximum_message_size,
+                         const std::uint16_t protocol_version,
+                         const std::uint32_t schema_version) {
+                 return std::make_unique<easy3d::NetworkClient>(
+                     easy3d::NetworkClientConfig{connection_timeout_seconds,
+                                                 event_queue_capacity,
+                                                 maximum_message_size,
+                                                 protocol_version,
+                                                 schema_version});
+             }),
+             py::arg("connection_timeout_seconds") = 5.0,
+             py::arg("event_queue_capacity") = 1024,
+             py::arg("maximum_message_size") = 64 * 1024,
+             py::arg("protocol_version") = 1,
+             py::arg("schema_version") = 1)
+        .def("connect", &easy3d::NetworkClient::connect, py::arg("address"), py::arg("port"))
+        .def("send",
+             [network_delivery, send_status_name](easy3d::NetworkClient& client,
+                                                  const std::uint64_t connection,
+                                                  const py::bytes& data,
+                                                  const std::string& delivery) {
+                 char* value = nullptr;
+                 py::ssize_t size = 0;
+                 if (PyBytes_AsStringAndSize(data.ptr(), &value, &size) != 0) {
+                     throw py::error_already_set();
+                 }
+                 return send_status_name(client.send(
+                     easy3d::ConnectionId{connection},
+                     std::span{reinterpret_cast<const std::uint8_t*>(value),
+                               static_cast<std::size_t>(size)},
+                     network_delivery(delivery)));
+             },
+             py::arg("connection"),
+             py::arg("data"),
+             py::arg("delivery"))
+        .def("disconnect",
+             [](easy3d::NetworkClient& client,
+                const std::uint64_t connection,
+                const std::string& reason) {
+                 client.disconnect(easy3d::ConnectionId{connection}, reason);
+             },
+             py::arg("connection"),
+             py::arg("reason") = "")
+        .def("poll",
+             [transport_event_tuple](easy3d::NetworkClient& client,
+                                     const std::size_t maximum_events) {
+                 const std::vector<easy3d::TransportEvent> events =
+                     client.poll(maximum_events);
+                 py::list result;
+                 for (const easy3d::TransportEvent& event : events) {
+                     result.append(transport_event_tuple(event));
+                 }
+                 return result;
+             },
+             py::arg("maximum_events") = 256)
+        .def_property_readonly("connection", [](const easy3d::NetworkClient& client) {
+            return client.connection().value;
+        })
+        .def_property_readonly("state", [client_state_name](const easy3d::NetworkClient& client) {
+            return client_state_name(client.state());
+        })
+        .def_property_readonly("remote_address", &easy3d::NetworkClient::remote_address)
+        .def_property_readonly("stats", [transport_stats_tuple](const easy3d::NetworkClient& client) {
+            return transport_stats_tuple(client.stats());
+        })
+        .def_property_readonly(
+            "metrics",
+            [client_state_name, transport_stats_tuple](const easy3d::NetworkClient& client) {
+                const easy3d::NetworkConnectionMetrics value = client.metrics();
+                return py::make_tuple(client_state_name(value.state),
+                                      value.ping_milliseconds,
+                                      value.outgoing_bytes_per_second,
+                                      value.incoming_bytes_per_second,
+                                      value.pending_reliable_bytes,
+                                      value.pending_unreliable_bytes,
+                                      value.negotiated_maximum_message_size,
+                                      transport_stats_tuple(value.transport));
+            });
     py::enum_<easy3d::TextureColorSpace>(module, "_TextureColorSpace")
         .value("LINEAR", easy3d::TextureColorSpace::Linear)
         .value("SRGB", easy3d::TextureColorSpace::Srgb);

@@ -88,27 +88,59 @@ cannot inject control text into diagnostics. Defined protocol codes are:
 - `1004` limit violation
 - `1005` unexpected message/state
 - `1006` message too large
+- `1007` connection/handshake timeout
+- `1008` local transport failure
 
 Parsing checks the outer 512-byte cap and declared length before reading or
 copying payload data. Local state-machine misuse raises a C++ logic error;
 untrusted peer input becomes a bounded rejection and stable disconnect code.
 No Python object serialization is used.
 
+## Implemented in Phase 3.4
+
+`easy3d.network.Client` owns one asynchronous direct-IP GNS connection. It
+accepts numeric IPv4 or IPv6 plus a nonzero port; DNS, discovery and room codes
+are intentionally separate policies. `connect()` enters `connecting` and
+returns. Repeated `poll()` calls run GNS callbacks, consume at most 256 native
+messages per call, drive the reliable Phase 3.3 handshake and enforce the
+configured monotonic deadline across transport connection and handshake.
+
+Application `connected` is emitted only after the client sends its validated
+confirmation. Before that point, unreliable frames or non-handshake bytes are
+protocol errors. After establishment, any message larger than the negotiated
+limit closes the peer; accepted payloads are copied into the existing bounded
+event queue. Reliable/unreliable intent and GNS message sequence are preserved.
+Queue overflow is counted, raised once, and leaves the event that fit available
+for the next poll.
+
+Clean local close, protocol rejection, deadline expiry, GNS local failure and
+remote close all produce one immutable disconnected event. Easy3D codes remain
+in the app range above; native GNS/OS codes outside that range are preserved as
+integers rather than mislabelled. Local reason text is capped at 120 bytes to
+fit the backend diagnostic field and rejects controls. A disconnected client
+has no active connection ID but retains its normalized remote address and
+counter snapshot for diagnostics.
+
+Metrics include application message/byte/rejection/overflow counters plus GNS
+ping, recent incoming/outgoing bytes per second, pending reliable/unreliable
+bytes and the negotiated limit. Rates are observations, not bandwidth promises.
+Python connect/disconnect callbacks run synchronously while the owning thread
+calls `poll()`; no native callback enters Python.
+
 ## Not implemented yet
 
-There is no public socket address, listener, client, server, timeout, discovery,
-firewall behavior, replication or RPC yet. Python bytes leave the process only
-in later concrete transport APIs; the current backend exercise is an in-process
-native socket pair. Phase 3.4 adapts live connections to the transport and
-handshake contracts. Until that milestone passes, the handshake has no public
-IP/port path and no application interoperability claim is made. Transport
-encryption also does not establish account or player identity; authentication
-remains a separate extension boundary.
+There is no public listener/server, discovery, firewall automation, DNS,
+replication or RPC yet. Phase 3.5 supplies the authoritative headless server;
+Phase 3.8 supplies a supported two-process sample and abrupt-disconnect/port
+collision integration. Transport encryption also does not establish account or
+player identity; authentication remains a separate extension boundary.
 
 ## Threading and ownership
 
-A concrete backend may receive data on a native callback/worker thread. It must
-copy validated bounded data into its event queue and return; it must not call
-Python, mutate a `Scene`, or retain a borrowed Python buffer. The gameplay or
-server thread polls events and applies protocol state at its documented safe
-boundary. Shutdown must stop producers before destroying their queues.
+The current direct-IP client services its connection-specific GNS callback only
+through `RunCallbacks()` inside `poll()`. The callback mutates native connection
+state and never calls Python, mutates a `Scene`, or retains a borrowed Python
+buffer. Application events contain copied bounded data. Python callbacks and
+protocol event handling run afterward on the gameplay thread that called
+`poll()`. A client is single-owner; concurrent calls from multiple threads are
+unsupported.

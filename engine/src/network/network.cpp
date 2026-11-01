@@ -1,4 +1,5 @@
 #include "easy3d/network.hpp"
+#include "easy3d/network_protocol.hpp"
 
 #include <algorithm>
 #include <array>
@@ -220,7 +221,9 @@ void SimulatedNetwork::disconnect(const std::size_t side,
                                                 NetworkDelivery::Reliable,
                                                 {},
                                                 reason,
-                                                0})) {
+                                                0,
+                                                static_cast<std::uint16_t>(
+                                                    detail::DisconnectCode::Normal)})) {
             ++impl_->stats[endpoint].event_overflows;
             impl_->overflow_pending[endpoint] = true;
         }

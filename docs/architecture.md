@@ -322,8 +322,8 @@ Phase 3.2 links GameNetworkingSockets 1.6.1 and a source-matched Protobuf 5.29.3
 runtime statically. Windows BCrypt supplies platform crypto, ICE/WebRTC remains
 off, and a reference-counted process owner serializes native initialization and
 shutdown. A real reliable socket-pair smoke test validates that private backend.
-The Phase 3.4 live connection adapter will place backend callbacks behind the
-existing bounded queue; it will not call Python or mutate scenes from the
+The Phase 3.4 live client adapter now places backend callbacks behind the
+existing bounded queue; it does not call Python or mutate scenes from the
 native callback path.
 
 The Phase 3.3 handshake is now a native transport-independent state machine.
@@ -333,5 +333,14 @@ negotiated minimum payload limit. The three-message client hello/server
 accept/client confirm exchange prevents the server from declaring completion
 before it verifies the client's negotiated limit. Malformed peer data produces
 stable bounded disconnect codes rather than exceptions escaping the network
-input path. Phase 3.4 will own timeout policy and feed only reliable GNS
-messages into this state machine.
+input path.
+
+`NetworkClient` owns one GNS handle and one handshake instance. Connection IDs
+are monotonically generated local identities, invalidated on close, and never
+derived from GNS handles. `poll()` is the sole pump: run connection callbacks,
+copy a bounded number of messages, apply the handshake/deadline, surface queue
+overflow, then drain immutable events. Python `Client` converts those events
+and invokes optional callbacks only after returning from native GNS code on the
+same owning thread. The native callback finds its owner through per-connection
+GNS user data; shutdown clears that pointer before closing the handle so queued
+callbacks cannot target a destroyed client.

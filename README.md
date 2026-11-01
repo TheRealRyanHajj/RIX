@@ -1,7 +1,7 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2 and the Phase 3.3 protocol handshake are validated.
+native core. Phases 0–2 and the Phase 3.4 direct-IP client are validated.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -360,14 +360,31 @@ assert network.backend_smoke_test()
 The backend is GameNetworkingSockets 1.6.1, statically linked with a matching
 Protobuf runtime and Windows BCrypt support. The smoke test initializes the
 process-global runtime and sends a reliable message through a native loopback
-socket pair. Public listener/client APIs, addresses and the live protocol
-adapter are still later milestones; backend availability is not a claim that
-those APIs exist. See [docs/network-protocol.md](docs/network-protocol.md).
+socket pair. See [docs/network-protocol.md](docs/network-protocol.md).
 
 The internal Phase 3.3 handshake now validates exact protocol/schema versions,
 client/server roles and negotiated payload limits with bounded disconnect
-reasons. It is not exposed as a gameplay serializer and is not yet attached to
-public IP/port connection APIs.
+reasons. Phase 3.4 attaches it to a nonblocking numeric IPv4/IPv6 client:
+
+```python
+from easy3d import network
+
+client = network.Client(
+    timeout=5.0,
+    on_connect=lambda active: print("connected", active.remote_address),
+    on_disconnect=lambda _client, event: print(event.disconnect_code, event.reason),
+)
+client.connect("127.0.0.1", 27020)
+
+# Call from the owning gameplay thread each update.
+for event in client.poll():
+    if event.type is network.EventType.MESSAGE:
+        print(event.payload)
+```
+
+`connect()` is asynchronous; `poll()` advances native callbacks, handshake,
+timeouts and Python callback dispatch. The public authoritative listener/server
+is Phase 3.5, so this client is not yet a complete two-process sample.
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 

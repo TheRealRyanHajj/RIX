@@ -796,3 +796,40 @@ into a bounded rejection.
   1 intentionally supports exact matches only.
 - Transport encryption does not authenticate a player identity, and the
   handshake does not claim authentication, discovery, sockets or replication.
+
+## ADR-0025: Poll-owned asynchronous direct-IP client
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+GNS connection transitions arrive through native callbacks, while Easy3D
+gameplay and Python have a single owning thread. Letting callbacks enter Python
+would make scene mutation timing uncontrolled. A blocking `connect()` would
+also freeze a game loop and make timeout/cancellation behavior difficult to
+compose. DNS and discovery introduce policy and attack surfaces separate from
+the direct-IP foundation.
+
+### Decision
+
+Make `NetworkClient`/`easy3d.network.Client` an asynchronous, single-owner
+direct numeric IPv4/IPv6 endpoint. `connect()` creates one GNS connection and
+returns; `poll()` alone runs GNS callbacks, copies at most 256 messages, drives
+the Phase 3.3 reliable handshake, enforces one monotonic connection/handshake
+deadline, reports queue overflow, and drains events. Use per-connection GNS user
+data to route callbacks to native state, clearing it before close/destruction.
+Publish Python callbacks only while the Python caller processes polled events.
+Invalidate the opaque local connection ID on close, preserve stable Easy3D
+disconnect codes and retain unknown backend codes as integers. Expose both
+application counters and GNS observational ping/rate/queue metrics.
+
+### Consequences
+
+- No native callback calls Python or mutates scene/gameplay state.
+- Games must poll regularly; timeout and callback progress intentionally follow
+  that owning-thread pump.
+- Numeric addresses keep this milestone deterministic and bounded. DNS, LAN
+  discovery and firewall guidance remain explicit later work.
+- The client is usable against a compatible peer, but the public authoritative
+  listener and headless server remain Phase 3.5 rather than a hidden test API.
