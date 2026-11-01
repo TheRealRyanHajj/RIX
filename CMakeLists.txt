@@ -1,17 +1,22 @@
 cmake_minimum_required(VERSION 3.26)
 
-project(Easy3D VERSION 0.1.0 LANGUAGES CXX)
+project(Easy3D VERSION 0.1.0 LANGUAGES C CXX)
 
 include(CTest)
 include(FetchContent)
 
 option(EASY3D_ENABLE_GRAPHICS "Build the SDL3/bgfx Windows window backend" ${WIN32})
+option(EASY3D_ENABLE_NETWORKING "Build the GameNetworkingSockets Windows backend" ${WIN32})
 option(EASY3D_BUILD_PYTHON "Build the Python extension" ON)
 option(EASY3D_BUILD_BENCHMARKS "Build the tiny native benchmark harness" ON)
 option(EASY3D_REGENERATE_SHADERS "Build shaderc and regenerate committed D3D11 shaders" OFF)
 
 if(EASY3D_ENABLE_GRAPHICS AND NOT WIN32)
     message(FATAL_ERROR "The Phase 0 graphics backend currently supports Windows only")
+endif()
+
+if(EASY3D_ENABLE_NETWORKING AND NOT WIN32)
+    message(FATAL_ERROR "The initial GameNetworkingSockets backend supports Windows only")
 endif()
 
 configure_file(
@@ -40,7 +45,16 @@ FetchContent_Declare(
     GIT_TAG 2945a967c5303b2c8c14174117c45f3302591150
     GIT_SHALLOW FALSE
 )
+set(easy3d_saved_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
+set(CMAKE_SKIP_INSTALL_RULES ON)
 FetchContent_MakeAvailable(tinyobjloader)
+set(CMAKE_SKIP_INSTALL_RULES "${easy3d_saved_skip_install_rules}")
+unset(easy3d_saved_skip_install_rules)
+# tinyobjloader is a private static implementation detail. Suppress its
+# headers, library and package metadata from editable wheels while satisfying
+# CMake's parent install-script inclusion.
+file(WRITE "${tinyobjloader_BINARY_DIR}/cmake_install.cmake"
+    "# tinyobjloader is statically linked and not installed.\n")
 
 # Jolt Physics 5.6.0. The native integration remains private behind Easy3D's
 # world/body handles and is built as a static, CPU-only library.
@@ -78,6 +92,113 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JoltPhysics)
 
+if(EASY3D_ENABLE_NETWORKING)
+    # Protobuf 5.29.3. Build protoc and its exactly matching static runtime from
+    # the same immutable source so generated GameNetworkingSockets messages
+    # cannot acquire a host/runtime version mismatch.
+    # GNS compiles as C++17; Protobuf must use the same string_view ABI rather
+    # than MSVC's C++14 default and Abseil's fallback implementation.
+    set(easy3d_saved_cxx_standard "${CMAKE_CXX_STANDARD}")
+    set(easy3d_saved_cxx_standard_required "${CMAKE_CXX_STANDARD_REQUIRED}")
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_CONFORMANCE OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_PROTOBUF_BINARIES ON CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_PROTOC_BINARIES ON CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_LIBPROTOC ON CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_LIBUPB OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+    set(protobuf_INSTALL OFF CACHE BOOL "" FORCE)
+    set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
+    set(ABSL_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        Protobuf
+        GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
+        GIT_TAG b407e8416e3893036aee5af9a12bd9b6a0e2b2e6
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES_RECURSE TRUE
+        OVERRIDE_FIND_PACKAGE
+    )
+    FetchContent_MakeAvailable(Protobuf)
+
+    # GameNetworkingSockets calls the compatibility helper supplied by
+    # FindProtobuf. The source build intentionally avoids installing a package,
+    # so provide the same thin wrapper around Protobuf's native generator.
+    include("${protobuf_SOURCE_DIR}/cmake/protobuf-generate.cmake")
+    if(NOT COMMAND protobuf_generate_cpp)
+        function(protobuf_generate_cpp output_sources output_headers)
+            set(proto_files ${ARGN})
+            if(NOT proto_files)
+                message(SEND_ERROR "protobuf_generate_cpp requires .proto inputs")
+                return()
+            endif()
+            protobuf_generate(
+                APPEND_PATH
+                LANGUAGE cpp
+                OUT_VAR generated_files
+                PROTOS ${proto_files}
+            )
+            set(generated_sources)
+            set(generated_headers)
+            foreach(generated_file IN LISTS generated_files)
+                if(generated_file MATCHES "cc$")
+                    list(APPEND generated_sources "${generated_file}")
+                else()
+                    list(APPEND generated_headers "${generated_file}")
+                endif()
+            endforeach()
+            set(${output_sources} ${generated_sources} PARENT_SCOPE)
+            set(${output_headers} ${generated_headers} PARENT_SCOPE)
+        endfunction()
+    endif()
+    set(Protobuf_VERSION "${protobuf_VERSION}")
+
+    # GameNetworkingSockets 1.6.1. BCrypt is a supported Windows backend and
+    # avoids an extra redistributable crypto library. Direct-IP comes first, so
+    # ICE/WebRTC and their wider dependency/attack surface remain disabled.
+    set(BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ICE OFF CACHE BOOL "" FORCE)
+    set(USE_STEAMWEBRTC OFF CACHE BOOL "" FORCE)
+    set(USE_CRYPTO "BCrypt" CACHE STRING "" FORCE)
+    set(Protobuf_USE_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        GameNetworkingSockets
+        GIT_REPOSITORY https://github.com/ValveSoftware/GameNetworkingSockets.git
+        GIT_TAG d534c19aa760df3fb75fd20db13ba1932b8a5463
+        GIT_SHALLOW FALSE
+    )
+    set(easy3d_saved_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
+    set(CMAKE_SKIP_INSTALL_RULES ON)
+    FetchContent_MakeAvailable(GameNetworkingSockets)
+    set(CMAKE_SKIP_INSTALL_RULES "${easy3d_saved_skip_install_rules}")
+    unset(easy3d_saved_skip_install_rules)
+    # CMake still includes a child install script for a fetched subdirectory
+    # even when that child's install rules were intentionally suppressed.
+    # Keep the backend private while giving the parent install step a no-op
+    # script to include during wheel creation.
+    file(WRITE "${gamenetworkingsockets_BINARY_DIR}/cmake_install.cmake"
+        "# GameNetworkingSockets is statically linked and not installed.\n")
+    if(easy3d_saved_cxx_standard)
+        set(CMAKE_CXX_STANDARD "${easy3d_saved_cxx_standard}")
+    else()
+        unset(CMAKE_CXX_STANDARD)
+    endif()
+    if(easy3d_saved_cxx_standard_required)
+        set(CMAKE_CXX_STANDARD_REQUIRED "${easy3d_saved_cxx_standard_required}")
+    else()
+        unset(CMAKE_CXX_STANDARD_REQUIRED)
+    endif()
+    unset(easy3d_saved_cxx_standard)
+    unset(easy3d_saved_cxx_standard_required)
+endif()
+
 set(easy3d_core_sources
     engine/src/assets/image.cpp
     engine/src/assets/model.cpp
@@ -90,6 +211,12 @@ set(easy3d_core_sources
     engine/src/renderer/mesh.cpp
     engine/src/scene/scene.cpp
 )
+
+if(EASY3D_ENABLE_NETWORKING)
+    list(APPEND easy3d_core_sources engine/src/network/backend_gns.cpp)
+else()
+    list(APPEND easy3d_core_sources engine/src/network/backend_stub.cpp)
+endif()
 
 if(EASY3D_ENABLE_GRAPHICS)
     # SDL 3.4.18, immutable release commit.
@@ -197,6 +324,11 @@ target_include_directories(easy3d_core
 )
 target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader Jolt)
 
+if(EASY3D_ENABLE_NETWORKING)
+    target_compile_definitions(easy3d_core PRIVATE EASY3D_HAS_GNS=1)
+    target_link_libraries(easy3d_core PRIVATE GameNetworkingSockets::static)
+endif()
+
 if(MSVC)
     target_compile_options(easy3d_core PRIVATE /W4 /permissive- /EHsc /Zc:__cplusplus)
 else()
@@ -294,6 +426,13 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_network_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_network_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.network COMMAND easy3d_network_tests)
+
+    if(EASY3D_ENABLE_NETWORKING)
+        add_executable(easy3d_network_backend_tests tests/cpp/test_network_backend.cpp)
+        target_compile_features(easy3d_network_backend_tests PRIVATE cxx_std_20)
+        target_link_libraries(easy3d_network_backend_tests PRIVATE Easy3D::core)
+        add_test(NAME easy3d.network_backend COMMAND easy3d_network_backend_tests)
+    endif()
 
     add_executable(easy3d_physics_tests tests/cpp/test_physics.cpp)
     target_compile_features(easy3d_physics_tests PRIVATE cxx_std_20)

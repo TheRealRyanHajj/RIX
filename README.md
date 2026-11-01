@@ -1,7 +1,7 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2 and the Phase 3.1 transport foundation are validated.
+native core. Phases 0–2 and the Phase 3.2 transport backend are validated.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -347,10 +347,22 @@ link.advance(0.050)
 events = link.second.poll()
 ```
 
-Queue limits, latency and jitter are in-process test controls. This is not a
-socket client/server and does not claim reliable retransmission or encryption;
-the pinned GameNetworkingSockets integration is the next milestone. See
-[docs/network-protocol.md](docs/network-protocol.md).
+Queue limits, latency and jitter are in-process test controls. The pinned
+GameNetworkingSockets backend can be inspected and exercised independently:
+
+```python
+from easy3d import network
+
+print(network.backend_info())
+assert network.backend_smoke_test()
+```
+
+The backend is GameNetworkingSockets 1.6.1, statically linked with a matching
+Protobuf runtime and Windows BCrypt support. The smoke test initializes the
+process-global runtime and sends a reliable message through a native loopback
+socket pair. Public listener/client APIs, addresses and the Easy3D wire
+handshake are still later milestones; backend availability is not a claim that
+those APIs exist. See [docs/network-protocol.md](docs/network-protocol.md).
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 

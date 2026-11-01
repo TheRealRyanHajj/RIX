@@ -723,3 +723,38 @@ the data plane.
 - The simulator deliberately does not implement retransmission, encryption,
   sockets, protocol framing or authority. Those capabilities are not implied by
   a reliable delivery label and remain later milestones.
+
+## ADR-0023: Static direct-IP GameNetworkingSockets backend
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+GameNetworkingSockets needs generated Protobuf messages and cryptographic
+primitives. Mixing an arbitrary host `protoc` with a different runtime risks
+wire/runtime incompatibility, and adding OpenSSL solely for Windows expands the
+redistributable and audit surface. The library also owns process-global state,
+while Easy3D objects may overlap in lifetime.
+
+### Decision
+
+Fetch immutable GameNetworkingSockets 1.6.1 and Protobuf 5.29.3 revisions and
+build their static libraries together as C++17. Generate messages with the
+matching source-built `protoc`. Use the supported Windows BCrypt provider for
+AES/SHA and upstream Donna code for Curve25519/Ed25519; disable ICE/WebRTC,
+tools, examples and upstream tests. Keep all backend types private and own
+initialization through a mutex-protected process reference count. Validate the
+backend with exact-byte reliable socket-pair round trips in native and Python
+tests. MSVC is the supported Windows toolchain; a MinGW build remains a
+diagnostic path after encountering an upstream GCC 15 Protobuf `musttail`
+failure.
+
+### Consequences
+
+- The dependency graph, generated-code/runtime pairing and license inventory
+  are reproducible from a clean checkout.
+- Easy3D does not redistribute OpenSSL or expose third-party socket handles.
+- Multiple runtime owners shut down safely only after the last owner leaves.
+- This milestone proves backend operation, not a public listener/client API,
+  wire handshake, identity, authentication or replication.

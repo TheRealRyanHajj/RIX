@@ -12,6 +12,16 @@ def _connected(link: network.SimulatedLink) -> None:
     assert tuple(event.type for event in second) == (network.EventType.CONNECTED,)
 
 
+def test_native_backend_metadata_and_loopback_smoke() -> None:
+    assert network.backend_info() == network.NetworkBackendInfo(
+        True,
+        "GameNetworkingSockets",
+        "1.6.1",
+        "Windows BCrypt",
+    )
+    assert network.backend_smoke_test()
+
+
 def test_simulated_link_preserves_latency_order_and_metadata() -> None:
     link = network.SimulatedLink(
         latency=0.05,

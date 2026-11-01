@@ -7,7 +7,12 @@ from enum import Enum
 import math
 from typing import Protocol, runtime_checkable
 
-from ._easy3d import NetworkError, _NetworkSimulator
+from ._easy3d import (
+    NetworkError,
+    _network_backend_info,
+    _network_backend_smoke_test,
+    _NetworkSimulator,
+)
 
 
 class Delivery(str, Enum):
@@ -63,6 +68,26 @@ class NetworkStats:
     bytes_received: int
     queue_rejections: int
     event_overflows: int
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkBackendInfo:
+    available: bool
+    name: str
+    version: str
+    crypto_provider: str
+
+
+def backend_info() -> NetworkBackendInfo:
+    """Return build-time native backend metadata without starting it."""
+
+    return NetworkBackendInfo(*_network_backend_info())
+
+
+def backend_smoke_test() -> bool:
+    """Initialize the native backend and reliably round-trip a loopback message."""
+
+    return _network_backend_smoke_test()
 
 
 @runtime_checkable
@@ -224,9 +249,12 @@ __all__ = [
     "EventType",
     "NetworkEvent",
     "NetworkError",
+    "NetworkBackendInfo",
     "NetworkStats",
     "NetworkTransport",
     "SendStatus",
     "SimulatedEndpoint",
     "SimulatedLink",
+    "backend_info",
+    "backend_smoke_test",
 ]

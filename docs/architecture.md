@@ -316,5 +316,12 @@ seeded clock schedules bounded messages with one-way latency, jitter and loss,
 preserves a monotonic sequence for equal-time ordering, and records sent,
 received, lost, byte, rejection and overflow counters. It is a deterministic
 datagram impairment tool: reliable intent is metadata and is not retransmitted
-by the simulator. GameNetworkingSockets will supply actual reliable/unreliable
-semantics in Phase 3.2 without changing this public queue boundary.
+by the simulator.
+
+Phase 3.2 links GameNetworkingSockets 1.6.1 and a source-matched Protobuf 5.29.3
+runtime statically. Windows BCrypt supplies platform crypto, ICE/WebRTC remains
+off, and a reference-counted process owner serializes native initialization and
+shutdown. A real reliable socket-pair smoke test validates that private backend.
+The Phase 3.3 handshake and Phase 3.4 live connection adapter will place its
+callbacks behind the existing bounded queue; they will not call Python or
+mutate scenes from the native callback path.

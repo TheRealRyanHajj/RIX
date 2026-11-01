@@ -532,3 +532,10 @@ models datagram impairment and does not retransmit. Event queue exhaustion raise
 `NetworkError` once and leaves already-queued events available to a subsequent
 poll. No socket, server, client, handshake, or replication API is claimed by
 this foundation.
+
+`backend_info()` returns a frozen `NetworkBackendInfo` containing availability,
+backend name/version and configured crypto provider. On the supported Windows
+build it reports GameNetworkingSockets 1.6.1 with Windows BCrypt.
+`backend_smoke_test()` temporarily owns the process-global native runtime and
+performs a bounded reliable loopback round trip. It is a build/runtime
+diagnostic, not a public client connection or network security test.

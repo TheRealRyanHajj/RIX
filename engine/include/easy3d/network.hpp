@@ -65,6 +65,32 @@ struct TransportStats final {
     friend bool operator==(const TransportStats&, const TransportStats&) = default;
 };
 
+struct NetworkBackendInfo final {
+    bool available{false};
+    std::string name;
+    std::string version;
+    std::string crypto_provider;
+};
+
+[[nodiscard]] NetworkBackendInfo network_backend_info();
+
+class NetworkBackendRuntime final {
+public:
+    NetworkBackendRuntime();
+    ~NetworkBackendRuntime();
+
+    NetworkBackendRuntime(const NetworkBackendRuntime&) = delete;
+    NetworkBackendRuntime& operator=(const NetworkBackendRuntime&) = delete;
+    NetworkBackendRuntime(NetworkBackendRuntime&&) = delete;
+    NetworkBackendRuntime& operator=(NetworkBackendRuntime&&) = delete;
+
+    [[nodiscard]] bool ready() const noexcept;
+    [[nodiscard]] bool loopback_smoke_test() const;
+
+private:
+    bool acquired_{false};
+};
+
 class TransportEventQueue final {
 public:
     explicit TransportEventQueue(std::size_t capacity);

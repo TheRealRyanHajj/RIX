@@ -60,12 +60,16 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
-Phase 3.1 provides only the native transport contract and deterministic
-in-memory impairment simulator. It does not open sockets, retransmit reliable
-messages, encrypt traffic, define a wire handshake, or provide a usable
-client/server API. Those are Phase 3.2–3.5 requirements. Simulated loss applies
-to both delivery labels because the simulator models the datagram link beneath
-reliability; GameNetworkingSockets will own actual reliable delivery.
+Phase 3.2 adds the real GameNetworkingSockets runtime and a reliable native
+socket-pair smoke test, but it does not yet expose a listener, address, client,
+server, timeout policy, or Easy3D wire handshake. Those are Phase 3.3–3.5
+requirements. Simulated loss still applies to both delivery labels because the
+deterministic simulator models the datagram link beneath reliability.
+
+The supported Windows build uses MSVC. A diagnostic attempt with MinGW GCC
+15.1 reaches an upstream Protobuf `musttail` compile failure in
+`generated_message_tctable_lite.cc`; it is not an Easy3D source failure and is
+not bypassed. Use the documented x64 Visual Studio developer environment.
 
 ## Input hardware validation
 

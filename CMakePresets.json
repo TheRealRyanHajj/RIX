@@ -16,6 +16,7 @@
         "CMAKE_CXX_COMPILER": "cl",
         "CMAKE_CONFIGURATION_TYPES": "Debug;Release",
         "EASY3D_ENABLE_GRAPHICS": "ON",
+        "EASY3D_ENABLE_NETWORKING": "ON",
         "EASY3D_BUILD_PYTHON": "OFF",
         "EASY3D_BUILD_BENCHMARKS": "ON",
         "BUILD_TESTING": "ON"

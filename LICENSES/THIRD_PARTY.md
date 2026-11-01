@@ -17,6 +17,11 @@ applicable notices.
 | GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Private native math implementation |
 | tinyobjloader | `2945a967c5303b2c8c14174117c45f3302591150` (`v2.0.0rc13`) | MIT | OBJ/MTL parsing |
 | Jolt Physics | `e77f175595e64cb44218cc9d9d56fc365ad0e36a` (`v5.6.0`) | MIT ([text](JoltPhysics.txt)) | Native rigid-body simulation |
+| GameNetworkingSockets | `d534c19aa760df3fb75fd20db13ba1932b8a5463` (`v1.6.1`) | BSD-3-Clause | Private reliable/unreliable transport backend |
+| Protocol Buffers | `b407e8416e3893036aee5af9a12bd9b6a0e2b2e6` (`v29.3`, C++ `5.29.3`) | BSD-3-Clause | GNS message generation/runtime |
+| Abseil | `4a2c63365eff8823a5221db86ef490e828306f9d` | Apache-2.0 | Protobuf support library |
+| utf8_range (bundled by Protobuf) | Protobuf pin above | MIT | Protobuf UTF-8 validation |
+| Windows BCrypt | Windows operating-system component | Microsoft Windows | GNS AES/SHA provider; not redistributed |
 | pybind11 | `3.1.0` | BSD-3-Clause | Python native binding |
 | scikit-build-core | `1.1.1` | Apache-2.0 | Python build backend |
 | pytest | `9.2.0` (development extra only) | MIT | Python tests |

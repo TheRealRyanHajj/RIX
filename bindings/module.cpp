@@ -68,6 +68,15 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "message";
     };
+    module.def("_network_backend_info", []() {
+        const easy3d::NetworkBackendInfo info = easy3d::network_backend_info();
+        return py::make_tuple(
+            info.available, info.name, info.version, info.crypto_provider);
+    });
+    module.def("_network_backend_smoke_test", []() {
+        easy3d::NetworkBackendRuntime runtime;
+        return runtime.ready() && runtime.loopback_smoke_test();
+    });
     py::class_<easy3d::SimulatedNetwork>(module, "_NetworkSimulator")
         .def(py::init([](const double latency_seconds,
                          const double jitter_seconds,

@@ -2280,3 +2280,145 @@ connected queued 1
 Phase 3.1: **DONE**. Immediate next task: Phase 3.2 — integrate a pinned
 GameNetworkingSockets Windows backend and audit its transitive build/license
 dependencies. No real socket transport is claimed by this checkpoint.
+
+## 2026-11-01 — Phase 3.2 GameNetworkingSockets backend (complete)
+
+### Bounded approach
+
+Pin GameNetworkingSockets v1.6.1 and Protobuf 5.29.3 by immutable commit,
+compile both statically through the existing CMake/FetchContent path, and use
+the supported Windows BCrypt provider so Easy3D does not ship or manage an
+OpenSSL binary. Disable ICE/WebRTC, tools, examples and upstream tests because
+this phase targets explicit direct-IP transport and keeps its dependency graph
+bounded. Add a reference-counted native runtime owner that proves initialization,
+interface availability, nested ownership and clean shutdown without exposing
+third-party types. Exercise it in headless, Debug and Release CTest, and expose
+read-only backend metadata to Python for installation diagnostics.
+
+Expected changes: dependency options/pins and link wiring in CMake, a private
+GameNetworkingSockets backend source plus graphics/network-disabled fallback,
+native/binding tests, typed diagnostics, third-party notices and networking
+architecture/progress docs. Connection/listener APIs, wire handshake and
+protocol messages remain Phase 3.3–3.4. Primary risks are matching `protoc` to
+the static runtime, avoiding unwanted install artifacts, preserving `/MD`, and
+ensuring the process-global backend is killed only after its last owner.
+
+### Implemented
+
+- Pinned GameNetworkingSockets 1.6.1 at
+  `d534c19aa760df3fb75fd20db13ba1932b8a5463` and Protobuf 5.29.3 at
+  `b407e8416e3893036aee5af9a12bd9b6a0e2b2e6`. CMake builds a matching
+  `protoc`/runtime pair and compiles both dependency families as C++17 to keep
+  their `string_view` ABI identical.
+- Built GNS statically with Windows BCrypt for AES/SHA, its bundled Donna code
+  for Curve25519/Ed25519, and ICE/WebRTC, tools, examples and upstream tests
+  disabled. Protobuf's optional Zlib integration is absent and unused.
+- Added a mutex-protected, process-reference-counted backend owner. Its native
+  smoke test creates a real GNS socket pair, sends a reliable bounded payload,
+  polls callbacks, compares exact bytes, releases the message and closes both
+  connections. Nested owners and repeated initialization/shutdown are covered.
+- Added immutable Python backend diagnostics and an on-demand loopback smoke
+  function, native/Python regressions, a networking-disabled fallback source,
+  explicit preset wiring, ADR-0023, API/protocol/architecture documentation and
+  complete immutable transitive license pins.
+- Prevented GNS/Protobuf and pre-existing private tinyobjloader libraries,
+  headers and CMake packages from leaking into the editable wheel. The audited
+  installed payload contains only editable-loader metadata, Easy3D metadata,
+  the project license and `easy3d/_easy3d.cp311-win_amd64.pyd`.
+
+### Failures found and corrected
+
+- The first configure failed with `No known features for C compiler "" version
+  .` because the project enabled only CXX while Protobuf builds C sources.
+  Enabling C and CXX fixed discovery under MSVC.
+- The initial static GNS configure rejected its install export because the
+  in-tree `libprotobuf` target was not in the export set. Private dependency
+  install rules are now suppressed, with a generated no-op child install
+  script for CMake's parent include.
+- Initial message generation could not import
+  `steamnetworkingsockets_messages_certs.proto`; the compatibility wrapper now
+  uses Protobuf's `APPEND_PATH` behavior.
+- The first Debug link reported unresolved Protobuf/Abseil `string_view` and
+  logging symbols because Protobuf had selected its C++14 fallback ABI while
+  GNS used C++17. Building both as C++17 fixed the ABI mismatch.
+- Running the editable install from ordinary PowerShell selected MinGW GCC
+  15.1 and failed in upstream Protobuf `generated_message_tctable_lite.cc` with
+  `cannot tail-call: callee required more stack slots`. The failed cache was
+  retained as `build/scikit-build/cp311-cp311-win_amd64-mingw-failed-20261101165511`.
+  The documented and supported x64 MSVC developer environment builds cleanly;
+  the MinGW failure is not bypassed or claimed supported.
+- The first successful MSVC compile reached all 1112 targets but wheel install
+  expected a suppressed GNS `cmake_install.cmake`. The explicit private no-op
+  script fixed packaging. A subsequent wheel audit found pre-existing
+  tinyobjloader install artifacts; applying the same private-install policy
+  reduced the wheel from 4,177,905 to 3,891,419 bytes.
+- One parallel verification launcher over-escaped the quoted developer prompt
+  path and three commands immediately returned `is not recognized as an
+  internal or external command`. The corrected PowerShell-composed `cmd /c`
+  invocations below all passed; this was a command quoting error, not a product
+  failure.
+- MSVC emits upstream Protobuf `C4141` duplicate-`inline` warnings. CMake also
+  reports optional Zlib, PkgConfig and LibUSB absence. None is used by this
+  static direct-IP Windows configuration, and no warning is hidden.
+
+### Exact final verification evidence
+
+All CMake commands below were run after entering the x64 Visual Studio Build
+Tools developer environment with `VsDevCmd.bat -arch=amd64 -host_arch=amd64`.
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3891419
+sha256=e9f2ed368a29d44a439fb98525739910ac8bbb25feb48944a029d368db23d3ab
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pip show -f easy3d
+Files:
+  __pycache__\_editable_skbc_easy3d.cpython-311.pyc
+  _editable_skbc_easy3d.pth
+  _editable_skbc_easy3d.py
+  easy3d-0.1.0.dist-info\...
+  easy3d\_easy3d.cp311-win_amd64.pyd
+
+build\venv311\Scripts\python.exe -c "import easy3d; from easy3d import network; print(easy3d.engine_version()); print(network.backend_info()); print('smoke=', network.backend_smoke_test())"
+0.1.0
+NetworkBackendInfo(available=True, name='GameNetworkingSockets', version='1.6.1', crypto_provider='Windows BCrypt')
+smoke= True
+
+cmake --build build\windows-headless --config Debug --parallel 4
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 13
+Total Test time (real) = 0.80 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 14
+Total Test time (real) = 0.71 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 14
+Total Test time (real) = 0.53 sec
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py -q
+...........                                                              [100%]
+11 passed in 0.11s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 66%]
+.....................................                                    [100%]
+109 passed in 0.35s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+cl /nologo /std:c++20 /EHsc /Iengine\include /c engine\src\network\backend_stub.cpp /Fobuild\network_backend_stub.obj
+backend_stub.cpp
+# exit code 0
+```
+
+Phase 3.2: **DONE**. Immediate next task: Phase 3.3 — define the bounded
+binary wire envelope and versioned connection handshake, including malformed,
+oversize and incompatible-peer tests. No public client/server or replication
+API is claimed by this checkpoint.
