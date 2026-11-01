@@ -85,6 +85,22 @@ native view/projection/look-at math. It exposes mutable `Vec3` position/Euler
 rotation and matrix tuples. It is not yet a scene `Entity` or render component;
 that ownership connection remains Phase 1.7 work.
 
+## Asset and model ownership
+
+`TextureCache` and `ModelCache` use canonical absolute paths (case-folded on
+Windows) as deterministic keys. Texture keys additionally contain linear/sRGB
+intent. Cache entries are immutable shared native allocations; clearing a cache
+releases only its references. Mutex-protected lookup/load prevents duplicate
+resources under concurrent requests. GPU texture and mesh handles remain
+private renderer resources released before bgfx shutdown.
+
+The pinned tinyobjloader dependency is private. Easy3D converts parsed OBJ/MTL
+data into its own `ModelData`, material, part, and `MeshData` values. Parts are
+triangulated and grouped by shape/material. Supplied normals are normalized;
+missing normals become per-triangle flat normals. OBJ V is converted to the
+engine's top-left UV convention. This model cache is graphics-independent so a
+headless process can validate geometry without linking image decoders or bgfx.
+
 ## Scene activation and construction contexts
 
 There is no implicit process-global scene. `Entity(scene=scene)` is explicit,

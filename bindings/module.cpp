@@ -57,6 +57,47 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("color_space"))
         .def("clear", &easy3d::TextureCache::clear)
         .def_property_readonly("size", &easy3d::TextureCache::size);
+    const auto model_info = [](const std::shared_ptr<const easy3d::ModelData>& model) {
+        py::list parts;
+        for (const easy3d::ModelPart& part : model->parts) {
+            parts.append(py::make_tuple(part.name,
+                                        part.mesh.vertices.size(),
+                                        part.mesh.indices.size(),
+                                        part.mesh.triangle_count(),
+                                        part.material_index));
+        }
+        py::list materials;
+        for (const easy3d::ModelMaterial& material : model->materials) {
+            py::object texture = material.diffuse_texture.has_value()
+                                     ? py::cast(material.diffuse_texture->string())
+                                     : py::none();
+            materials.append(py::make_tuple(material.name,
+                                            py::make_tuple(material.diffuse_color.r,
+                                                           material.diffuse_color.g,
+                                                           material.diffuse_color.b,
+                                                           material.diffuse_color.a),
+                                            texture));
+        }
+        return py::make_tuple(model->source_path.string(),
+                              model->triangle_count(),
+                              parts,
+                              materials,
+                              model->warnings);
+    };
+    module.def("_load_obj_info",
+               [model_info](const std::string& path) {
+                   return model_info(easy3d::load_obj(path));
+               },
+               py::arg("path"));
+    py::class_<easy3d::ModelCache>(module, "_ModelCache")
+        .def(py::init<>())
+        .def("load",
+             [model_info](easy3d::ModelCache& cache, const std::string& path) {
+                 return model_info(cache.load(path));
+             },
+             py::arg("path"))
+        .def("clear", &easy3d::ModelCache::clear)
+        .def_property_readonly("size", &easy3d::ModelCache::size);
     module.def("_quat_from_euler", [](const double x, const double y, const double z) {
         const easy3d::Quat value = easy3d::Quat::from_euler_degrees(
             {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});

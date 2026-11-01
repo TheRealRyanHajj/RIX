@@ -8,7 +8,16 @@ from ._easy3d import (
     engine_version,
     native_add,
 )
-from .assets import ImageInfo, TextureCache, load_image
+from .assets import (
+    ImageInfo,
+    ModelCache,
+    ModelInfo,
+    ModelMaterialInfo,
+    ModelPartInfo,
+    TextureCache,
+    load_image,
+    load_obj,
+)
 from .camera import Camera
 from .entity import Entity
 from ._version import __version__
@@ -25,6 +34,10 @@ __all__ = [
     "InvalidEntityError",
     "ImageInfo",
     "MissingAssetError",
+    "ModelCache",
+    "ModelInfo",
+    "ModelMaterialInfo",
+    "ModelPartInfo",
     "Quat",
     "Scene",
     "Vec2",
@@ -33,6 +46,7 @@ __all__ = [
     "__version__",
     "engine_version",
     "load_image",
+    "load_obj",
     "native_add",
 ]
 

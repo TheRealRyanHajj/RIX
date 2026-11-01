@@ -264,3 +264,38 @@ contract.
   policy remain later asset-system work.
 - Other renderer backends must explicitly adapt or transform the documented UV
   convention and receive independent shader/runtime validation.
+
+## ADR-0010: Convert tinyobjloader output into immutable Easy3D model assets
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+OBJ support must preserve the engine's public type boundary, share parsed mesh
+resources, work in a future headless server/tool process, and provide predictable
+behavior for incomplete normals and broad MTL syntax.
+
+### Decision
+
+Pin tinyobjloader `v2.0.0rc13` by immutable commit and link it privately. Convert
+every successful parse into Easy3D-owned immutable `ModelData`, `ModelPart`,
+`ModelMaterial`, and `MeshData`. Triangulate faces and group parts by both OBJ
+shape and material. Normalize supplied normals; when a triangle has incomplete
+normals, generate one flat geometric normal and unique vertices. Flip OBJ V into
+the existing top-left texture convention.
+
+Cache models strongly by canonical absolute OBJ path, with Windows case folding.
+The implemented MTL surface is deliberately narrow: diffuse color/alpha and one
+diffuse texture. Resolve texture paths against the OBJ directory and fail on
+missing MTL/texture/material references instead of silently substituting a
+default. Retain non-fatal parser warnings on `ModelData`.
+
+### Consequences
+
+- Repeated model instances can share one parsed model and its mesh arrays; GPU
+  handle sharing attaches to these resources with Phase 1.7 components.
+- OBJ parsing remains usable in graphics-disabled/headless builds.
+- Smooth shading requires source normals; absent normals are visibly flat.
+- Advanced MTL fields, relative-to-nested-MTL texture roots, glTF, animation,
+  and PBR are explicitly outside this milestone.

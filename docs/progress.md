@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.5 PASSED; Phase 1.6 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.6 PASSED; Phase 1.7 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -932,3 +932,70 @@ Total Test time (real) =   0.38 sec
 The headless build keeps asset types but intentionally excludes image decoding;
 client texture support is unaffected. This is recorded in known issues rather
 than being hidden as an unsupported-server dependency.
+
+## 2026-11-01 — Phase 1.6 OBJ/MTL model assets
+
+### Implemented
+
+- Immutable-pinned tinyobjloader `v2.0.0rc13`, linked privately and converted
+  completely into Easy3D-owned model/material/mesh values.
+- Canonical, case-folded-on-Windows, mutex-protected `ModelCache` sharing parsed
+  model and mesh arrays across references and future instances.
+- Polygon triangulation, shape/material part splitting, 32-bit indices,
+  positions, normalized source normals, optional vertex RGB and UVs.
+- Flat per-triangle normals for incomplete source normals, degenerate rejection,
+  and OBJ-to-Easy3D V-coordinate conversion.
+- MTL diffuse color/alpha and `map_Kd` path assignment, with explicit failures
+  for missing MTLs, unknown materials and missing textures.
+- Typed `ModelInfo`, `ModelPartInfo`, `ModelMaterialInfo`, `load_obj`, and
+  `ModelCache` Python APIs plus explicit advanced-MTL/smoothing limitations.
+
+### Exact verification evidence
+
+```text
+ctest --preset windows-debug --output-on-failure
+1/7 Test #1: easy3d.core ......................   Passed    0.04 sec
+2/7 Test #2: easy3d.scene .....................   Passed    0.03 sec
+3/7 Test #3: easy3d.math_transform ............   Passed    0.03 sec
+4/7 Test #4: easy3d.mesh ......................   Passed    0.03 sec
+5/7 Test #5: easy3d.camera ....................   Passed    0.03 sec
+6/7 Test #6: easy3d.model .....................   Passed    0.05 sec
+7/7 Test #7: easy3d.texture ...................   Passed    0.04 sec
+100% tests passed, 0 tests failed out of 7
+Total Test time (real) =   0.46 sec
+
+ctest --preset windows-release --output-on-failure
+1/7 Test #1: easy3d.core ......................   Passed    0.04 sec
+2/7 Test #2: easy3d.scene .....................   Passed    0.05 sec
+3/7 Test #3: easy3d.math_transform ............   Passed    0.03 sec
+4/7 Test #4: easy3d.mesh ......................   Passed    0.03 sec
+5/7 Test #5: easy3d.camera ....................   Passed    0.03 sec
+6/7 Test #6: easy3d.model .....................   Passed    0.06 sec
+7/7 Test #7: easy3d.texture ...................   Passed    0.04 sec
+100% tests passed, 0 tests failed out of 7
+Total Test time (real) =   0.50 sec
+
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4421319
+sha256=6e4959331fdaa79220cccc9eace60d13f0470edbd31d9e28a918fc9aa2ea7f13
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................                                 [100%]
+40 passed in 0.44s
+
+ctest --test-dir build/windows-headless --output-on-failure
+1/6 Test #1: easy3d.core ......................   Passed    0.03 sec
+2/6 Test #2: easy3d.scene .....................   Passed    0.04 sec
+3/6 Test #3: easy3d.math_transform ............   Passed    0.04 sec
+4/6 Test #4: easy3d.mesh ......................   Passed    0.03 sec
+5/6 Test #5: easy3d.camera ....................   Passed    0.03 sec
+6/6 Test #6: easy3d.model .....................   Passed    0.05 sec
+100% tests passed, 0 tests failed out of 6
+Total Test time (real) =   0.41 sec
+```
+
+Phase 1.6: **DONE**. Immediate next task: Phase 1.7 — render components and
+beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities that reference
+the shared mesh/model/texture assets without per-frame Python submission.

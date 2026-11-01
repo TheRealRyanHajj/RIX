@@ -7,10 +7,10 @@ machine.
 
 Phase 1.1 scene/entity lifetime semantics, Phase 1.2 math/transform hierarchy,
 Phase 1.3 native mesh/material/indexed rendering, Phase 1.4 standalone
-camera/projection, and Phase 1.5 cached PNG/JPEG textures are implemented.
-Component attachment, camera-to-scene ownership, model loading, lighting,
-culling, and instancing remain
-unimplemented checklist work. The loaded Python scene
+camera/projection, Phase 1.5 cached PNG/JPEG textures, and Phase 1.6 cached
+OBJ/MTL model loading are implemented. Component attachment, camera-to-scene
+ownership, lighting, culling, and instancing remain unimplemented checklist
+work. The loaded Python scene
 therefore owns entity and transform state but is not yet submitted to the
 renderer; Phase 1.3 rendering is exercised by a native diagnostic scene only.
 

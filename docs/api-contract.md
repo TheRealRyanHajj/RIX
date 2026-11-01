@@ -131,3 +131,37 @@ surface but deliberately do not link image decoders; attempting image decode in
 that configuration raises `AssetError`. Dedicated servers do not need texture
 pixels. A future headless content-validation tool may split decoding into a
 separate optional build feature if that becomes a concrete requirement.
+
+## OBJ model assets
+
+```python
+from easy3d.assets import ModelCache, load_obj
+
+model = load_obj("assets/house.obj")
+cache = ModelCache()
+shared = cache.load("assets/house.obj")
+```
+
+The OBJ importer preserves positions, normalized supplied normals, texture
+coordinates, and optional per-vertex RGB. Faces are triangulated. If any corner
+of a triangle lacks a normal, Easy3D creates a flat geometric normal and unique
+vertices for that triangle. Degenerate triangles are rejected. OBJ V is flipped
+(`v_engine = 1 - v_obj`) into Easy3D's top-left texture convention; U is
+unchanged. Shapes are split again by material so every `ModelPartInfo` has one
+material index.
+
+`ModelCache` is thread-safe, holds immutable native model/mesh data, and uses a
+canonical path key. Instances created in the next render-component milestone
+will reference that shared data rather than parse or copy the model again.
+Clearing the cache does not invalidate outstanding native shared references.
+OBJ loading and caching work in graphics-disabled/headless builds.
+
+Supported MTL fields are material name, diffuse `Kd`, dissolve `d`/`Tr`, and
+diffuse texture `map_Kd`. Diffuse texture paths are currently resolved relative
+to the OBJ directory; keep MTL files and their referenced textures under that
+root. Missing MTL files, unknown material names, missing diffuse textures,
+invalid indices, empty geometry, and malformed files are errors. Other MTL
+channels/options (specular/normal maps, illumination models, PBR extensions,
+multiple texture layers) are parsed by the dependency where possible but not
+represented or claimed by Easy3D. Smoothing-group normal generation is not yet
+implemented: provide normals for smooth shading, otherwise output is flat.

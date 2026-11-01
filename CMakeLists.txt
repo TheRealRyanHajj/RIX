@@ -32,8 +32,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
+# tinyobjloader v2.0.0rc13. OBJ parsing stays private behind Easy3D assets.
+set(TINYOBJLOADER_BUILD_TEST_LOADER OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG 2945a967c5303b2c8c14174117c45f3302591150
+    GIT_SHALLOW FALSE
+)
+FetchContent_MakeAvailable(tinyobjloader)
+
 set(easy3d_core_sources
     engine/src/assets/image.cpp
+    engine/src/assets/model.cpp
     engine/src/core/engine.cpp
     engine/src/math/math.cpp
     engine/src/renderer/camera.cpp
@@ -141,7 +152,7 @@ target_include_directories(easy3d_core
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine/src"
 )
-target_link_libraries(easy3d_core PRIVATE glm::glm)
+target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader)
 
 if(MSVC)
     target_compile_options(easy3d_core PRIVATE /W4 /permissive- /EHsc /Zc:__cplusplus)
@@ -210,6 +221,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_camera_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_camera_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.camera COMMAND easy3d_camera_tests)
+
+    add_executable(easy3d_model_tests tests/cpp/test_model.cpp)
+    target_compile_features(easy3d_model_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_model_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.model COMMAND easy3d_model_tests)
 
     if(EASY3D_ENABLE_GRAPHICS)
         add_executable(easy3d_texture_tests tests/cpp/test_texture.cpp)

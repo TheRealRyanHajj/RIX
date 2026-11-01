@@ -126,6 +126,21 @@ print(grass.width, grass.height, grass.byte_size)
 Cache keys use the canonical path and color space. Missing files raise
 `MissingAssetError`; unsupported or malformed files raise `AssetError`.
 
+OBJ/MTL metadata and immutable shared meshes use the same asset layer:
+
+```python
+from easy3d.assets import ModelCache
+
+models = ModelCache()
+tree = models.load("assets/tree.obj")
+print(tree.triangle_count, len(tree.parts), len(tree.materials))
+```
+
+The initial importer triangulates faces, accepts positions/normals/UVs and
+vertex colors, generates flat normals when absent, splits parts by
+shape/material, and supports MTL diffuse color, dissolve, and `map_Kd`. See the
+API contract for explicit MTL/path limitations.
+
 ## Benchmarks
 
 After installation, run the small native-call harness with:
