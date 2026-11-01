@@ -455,3 +455,40 @@ SDL event pointer.
 - One primary gamepad is sufficient for the initial gameplay milestone.
   Multi-gamepad assignment, rumble, sensors, and controller UI labels remain
   later extensions.
+
+## ADR-0015: Python lifecycle callbacks execute inside the native frame boundary
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Python gameplay must mutate the native scene without racing renderer traversal.
+Moving SDL to a background thread would weaken platform ownership and introduce
+cross-thread scene access. Holding the GIL for the whole native window loop
+would block monitoring and stop requests.
+
+### Decision
+
+Keep SDL event polling, gameplay scheduling, and rendering serial on the thread
+that calls `Game.run()`. Pybind releases the GIL while the native loop works and
+reacquires it only for a frame callback placed after input polling and before
+renderer submission. `Game` records the callback thread/scope, and scene
+mutation permits that exact boundary while rejecting other running-game access.
+
+The Python scheduler owns `awake`/`start` state, a clamped fixed-step
+accumulator, catch-up limits, render hooks, exception policy, and per-hook
+profiles. Destroy and clear operations queue to phase boundaries; normal
+property/component/camera writes apply immediately because native traversal is
+not concurrent.
+
+### Consequences
+
+- SDL remains on its owning thread, Python scripts have the GIL, and renderer
+  traversal cannot overlap script mutation.
+- Python callback cost directly affects frame time and is therefore measured.
+- Fail-fast errors unwind C++ RAII normally; tolerant mode quarantines a broken
+  script after logging its traceback.
+- The scheduler defines ordering, not deterministic arbitrary Python behavior.
+- Physics and networking must insert their owned stages into this boundary or
+  communicate through queues; they must not invoke Python from worker threads.

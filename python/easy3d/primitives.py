@@ -71,7 +71,7 @@ class Cube(Entity):
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, scale)
         except Exception:
-            self.destroy()
+            self.scene._rollback_entity_construction(self)
             raise
 
 
@@ -108,7 +108,7 @@ class Plane(Entity):
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, (width, 1.0, depth))
         except Exception:
-            self.destroy()
+            self.scene._rollback_entity_construction(self)
             raise
 
 
@@ -139,7 +139,7 @@ class Sphere(Entity):
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, (diameter, diameter, diameter))
         except Exception:
-            self.destroy()
+            self.scene._rollback_entity_construction(self)
             raise
 
 
@@ -166,5 +166,5 @@ class Model(Entity):
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, scale)
         except Exception:
-            self.destroy()
+            self.scene._rollback_entity_construction(self)
             raise

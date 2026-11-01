@@ -13,7 +13,8 @@ void run_window_loop(const EngineConfig& config,
                      std::atomic_uint64_t& frame_count,
                      std::atomic<double>& last_frame_seconds,
                      RendererStatsAtomic& renderer_stats,
-                     InputSystem& input);
+                     InputSystem& input,
+                     Engine::FrameCallback frame_callback);
 
 } // namespace easy3d::platform
 

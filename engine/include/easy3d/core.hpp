@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <string>
 
@@ -54,6 +55,7 @@ private:
 
 class Engine final {
 public:
+    using FrameCallback = std::function<void(double)>;
     explicit Engine(EngineConfig config = {});
 
     Engine(const Engine&) = delete;
@@ -62,7 +64,7 @@ public:
     Engine& operator=(Engine&&) = delete;
     ~Engine() = default;
 
-    void run();
+    void run(FrameCallback frame_callback = {});
     void stop() noexcept;
     void set_scene(Scene* scene);
 

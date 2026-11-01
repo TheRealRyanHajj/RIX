@@ -293,7 +293,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 ### PHASE 2 — Python gameplay, utilities, complete physics foundation
 
 - [x] **2.1** Implement input mapping (keyboard/mouse/gamepad), pointer lock, focus behavior, remappable actions.
-- [ ] **2.2** Implement script lifecycle and simulation scheduler, error propagation, deferred mutation and profile callback times.
+- [x] **2.2** Implement script lifecycle and simulation scheduler, error propagation, deferred mutation and profile callback times.
 - [ ] **2.3** Build standalone `StateMachine`, `Timer`, `Cooldown`, `EventBus`, `Tween` with tests independent of graphics.
 - [ ] **2.4** Integrate Jolt world, collision layers, gravity, body lifetime and fixed stepping; test headless without renderer.
 - [ ] **2.5** Expose basic colliders and rigid bodies, impulses/forces, physical materials, triggers; validate conversions and safety.

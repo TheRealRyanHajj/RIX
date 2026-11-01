@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import base64
+import math
 import tempfile
 import threading
 import time
 from pathlib import Path
 
-from easy3d import Camera, Cube, Game, Light, Model, Plane, Scene, Sphere, debug
+from easy3d import Camera, Cube, Entity, Game, Light, Model, Plane, Scene, Sphere, debug
 
 
 _CHECKER_PNG = (
@@ -17,6 +18,27 @@ _CHECKER_PNG = (
     "QU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAXSURBVBhXY/jPwPCfoYHh"
     "PwMDw38wAABD1Al4TlSdlQAAAABJRU5ErkJggg=="
 )
+
+
+class OrbitCamera(Entity):
+    """Small Phase 2 script proving safe per-frame scene-camera mutation."""
+
+    def __init__(self, *, scene: Scene) -> None:
+        super().__init__("Orbit camera", scene=scene)
+        self._angle = math.atan2(11.0, 8.5)
+
+    def update(self, dt: float) -> None:
+        self._angle += dt * 0.22
+        camera = Camera(
+            position=(
+                math.cos(self._angle) * 13.9,
+                6.0,
+                math.sin(self._angle) * 13.9,
+            ),
+            vertical_fov_degrees=52.0,
+        )
+        camera.look_at((0.0, 0.5, 0.0))
+        self.scene.camera = camera
 
 
 def _write_example_assets(directory: Path) -> tuple[Path, Path]:
@@ -56,6 +78,7 @@ def run(*, seconds: float | None = None) -> None:
         scene.camera = camera
 
         with scene:
+            OrbitCamera(scene=scene)
             Light("ambient", color=(0.45, 0.55, 0.8), intensity=0.24)
             Light(
                 "directional",
@@ -98,6 +121,7 @@ def run(*, seconds: float | None = None) -> None:
 
         game.run()
         stats = game.renderer_stats
+        scheduler_stats = game.scheduler_stats
         unloaded = game.unload_scene(clear=True)
         if unloaded is not scene or scene.entity_count != 0:
             raise RuntimeError("first-world scene did not tear down cleanly")
@@ -106,6 +130,8 @@ def run(*, seconds: float | None = None) -> None:
             "first_world: PASS "
             f"frames={game.frame_count} draw_calls={stats.draw_calls} "
             f"visible={stats.visible_instances} culled={stats.culled_instances} "
+            f"fixed_ticks={scheduler_stats.fixed_ticks} "
+            f"update_calls={scheduler_stats.callbacks.get('update').calls} "
             f"scene_closed={scene.closed}"
         )
 

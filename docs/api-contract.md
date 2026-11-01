@@ -82,9 +82,9 @@ color, and `remove()` detaches the component.
 
 The loaded scene is traversed natively for every rendered frame. No per-entity
 Python draw calls occur. The renderer reads the scene-owned camera, native light
-components, and render components during that traversal. Public
-scene/entity/component mutation raises `RuntimeError` while `Game.run()` is
-active because the Phase 2 safe-boundary scheduler is not implemented yet.
+components, and render components during that traversal. Public scene/entity/
+component mutation is allowed during scheduler hooks on the gameplay thread;
+other threads raise `RuntimeError` while `Game.run()` is active.
 
 ## Math and transform conventions
 
@@ -230,6 +230,36 @@ clears all held controls, produces action releases at the next frame boundary,
 and disables the applied lock without discarding the request. Gaining focus
 reapplies it. The input object is mutex-protected for monitoring threads; Phase
 2.2 will make action reads deterministic inside gameplay callbacks.
+
+## Script lifecycle and scheduler
+
+An `Entity` subclass is registered as a script when it defines any of `awake`,
+`start`, `fixed_update`, `update`, `late_update`, or `on_destroy`. `awake` runs
+once when the scheduler first sees the entity. `start` runs once when that
+entity is first enabled; disabling and re-enabling does not repeat it. Disabled
+entities receive no fixed/render updates. `on_destroy` runs once before native
+handle invalidation, including scene clear.
+
+Input events are drained before the native frame callback. The scheduler then
+runs zero or more `fixed_update(fixed_dt)` calls, followed by one `update(dt)`
+phase and one `late_update(dt)` phase before renderer submission. The default
+fixed rate is 60 Hz. Frame delta clamps to 0.25 seconds and catch-up is capped at
+five ticks; excess whole-tick time is dropped and reported rather than causing
+an unbounded spiral. Configure these with `Game(fixed_hz=...,
+max_frame_seconds=..., max_catch_up_steps=...)`.
+
+Entity destruction and `Scene.clear()` requested inside a hook are deferred to
+the end of that callback phase. Other transform/component/camera mutations are
+safe immediately because callbacks execute on the SDL/render-owning thread
+before traversal. Uncontrolled worker-thread mutation remains rejected.
+
+The default `fail_fast=True` wraps callback failures in `ScriptCallbackError`
+with hook, entity type/name, and generation-qualified ID while preserving the
+original exception as its cause. The native loop unwinds and resets running
+state. With `fail_fast=False`, the traceback is printed, the failing entity is
+quarantined from later hooks, and the summary appears in `game.script_errors`.
+`game.scheduler_stats` exposes fixed tick/drop/overrun totals and immutable
+per-hook call/total/maximum/last durations.
 
 ## Texture assets
 

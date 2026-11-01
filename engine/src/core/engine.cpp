@@ -64,7 +64,7 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     }
 }
 
-void Engine::run() {
+void Engine::run(FrameCallback frame_callback) {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) {
         throw EngineError("this Engine is already running");
@@ -80,7 +80,14 @@ void Engine::run() {
     last_frame_seconds_.store(0.0);
     renderer_stats_.reset();
     platform::run_window_loop(
-        config_, scene_, stop_requested_, frame_count_, last_frame_seconds_, renderer_stats_, input_);
+        config_,
+        scene_,
+        stop_requested_,
+        frame_count_,
+        last_frame_seconds_,
+        renderer_stats_,
+        input_,
+        std::move(frame_callback));
 }
 
 void Engine::stop() noexcept {

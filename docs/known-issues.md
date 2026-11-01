@@ -3,15 +3,15 @@
 There are no remaining blockers to the Phase 0 exit gate on the validated
 machine.
 
-## Phase 1 exit gate awaits runtime camera movement
+## Phase 1 exit gate is complete
 
 Phase 1.1–1.10 are implemented, including native scene traversal, public
 primitive/model render entities, scene camera ownership, directional/ambient
 lighting, debug lines, conservative frustum culling, compatible-mesh hardware
 instancing, frame counters, perspective/orthographic projection, the first-world
-example, and the recorded 10,000-cube workload. The Phase 1 exit gate's moving
-camera evidence remains coupled to Phase 2.2's safe simulation scheduler;
-runtime scene mutation is deliberately rejected until that scheduler exists.
+example, and the recorded 10,000-cube workload. Phase 2.2 now drives the
+first-world orbit camera at a safe frame boundary, completing the remaining
+moving-camera exit evidence.
 The baseline lighting intentionally supports ambient accumulation and one
 directional light; shadows, PBR, multiple directional-light blending, and
 transparent sorting remain later work.
@@ -24,10 +24,10 @@ reject visible ones. The instanced D3D11 programs compiled and ran with correct
 frame counters, but their last dedicated computer-use image inspection was
 interrupted, so that specific image is not claimed as visually verified.
 
-Public scene mutation is intentionally rejected while `Game.run()` is active.
-Phase 2 must add a documented scheduler and safe mutation boundaries before
-runtime Python gameplay updates are allowed; bypassing the public API through
-the private extension is outside the supported contract.
+Public scene mutation is permitted only on the gameplay thread while a
+scheduler callback is active. Other threads remain rejected while `Game.run()`
+is traversing the scene; bypassing the public API through the private extension
+is outside the supported contract.
 
 ## Input hardware validation
 

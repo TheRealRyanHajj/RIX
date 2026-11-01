@@ -8,7 +8,8 @@ void run_window_loop(const EngineConfig&,
                      std::atomic_uint64_t&,
                      std::atomic<double>&,
                      RendererStatsAtomic&,
-                     InputSystem&) {
+                     InputSystem&,
+                     Engine::FrameCallback) {
     throw EngineError("Easy3D was built without the Windows graphics backend");
 }
 

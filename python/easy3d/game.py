@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass
 from typing import Final
 
 from ._easy3d import Engine
 from .input import Input
 from .scene import Scene
+from .scheduler import SchedulerStats, SimulationScheduler
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +38,11 @@ class Game:
         resolution: tuple[int, int] = (1280, 720),
         vsync: bool = True,
         fps_limit: float = 0,
+        *,
+        fixed_hz: float = 60.0,
+        max_frame_seconds: float = 0.25,
+        max_catch_up_steps: int = 5,
+        fail_fast: bool = True,
     ) -> None:
         if not isinstance(title, str) or not title:
             raise ValueError("title must be a non-empty string")
@@ -58,7 +65,15 @@ class Game:
 
         self._engine = Engine(title, width, height, bool(vsync), float(fps_limit))
         self._input = Input(self._engine.input)
+        self._scheduler = SimulationScheduler(
+            fixed_hz=fixed_hz,
+            max_frame_seconds=max_frame_seconds,
+            max_catch_up_steps=max_catch_up_steps,
+            fail_fast=fail_fast,
+        )
         self._scene: Scene | None = None
+        self._callback_active = False
+        self._gameplay_thread_id: int | None = None
 
     @property
     def scene(self) -> Scene | None:
@@ -86,10 +101,37 @@ class Game:
 
         return RendererStats(*self._engine.renderer_stats)
 
+    @property
+    def scheduler_stats(self) -> SchedulerStats:
+        return self._scheduler.stats
+
+    @property
+    def script_errors(self) -> tuple[str, ...]:
+        return self._scheduler.errors
+
     def run(self) -> None:
         """Open the native window and run until close or ``stop``."""
 
-        self._engine.run()
+        self._scheduler.begin_run()
+        self._gameplay_thread_id = threading.get_ident()
+
+        def frame_callback(delta_seconds: float) -> None:
+            self._callback_active = True
+            try:
+                self._scheduler.advance(self._scene, delta_seconds)
+            finally:
+                self._callback_active = False
+
+        try:
+            self._engine.run(frame_callback)
+        finally:
+            self._callback_active = True
+            try:
+                if self._scene is not None:
+                    self._scene._commit_deferred(self._scheduler.destroy_callback)
+            finally:
+                self._callback_active = False
+                self._gameplay_thread_id = None
 
     def stop(self) -> None:
         """Request a running game to stop; safe to call from another thread."""
@@ -124,10 +166,20 @@ class Game:
             return None
         if self.is_running:
             raise RuntimeError("cannot unload the active scene while Game is running")
+        if clear:
+            scene.clear()
         scene._detach(self)
         self._engine.set_scene(None)
         self._scene = None
-        if clear:
-            scene.clear()
         return scene
+
+    def _allows_scene_mutation(self, scene: Scene) -> bool:
+        return (
+            scene is self._scene
+            and self._callback_active
+            and self._gameplay_thread_id == threading.get_ident()
+        )
+
+    def _on_entity_destroyed(self, entity: object) -> None:
+        self._scheduler.forget(entity)  # type: ignore[arg-type]
 

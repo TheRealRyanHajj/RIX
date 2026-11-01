@@ -172,9 +172,22 @@ non-owning pointer, and scene replacement is rejected during `run()`.
 
 ## Threading status
 
-Scene mutation is currently single-gameplay-thread state. The registry does not
-claim concurrent mutation safety. The public Python scene/entity/component APIs
-therefore reject mutation while an owning `Game` is running and the renderer is
-traversing the registry. Future gameplay, worker, physics, and networking systems
-must communicate through the Phase 2 safe-boundary scheduler or owned queues
-instead of mutating the world from uncontrolled threads.
+Scene mutation is single-gameplay-thread state. The pybind frame bridge
+releases the GIL while SDL owns the loop, reacquires it for one Python scheduler
+callback after event polling, and returns before native renderer traversal.
+`Game` records that thread and callback scope; scene/entity/component APIs allow
+running-game mutation only inside that exact boundary. Worker, physics, and
+networking systems must use future owned queues instead of mutating the world
+from uncontrolled threads.
+
+`SimulationScheduler` retains per-world/entity lifecycle state across repeated
+runs. It clamps render delta, accumulates a configurable fixed step, caps
+catch-up work, and records dropped time/overruns. Hook iteration uses snapshots;
+destroy and clear requests queue until the phase boundary, where `on_destroy`
+runs before native invalidation. Newly constructed scripts become eligible at
+the next lifecycle preparation boundary.
+
+Callback profiling uses Python's monotonic high-resolution clock and records
+calls, total, maximum, and latest duration per hook. Fail-fast exceptions cross
+the C++ frame bridge and unwind normal renderer/window RAII. Tolerant mode logs
+the traceback once and quarantines that entity for the rest of its lifetime.

@@ -29,6 +29,7 @@ class Entity:
             raise TypeError("scene must be an easy3d.Scene")
         self._scene = owner
         self._handle = owner._create_handle(name)
+        owner._register_script_entity(self)
 
     @classmethod
     def _from_handle(cls, scene: Scene, handle: EntityHandle) -> Entity:
@@ -203,8 +204,7 @@ class Entity:
     def destroy(self) -> None:
         """Destroy this entity and invalidate all wrappers to its handle."""
 
-        self._scene._require_mutable()
-        self._scene._native.destroy_entity(self._handle)
+        self._scene._destroy_entity(self)
 
     def has_component(self, component_type: type[_ComponentT]) -> bool:
         from .components import LightComponent, MeshRenderer

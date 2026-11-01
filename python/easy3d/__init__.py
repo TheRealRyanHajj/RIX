@@ -29,11 +29,13 @@ from .lights import Light
 from .math import Quat, Vec2, Vec3
 from .primitives import Cube, Model, Plane, Sphere
 from .scene import Scene
+from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
 
 __all__ = [
     "EngineError",
     "AssetError",
     "Camera",
+    "CallbackStats",
     "Cube",
     "Entity",
     "Game",
@@ -57,6 +59,8 @@ __all__ = [
     "Binding",
     "Plane",
     "Scene",
+    "SchedulerStats",
+    "ScriptCallbackError",
     "Sphere",
     "Vec2",
     "Vec3",

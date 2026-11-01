@@ -5,6 +5,7 @@ import math
 import pytest
 
 from easy3d import Game, RendererStats
+from easy3d._easy3d import Engine
 
 
 def test_game_construction_does_not_initialize_graphics() -> None:
@@ -14,6 +15,12 @@ def test_game_construction_does_not_initialize_graphics() -> None:
     assert game.last_frame_seconds == 0.0
     assert game.renderer_stats == RendererStats()
     game.stop()
+
+
+def test_native_frame_callback_rejects_non_callable_before_window_init() -> None:
+    engine = Engine()
+    with pytest.raises(TypeError, match="callable or None"):
+        engine.run(42)
 
 
 @pytest.mark.parametrize(

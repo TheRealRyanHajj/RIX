@@ -196,7 +196,8 @@ void run_window_loop(const EngineConfig& config,
                      std::atomic_uint64_t& frame_count,
                      std::atomic<double>& last_frame_seconds,
                      RendererStatsAtomic& renderer_stats,
-                     InputSystem& input) {
+                     InputSystem& input,
+                     Engine::FrameCallback frame_callback) {
     SdlVideo sdl;
 
     const auto flags = static_cast<SDL_WindowFlags>(SDL_WINDOW_RESIZABLE |
@@ -363,6 +364,9 @@ void run_window_loop(const EngineConfig& config,
         }
         input.set_pointer_lock_active(applied_pointer_lock);
         input.end_frame();
+        if (frame_callback) {
+            frame_callback(last_frame_seconds.load());
+        }
 
         renderer.present();
         renderer_stats.store(renderer.stats());

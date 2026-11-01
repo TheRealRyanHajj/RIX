@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextvars import ContextVar, Token
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 import weakref
 
 from ._easy3d import EntityHandle, _NativeScene
@@ -34,6 +34,9 @@ class Scene:
         self._closed = False
         self._context_tokens: list[Token[Scene | None]] = []
         self._owner: weakref.ReferenceType[object] | None = None
+        self._script_entities: dict[int, Entity] = {}
+        self._deferred_destroy: dict[int, Entity] = {}
+        self._deferred_clear = False
 
     @classmethod
     def current(cls) -> Scene:
@@ -130,7 +133,11 @@ class Scene:
         """Destroy all entities while keeping the scene reusable."""
 
         self._require_mutable()
-        self._native.clear()
+        if self._callback_mutation_allowed():
+            self._deferred_clear = True
+            self._deferred_destroy.clear()
+        else:
+            self._clear_now(None)
 
     def add_debug_line(
         self,
@@ -163,7 +170,7 @@ class Scene:
             return
         if self._live_owner() is not None:
             raise RuntimeError("cannot close a scene while it is loaded by a Game")
-        self._native.clear()
+        self._clear_now(None)
         self._native.active = False
         self._closed = True
 
@@ -172,6 +179,91 @@ class Scene:
         if not isinstance(name, str):
             raise TypeError("entity name must be a string")
         return self._native.create_entity(name)
+
+    def _register_script_entity(self, entity: Entity) -> None:
+        hooks = ("awake", "start", "fixed_update", "update", "late_update", "on_destroy")
+        if any(callable(getattr(entity, hook, None)) for hook in hooks):
+            self._script_entities[entity.id] = entity
+
+    def _rollback_entity_construction(self, entity: Entity) -> None:
+        """Remove a partially constructed entity without running lifecycle hooks."""
+
+        if entity.is_alive:
+            self._native.destroy_entity(entity._handle)
+        self._script_entities.pop(entity.id, None)
+        self._deferred_destroy.pop(entity.id, None)
+
+    def _script_snapshot(self) -> tuple[Entity, ...]:
+        return tuple(self._script_entities.values())
+
+    def _destroy_entity(self, entity: Entity) -> None:
+        self._require_mutable()
+        if self._callback_mutation_allowed():
+            self._deferred_destroy[entity.id] = entity
+        else:
+            self._destroy_now(entity, None)
+
+    def _destroy_now(
+        self,
+        entity: Entity,
+        on_destroy: Callable[[Entity], None] | None,
+    ) -> None:
+        if not entity.is_alive:
+            self._native.destroy_entity(entity._handle)
+            return
+        try:
+            if on_destroy is not None:
+                on_destroy(entity)
+            else:
+                callback = getattr(entity, "on_destroy", None)
+                if callable(callback):
+                    callback()
+        finally:
+            self._native.destroy_entity(entity._handle)
+            self._script_entities.pop(entity.id, None)
+            owner = self._live_owner()
+            if owner is not None:
+                notify = getattr(owner, "_on_entity_destroyed", None)
+                if callable(notify):
+                    notify(entity)
+
+    def _clear_now(self, on_destroy: Callable[[Entity], None] | None) -> None:
+        entities = tuple(self._script_entities.values())
+        first_error: BaseException | None = None
+        for entity in entities:
+            if not entity.is_alive:
+                continue
+            try:
+                if on_destroy is not None:
+                    on_destroy(entity)
+                else:
+                    callback = getattr(entity, "on_destroy", None)
+                    if callable(callback):
+                        callback()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        self._native.clear()
+        owner = self._live_owner()
+        notify = None if owner is None else getattr(owner, "_on_entity_destroyed", None)
+        if callable(notify):
+            for entity in entities:
+                notify(entity)
+        self._script_entities.clear()
+        self._deferred_destroy.clear()
+        self._deferred_clear = False
+        if first_error is not None:
+            raise first_error
+
+    def _commit_deferred(self, on_destroy: Callable[[Entity], None]) -> None:
+        if self._deferred_clear:
+            self._clear_now(on_destroy)
+            return
+        pending = tuple(self._deferred_destroy.values())
+        self._deferred_destroy.clear()
+        for entity in pending:
+            if entity.is_alive:
+                self._destroy_now(entity, on_destroy)
 
     def _attach(self, owner: object) -> None:
         self._require_open()
@@ -198,11 +290,17 @@ class Scene:
     def _require_mutable(self) -> None:
         self._require_open()
         owner = self._live_owner()
-        if owner is not None and bool(getattr(owner, "is_running", False)):
+        if (owner is not None and bool(getattr(owner, "is_running", False)) and
+                not self._callback_mutation_allowed()):
             raise RuntimeError(
                 "cannot mutate a scene while its Game is running; "
-                "runtime scheduling arrives in Phase 2"
+                "mutations are allowed only from an active script callback"
             )
+
+    def _callback_mutation_allowed(self) -> bool:
+        owner = self._live_owner()
+        check = None if owner is None else getattr(owner, "_allows_scene_mutation", None)
+        return bool(check(self)) if callable(check) else False
 
     def __enter__(self) -> Scene:
         self._require_open()

@@ -125,8 +125,8 @@ game.run()
 Run `python tests/manual/render_components.py` for the visible Phase 1.7
 primitive/OBJ diagnostic or `python tests/manual/lighting_debug.py` for the
 Phase 1.8 lighting, scene-camera, and native debug-line diagnostic. Public scene
-mutation is rejected while `Game.run()` is traversing it; the Phase 2 scheduler
-will introduce safe runtime update boundaries.
+mutation while `Game.run()` is accepted only from lifecycle callbacks on the
+gameplay thread; other threads remain rejected during native traversal.
 
 Run `python examples/02_first_world/main.py` for a complete Phase 1 scene with
 transformed primitives, a decoded texture, loaded OBJ/MTL geometry, lights,
@@ -171,6 +171,33 @@ focus, and gamepad identity. Focus loss clears held controls and releases active
 relative mouse mode; the requested lock is restored on focus gain. Run
 `python tests/manual/input_diagnostic.py --seconds 10 --pointer-lock` for a
 timed native diagnostic.
+
+## Script lifecycle and timing
+
+Subclass any `Entity` or primitive and define the hooks you need:
+
+```python
+class Spinner(Cube):
+    def awake(self):
+        self.speed = 45.0
+
+    def fixed_update(self, dt):
+        pass
+
+    def update(self, dt):
+        self.rotation.y += self.speed * dt
+
+    def on_destroy(self):
+        print("removed")
+```
+
+`awake` runs once after registration, `start` once on first activation,
+`fixed_update` on the fixed simulation clock, then `update` and `late_update`
+once per rendered frame. Destruction and scene clear requested from a callback
+commit after the current phase. `game.scheduler_stats` reports fixed ticks,
+dropped catch-up time, overruns, and per-hook call timing. Development defaults
+to fail-fast callback errors; pass `fail_fast=False` to quarantine a failing
+script and inspect `game.script_errors`.
 
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:

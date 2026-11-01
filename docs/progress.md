@@ -1,10 +1,9 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.10 passed; Phase 2.1 is
-implemented with green automated tests, while live pointer lock and physical
-gamepad validation remain unverified. Phase 2.2 is next.** Phase 1 exit-gate
-camera motion awaits that scheduler. Earlier blocked checkpoints below are
-retained as diagnostic history.
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.2 passed;
+Phase 2.3 is next. Live pointer lock and physical gamepad validation remain
+unverified.** Earlier blocked checkpoints below are retained as diagnostic
+history.
 
 ## 2026-11-01 — Phase 0 kickoff
 
@@ -1536,3 +1535,122 @@ by the Windows build.
 Phase 2.1: **DONE**. Immediate next task: Phase 2.2 — script lifecycle, fixed
 simulation scheduling, safe deferred mutation, exception policy, and callback
 profiling.
+
+## 2026-11-01 — Phase 2.2 script lifecycle and simulation scheduler
+
+### Implemented
+
+- Added a pybind frame bridge that releases the GIL during the native loop,
+  reacquires it for one gameplay callback after input polling, and returns to
+  C++ before renderer traversal.
+- Added entity `awake`, `start`, `fixed_update`, `update`, `late_update`, and
+  `on_destroy` discovery with once-only lifecycle state and disabled-entity
+  behavior.
+- Added configurable fixed rate, frame-delta clamp, catch-up cap, dropped-time
+  and overrun counters, plus per-hook call/total/maximum/latest timings.
+- Added safe deferred entity destruction and scene clear at callback phase
+  boundaries. Other scene mutations are permitted only from the gameplay thread
+  while its scheduler callback is active.
+- Added identity-rich fail-fast `ScriptCallbackError` propagation and tolerant
+  traceback logging/quarantine through `fail_fast=False` and `script_errors`.
+- Updated the first-world example with an `Entity.update` orbit camera. Its live
+  D3D11 run completes the remaining Phase 1 moving-camera exit evidence.
+
+### Exact verification evidence
+
+Native Debug:
+
+```text
+cmake --build --preset windows-debug --parallel
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 1.21 sec
+```
+
+Native Release:
+
+```text
+cmake --build --preset windows-release --parallel
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.71 sec
+```
+
+Graphics-disabled/headless:
+
+```text
+cmake --build build\windows-headless --parallel
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 0.59 sec
+```
+
+Python 3.11 editable build and tests:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=2769696
+sha256=0b4361da53ace34d90177b2af936963b77533dd3126a3d114e61329733e9a579
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+................................................................         [100%]
+64 passed in 0.16s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+```
+
+Moving-camera first-world D3D11 run:
+
+```text
+build\venv311\Scripts\python.exe examples\02_first_world\main.py --seconds 3
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+first_world: PASS frames=440 draw_calls=5 visible=4 culled=0 fixed_ticks=145 update_calls=440 scene_closed=True
+# exit code 0
+```
+
+All 440 rendered frames ran the orbit script before native traversal, and 145
+fixed ticks ran independently of render-frame count. The scene then unloaded,
+cleared, and closed. Exact visual composition was not separately image-inspected,
+but camera mutation, callback count, D3D11 presentation, and teardown executed.
+
+Live exception/recovery diagnostic:
+
+```text
+build\venv311\Scripts\python.exe tests\manual\scheduler_diagnostic.py
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+update failed for BrokenScript name='tolerant actor' id=4294967296: intentional scheduler diagnostic failure
+ValueError: intentional scheduler diagnostic failure
+scheduler_diagnostic: PASS frames=14 errors=1
+# exit code 0
+```
+
+The first window's fail-fast error crossed the native boundary and reset engine
+running state. A second window initialized successfully in the same process;
+tolerant mode logged and quarantined exactly one script failure.
+
+Final lifecycle edge-case audit also verified that failed primitive
+construction rolls back without firing `on_destroy`, and that
+`unload_scene(clear=True)` invokes destruction while the scene is still
+attached so scheduler state is released. The final native recheck used the
+existing build trees:
+
+```text
+ctest --test-dir build/windows-debug --output-on-failure -C Debug
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.21 sec
+
+ctest --test-dir build/windows-release --output-on-failure -C Release
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.20 sec
+
+ctest --test-dir build/windows-headless --output-on-failure -C Debug
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 0.17 sec
+```
+
+Phase 2.2: **DONE**. Phase 1 exit gate: **PASSED**. Immediate next task: Phase
+2.3 — standalone state machine, timers, cooldowns, event bus, and tween utilities.

@@ -295,7 +295,26 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("height") = 720,
              py::arg("vsync") = true,
              py::arg("fps_limit") = 0.0)
-        .def("run", &easy3d::Engine::run, py::call_guard<py::gil_scoped_release>())
+        .def("run",
+             [](easy3d::Engine& engine, const py::object& callback) {
+                 easy3d::Engine::FrameCallback frame_callback;
+                 if (!callback.is_none()) {
+                     if (PyCallable_Check(callback.ptr()) == 0) {
+                         throw py::type_error("frame_callback must be callable or None");
+                     }
+                     // The binding argument owns this object until engine.run returns. Capturing
+                     // only its borrowed pointer prevents a Python refcount decrement when the
+                     // native std::function is destroyed while the GIL is released.
+                     PyObject* const callback_ptr = callback.ptr();
+                     frame_callback = [callback_ptr](const double delta_seconds) {
+                         py::gil_scoped_acquire acquire;
+                         py::reinterpret_borrow<py::function>(callback_ptr)(delta_seconds);
+                     };
+                 }
+                 py::gil_scoped_release release;
+                 engine.run(std::move(frame_callback));
+             },
+             py::arg("frame_callback") = py::none())
         .def("stop", &easy3d::Engine::stop)
         .def("set_scene",
              [](easy3d::Engine& engine, easy3d::Scene* scene) {
