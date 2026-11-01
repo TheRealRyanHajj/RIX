@@ -124,6 +124,22 @@ This establishes debug visualization without persistent GPU handles or
 per-frame Python callbacks. Scene clear releases both entities and debug lines;
 camera configuration remains reusable.
 
+## Input ownership and frame boundaries
+
+`Engine` owns one platform-neutral `InputSystem`; it has no SDL dependency and
+is included in graphics-disabled builds. The Windows adapter translates SDL
+physical scancodes, mouse motion/buttons/wheel, primary-gamepad buttons/axes,
+connection changes, and window focus events into canonical `device:name`
+controls. The action map combines those controls at `end_frame`, after all SDL
+events for that frame have been drained.
+
+Input state and action maps share a mutex because `Engine.run()` releases the
+GIL and monitoring Python threads may request pointer lock or inspect state.
+Focus loss zeros every held control and the window thread drops relative mouse
+mode. A pointer-lock request remains declarative so focus gain can safely apply
+it on the SDL-owning thread. No SDL object or event pointer crosses the native
+boundary into Python.
+
 ## Asset and model ownership
 
 `TextureCache` and `ModelCache` use canonical absolute paths (case-folded on

@@ -145,6 +145,33 @@ The renderer conservatively culls transformed mesh bounds and hardware-instances
 matching shared meshes/materials/textures when their scale is uniform. Read the
 latest completed frame through `game.renderer_stats`.
 
+## Input and action maps
+
+Keyboard, mouse, and the primary SDL gamepad feed a thread-safe snapshot owned
+by each `Game`. Bind named actions with digital controls or scaled/deadzoned
+axes:
+
+```python
+from easy3d import Binding, Game
+
+game = Game("Input example")
+game.input.bind(
+    "move_x",
+    Binding("key:d"),
+    Binding("key:a", scale=-1),
+    Binding("gamepad:left_x", deadzone=0.2),
+)
+game.input.bind("jump", "key:space", "gamepad:a")
+game.input.pointer_lock_requested = True
+```
+
+Use `state`, `value`, `down`, `pressed`, and `released` for actions. Raw helpers
+cover keys, mouse buttons, gamepad buttons/axes, pointer position/delta/wheel,
+focus, and gamepad identity. Focus loss clears held controls and releases active
+relative mouse mode; the requested lock is restored on focus gain. Run
+`python tests/manual/input_diagnostic.py --seconds 10 --pointer-lock` for a
+timed native diagnostic.
+
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
 

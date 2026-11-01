@@ -29,6 +29,17 @@ Phase 2 must add a documented scheduler and safe mutation boundaries before
 runtime Python gameplay updates are allowed; bypassing the public API through
 the private extension is outside the supported contract.
 
+## Input hardware validation
+
+Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,
+and gamepad connect/disconnect behavior are covered by platform-neutral native
+tests. The desktop automation host did not retain focus on the diagnostic window
+long enough to observe applied SDL relative mouse mode after the strict focus
+guard was added, so live pointer lock remains **UNVERIFIED**. No physical
+gamepad was connected during this checkpoint, so real-controller button labels,
+hot-plug behavior, and axis hardware are also **UNVERIFIED**. The current API
+selects one primary gamepad; multi-gamepad player assignment is not yet exposed.
+
 ## Visual Studio 2022 minimum is not independently exercised here
 
 The intended minimum remains Visual Studio 2022/MSVC v143, but the available

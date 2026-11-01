@@ -202,6 +202,35 @@ a coherent, immutable `RendererStats` snapshot from the latest completed frame
 and is safe to sample from a monitoring thread while `Game.run()` has released
 the GIL.
 
+## Input and remappable actions
+
+Each `Game` owns one `game.input` object. Physical control identifiers are
+lower-case `device:name` strings: `key:w`, `mouse:left`,
+`mouse:delta_x`, `mouse:wheel_y`, `gamepad:a`, and `gamepad:left_x` are
+representative values. Keyboard identifiers describe physical SDL scancodes,
+so `key:w` means the physical W position rather than layout-produced text.
+
+`Input.bind(name, *bindings, replace=True)` atomically replaces an action map;
+pass `replace=False` to append. A string creates a unit digital binding.
+`Binding(control, scale=..., deadzone=...)` supports opposing directions,
+axis inversion, and one-dimensional deadzones. Contributions sum and clamp to
+`[-1, 1]`; deadzone magnitude is rescaled to retain the full post-deadzone
+range. `state()` returns an immutable value/down/pressed/released snapshot.
+Unknown actions raise `IndexError` rather than silently returning an
+unconfigured value.
+
+Mouse position is window-relative; delta and wheel accumulate for the current
+frame and reset at the next native event poll. The current baseline opens one
+primary SDL gamepad and uses Xbox-style logical face names `a/b/x/y`; axes are
+normalized to `[-1,1]`, while triggers use `[0,1]`.
+
+Setting `pointer_lock_requested` asks the window thread to enter SDL relative
+mouse mode. `pointer_locked` reports the applied state. Losing keyboard focus
+clears all held controls, produces action releases at the next frame boundary,
+and disables the applied lock without discarding the request. Gaining focus
+reapplies it. The input object is mutex-protected for monitoring threads; Phase
+2.2 will make action reads deterministic inside gameplay callbacks.
+
 ## Texture assets
 
 ```python

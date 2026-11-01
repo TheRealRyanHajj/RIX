@@ -1,5 +1,7 @@
 #pragma once
 
+#include "easy3d/input.hpp"
+
 #include <atomic>
 #include <cstdint>
 #include <stdexcept>
@@ -68,6 +70,8 @@ public:
     [[nodiscard]] std::uint64_t frame_count() const noexcept;
     [[nodiscard]] double last_frame_seconds() const noexcept;
     [[nodiscard]] RendererStats renderer_stats() const noexcept;
+    [[nodiscard]] InputSystem& input() noexcept;
+    [[nodiscard]] const InputSystem& input() const noexcept;
     [[nodiscard]] const EngineConfig& config() const noexcept;
 
 private:
@@ -77,6 +81,7 @@ private:
     std::atomic_uint64_t frame_count_{0};
     std::atomic<double> last_frame_seconds_{0.0};
     RendererStatsAtomic renderer_stats_;
+    InputSystem input_;
     Scene* scene_{nullptr};
 };
 

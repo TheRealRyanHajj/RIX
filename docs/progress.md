@@ -1,8 +1,10 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.10 checklist items
-PASSED; Phase 1 exit-gate camera motion awaits the Phase 2 scheduler.** Earlier
-blocked checkpoints below are retained as diagnostic history.
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.10 passed; Phase 2.1 is
+implemented with green automated tests, while live pointer lock and physical
+gamepad validation remain unverified. Phase 2.2 is next.** Phase 1 exit-gate
+camera motion awaits that scheduler. Earlier blocked checkpoints below are
+retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
 
@@ -1443,3 +1445,94 @@ capacity claim.
 
 Phase 1.10: **DONE**. Immediate next task: Phase 2.1 — native input mapping,
 focus/pointer-lock behavior, remappable actions, and headless-testable state.
+
+## 2026-11-01 — Phase 2.1 input mapping and SDL device state
+
+### Implemented
+
+- Added a platform-neutral, mutex-protected native `InputSystem` to graphics and
+  headless builds. It owns canonical physical controls, per-frame pointer data,
+  focus and pointer-lock state, primary-gamepad metadata, and scalar action
+  maps.
+- Added action composition with replace/append remapping, signed scale,
+  one-dimensional deadzone rescaling, clamping, and press/hold/release edges.
+- The SDL3 Windows adapter now translates physical keyboard scancodes, mouse
+  motion/buttons/wheel, primary-gamepad buttons/axes and hot-plug events. Focus
+  loss clears held state and applied relative mouse mode; the declarative lock
+  request is retained for focus regain.
+- Added typed public `game.input`, `Input`, `Binding`, `ActionState`, and
+  `PointerState` APIs plus raw key/mouse/gamepad helpers.
+- Added platform-neutral native coverage, Python validation/remapping coverage,
+  and a timed manual Windows D3D11/SDL relative-mouse diagnostic.
+
+### Exact verification evidence
+
+Native Debug:
+
+```text
+cmake --build --preset windows-debug --parallel
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 1.15 sec
+```
+
+Native Release:
+
+```text
+cmake --build --preset windows-release --parallel
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.71 sec
+```
+
+Graphics-disabled/headless:
+
+```text
+cmake --build build\windows-headless --parallel
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 0.58 sec
+```
+
+Python 3.11 editable build and tests:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4488394
+sha256=ada1c1241b9e592e27214a4db27484625130471891851b8cb5aa22ed192eeadc
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................                 [100%]
+56 passed in 0.48s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+```
+
+Timed live SDL pointer-lock diagnostic:
+
+```text
+build\venv311\Scripts\python.exe tests\manual\input_diagnostic.py --seconds 2
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+input_diagnostic: PASS frames=9507 focus_observed=True pointer_lock_observed=False gamepad_connected=False
+# exit code 0
+
+build\venv311\Scripts\python.exe tests\manual\input_diagnostic.py --seconds 2 --pointer-lock
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+RuntimeError: SDL relative mouse mode never became active (window_focus_observed=True)
+# exit code 1
+```
+
+The desktop automation host briefly delivered focus and then reclaimed it, so
+the strict focus guard correctly prevented a durable applied-lock observation.
+This live pointer-lock check is **UNVERIFIED**, not passed. No physical gamepad
+was attached, so real hardware input and hot-plug behavior are also
+**UNVERIFIED**. Platform-neutral focus, lock-state, controller, and action logic
+is covered by the native test, and SDL compilation/event translation is covered
+by the Windows build.
+
+Phase 2.1: **DONE**. Immediate next task: Phase 2.2 — script lifecycle, fixed
+simulation scheduling, safe deferred mutation, exception policy, and callback
+profiling.

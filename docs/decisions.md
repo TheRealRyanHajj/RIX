@@ -418,3 +418,40 @@ counters through a sequence-protected atomic store.
   possible later optimizations after profiling.
 - Renderer counters count mesh parts, not high-level entities, and are suitable
   for diagnostics rather than gameplay synchronization.
+
+## ADR-0014: Platform-neutral input state with SDL-owned event translation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Input must support SDL keyboard, mouse, and gamepad events without exposing SDL
+types to the stable native or Python APIs. `Engine.run()` releases the GIL, so
+pointer-lock requests and diagnostic reads can race the window loop unless the
+ownership boundary is explicit. Focus loss must not leave controls stuck.
+
+### Decision
+
+`Engine` owns a mutex-protected, platform-neutral `InputSystem` built in both
+graphics and headless configurations. Controls use canonical `device:name`
+identifiers and feed remappable scalar actions with scale and deadzone values.
+The SDL window thread alone owns SDL objects, translates events, opens one
+primary gamepad, applies relative mouse mode, and resolves action transitions
+after event polling.
+
+Pointer lock is a declarative request plus a separately reported applied state.
+Focus loss zeros held controls and drops the applied lock; focus gain can
+reapply the retained request. Python receives immutable snapshots and never an
+SDL event pointer.
+
+### Consequences
+
+- Action-map and focus behavior are unit-testable without a window or GPU.
+- Monitoring threads can safely inspect input while the native loop owns event
+  production, though deterministic gameplay reads wait for Phase 2.2 callbacks.
+- Physical scancode identifiers are layout-position based; text entry will be
+  a separate API when UI work requires it.
+- One primary gamepad is sufficient for the initial gameplay milestone.
+  Multi-gamepad assignment, rumble, sensors, and controller UI labels remain
+  later extensions.

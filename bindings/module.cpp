@@ -227,6 +227,60 @@ PYBIND11_MODULE(_easy3d, module) {
         return "unknown";
     };
 
+    py::class_<easy3d::InputSystem>(module, "_NativeInput")
+        .def("bind_action",
+             [](easy3d::InputSystem& input,
+                std::string action,
+                const std::vector<std::tuple<std::string, float, float>>& values,
+                const bool replace) {
+                 std::vector<easy3d::InputBinding> bindings;
+                 bindings.reserve(values.size());
+                 for (const auto& [control, scale, deadzone] : values) {
+                     bindings.push_back({control, scale, deadzone});
+                 }
+                 input.bind_action(std::move(action), std::move(bindings), replace);
+             },
+             py::arg("action"),
+             py::arg("bindings"),
+             py::arg("replace") = true)
+        .def("unbind_action", &easy3d::InputSystem::unbind_action)
+        .def("clear_actions", &easy3d::InputSystem::clear_actions)
+        .def("action_state", [](const easy3d::InputSystem& input,
+                                const std::string& action) {
+            const easy3d::InputActionState state = input.action_state(action);
+            return py::make_tuple(
+                state.value, state.down, state.pressed, state.released);
+        })
+        .def("action_bindings", [](const easy3d::InputSystem& input,
+                                   const std::string& action) {
+            py::list result;
+            for (const easy3d::InputBinding& binding : input.action_bindings(action)) {
+                result.append(py::make_tuple(
+                    binding.control, binding.scale, binding.deadzone));
+            }
+            return result;
+        })
+        .def("control_value", &easy3d::InputSystem::control_value)
+        .def_property_readonly("pointer_state", [](const easy3d::InputSystem& input) {
+            const easy3d::PointerState state = input.pointer_state();
+            return py::make_tuple(state.x,
+                                  state.y,
+                                  state.delta_x,
+                                  state.delta_y,
+                                  state.wheel_x,
+                                  state.wheel_y);
+        })
+        .def_property_readonly("focused", &easy3d::InputSystem::focused)
+        .def_property("pointer_lock_requested",
+                      &easy3d::InputSystem::pointer_lock_requested,
+                      &easy3d::InputSystem::request_pointer_lock)
+        .def_property_readonly("pointer_lock_active",
+                               &easy3d::InputSystem::pointer_lock_active)
+        .def_property_readonly("gamepad_connected",
+                               &easy3d::InputSystem::gamepad_connected)
+        .def_property_readonly("gamepad_name", &easy3d::InputSystem::gamepad_name)
+        .def_property_readonly("action_count", &easy3d::InputSystem::action_count);
+
     py::class_<easy3d::Engine>(module, "Engine")
         .def(py::init([](std::string title,
                          const std::uint32_t width,
@@ -251,6 +305,11 @@ PYBIND11_MODULE(_easy3d, module) {
         .def_property_readonly("is_running", &easy3d::Engine::is_running)
         .def_property_readonly("frame_count", &easy3d::Engine::frame_count)
         .def_property_readonly("last_frame_seconds", &easy3d::Engine::last_frame_seconds)
+        .def_property_readonly(
+            "input",
+            static_cast<easy3d::InputSystem& (easy3d::Engine::*)() noexcept>(
+                &easy3d::Engine::input),
+            py::return_value_policy::reference_internal)
         .def_property_readonly("renderer_stats", [](const easy3d::Engine& engine) {
             const easy3d::RendererStats stats = engine.renderer_stats();
             return py::make_tuple(stats.draw_calls,

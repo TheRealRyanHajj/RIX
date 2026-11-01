@@ -80,7 +80,7 @@ void Engine::run() {
     last_frame_seconds_.store(0.0);
     renderer_stats_.reset();
     platform::run_window_loop(
-        config_, scene_, stop_requested_, frame_count_, last_frame_seconds_, renderer_stats_);
+        config_, scene_, stop_requested_, frame_count_, last_frame_seconds_, renderer_stats_, input_);
 }
 
 void Engine::stop() noexcept {
@@ -108,6 +108,14 @@ double Engine::last_frame_seconds() const noexcept {
 
 RendererStats Engine::renderer_stats() const noexcept {
     return renderer_stats_.load();
+}
+
+InputSystem& Engine::input() noexcept {
+    return input_;
+}
+
+const InputSystem& Engine::input() const noexcept {
+    return input_;
 }
 
 const EngineConfig& Engine::config() const noexcept {

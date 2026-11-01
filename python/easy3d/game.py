@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from ._easy3d import Engine
+from .input import Input
 from .scene import Scene
 
 
@@ -56,11 +57,16 @@ class Game:
             raise ValueError("fps_limit must be zero (unlimited) or positive")
 
         self._engine = Engine(title, width, height, bool(vsync), float(fps_limit))
+        self._input = Input(self._engine.input)
         self._scene: Scene | None = None
 
     @property
     def scene(self) -> Scene | None:
         return self._scene
+
+    @property
+    def input(self) -> Input:
+        return self._input
 
     @property
     def is_running(self) -> bool:

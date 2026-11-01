@@ -46,6 +46,7 @@ set(easy3d_core_sources
     engine/src/assets/image.cpp
     engine/src/assets/model.cpp
     engine/src/core/engine.cpp
+    engine/src/input/input.cpp
     engine/src/math/math.cpp
     engine/src/renderer/camera.cpp
     engine/src/renderer/mesh.cpp
@@ -245,6 +246,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_frustum_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_frustum_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.frustum COMMAND easy3d_frustum_tests)
+
+    add_executable(easy3d_input_tests tests/cpp/test_input.cpp)
+    target_compile_features(easy3d_input_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_input_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.input COMMAND easy3d_input_tests)
 
     if(EASY3D_ENABLE_GRAPHICS)
         add_executable(easy3d_texture_tests tests/cpp/test_texture.cpp)
