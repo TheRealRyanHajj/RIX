@@ -84,6 +84,7 @@ set(easy3d_core_sources
     engine/src/core/engine.cpp
     engine/src/input/input.cpp
     engine/src/math/math.cpp
+    engine/src/network/network.cpp
     engine/src/physics/physics.cpp
     engine/src/renderer/camera.cpp
     engine/src/renderer/mesh.cpp
@@ -288,6 +289,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_input_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_input_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.input COMMAND easy3d_input_tests)
+
+    add_executable(easy3d_network_tests tests/cpp/test_network.cpp)
+    target_compile_features(easy3d_network_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_network_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.network COMMAND easy3d_network_tests)
 
     add_executable(easy3d_physics_tests tests/cpp/test_physics.cpp)
     target_compile_features(easy3d_physics_tests PRIVATE cxx_std_20)

@@ -1,8 +1,9 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2 are validated: the engine has a native D3D11 renderer,
-generation-safe scenes and entities, shared assets and render components,
+native core. Phases 0–2 and the Phase 3.1 transport foundation are validated.
+The engine has a native D3D11 renderer, generation-safe scenes and entities,
+shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
 physics foundation with rigid bodies, queries, events, character motors,
 advanced shapes, joints, and CCD.
@@ -329,6 +330,27 @@ print(grass.width, grass.height, grass.byte_size)
 
 Cache keys use the canonical path and color space. Missing files raise
 `MissingAssetError`; unsupported or malformed files raise `AssetError`.
+
+## Network transport simulation
+
+Phase 3.1 exposes a dependency-free transport contract and deterministic
+two-endpoint impairment link for headless protocol tests:
+
+```python
+from easy3d import network
+
+link = network.SimulatedLink(latency=0.050, loss=0.05, seed=7)
+link.first.poll()  # connected event
+link.second.poll()
+status = link.first.send(b"bounded payload")
+link.advance(0.050)
+events = link.second.poll()
+```
+
+Queue limits, latency and jitter are in-process test controls. This is not a
+socket client/server and does not claim reliable retransmission or encryption;
+the pinned GameNetworkingSockets integration is the next milestone. See
+[docs/network-protocol.md](docs/network-protocol.md).
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 

@@ -1,9 +1,9 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2 passed; Phase 3.1
-is next. Live relative-mouse behavior and physical gamepad validation remain
-unverified.** Earlier blocked checkpoints below are retained as diagnostic
-history.
+**Current status (2026-11-01): Phase 0, Phase 1, Phase 2, and Phase 3.1 passed;
+Phase 3.2 is next. Live relative-mouse behavior and physical gamepad validation
+remain unverified.** Earlier blocked checkpoints below are retained as
+diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
 
@@ -2173,3 +2173,110 @@ build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version(
 Phase 2.9 and the Phase 2 exit gate: **DONE**. Immediate next task: Phase 3.1 —
 platform-neutral transport interfaces, bounded queues, and deterministic
 loss/latency simulation tests. No networking implementation is claimed yet.
+
+## 2026-11-01 — Phase 3.1 transport foundation
+
+### Bounded approach
+
+Add a dependency-free C++ transport contract with opaque 64-bit connection
+IDs, explicit reliable/unreliable intent, immutable transport events, send
+backpressure results, statistics, and a mutex-protected bounded event queue.
+Build a deterministic in-memory two-endpoint link behind that same interface so
+latency, jitter, loss, message-size limits, queue exhaustion, disconnects and
+ordering can be tested without sockets or graphics. Expose the simulator through
+a typed `easy3d.network` Python facade and document the ownership/threading
+boundary. Add native and Python regressions, then rerun headless, Debug, Release,
+editable-install and full pytest matrices.
+
+Files expected to change: new native network header/source, CMake and pybind11
+wiring, `easy3d.network` and its stub/export surface, native/Python tests, and
+network architecture/progress documentation. GameNetworkingSockets, real
+addresses/ports, protocol handshakes, servers, clients and entity replication
+remain explicitly outside this slice. Primary risks are queue-overflow semantics,
+deterministic simulated scheduling and keeping future worker-thread data from
+calling Python directly.
+
+### Implemented
+
+- Added a dependency-neutral native `NetworkTransport` data-plane interface,
+  opaque nonzero 64-bit `ConnectionId`, reliable/unreliable delivery intent,
+  immutable copied events, explicit send outcomes and transport statistics.
+- Added a mutex-protected bounded FIFO `TransportEventQueue`. Capacity
+  exhaustion increments diagnostics and is surfaced by the owning transport as
+  `NetworkError`; queued messages remain drainable afterward.
+- Added a native two-endpoint `SimulatedNetwork` behind the same interface.
+  Its manual seeded clock implements bounded in-flight messages, one-way
+  latency, jitter, loss, equal-time sequence ordering, size rejection,
+  disconnect lifecycle and per-endpoint counters without SDL, bgfx or sockets.
+- Added typed public `easy3d.network` enums, frozen IDs/events/statistics, a
+  runtime-checkable `NetworkTransport` protocol, `SimulatedLink`, endpoint
+  validation and native exception translation. Borrowed Python byte buffers are
+  size-checked by native code before the simulator copies an accepted payload.
+- Added native and Python regressions for FIFO/capacity, delivery metadata,
+  ordering, backpressure, latency, reproducible seeded impairment, complete
+  loss, overflow recovery, validation, statistics and disconnects.
+- Added ADR-0022, the implemented architecture/API contract, and an explicit
+  protocol-status document that does not claim sockets, reliability,
+  encryption, handshake, client/server or replication.
+
+### Failures found and corrected
+
+The first targeted command asked the `windows-headless` preset for `_easy3d`,
+but all checked-in native presets deliberately set `EASY3D_BUILD_PYTHON=OFF`;
+Ninja correctly reported `unknown target '_easy3d'`. The native target was then
+built independently. A later direct build of the scikit-build cache triggered
+CMake regeneration outside pip's isolated environment and failed to locate
+`pybind11Config.cmake`. The supported editable-install entry point supplied its
+declared build dependency and completed successfully. These were command-path
+errors, not product failures, and both exact causes are retained here.
+
+The initial native test build emitted seven `C4834` warnings for intentionally
+ignored `[[nodiscard]]` test setup returns. Explicit `static_cast<void>` markers
+removed the warnings without weakening assertions. The binding initially copied
+`py::bytes` into `std::string` before native size validation; it now borrows the
+CPython buffer for the synchronous send call, and the native simulator copies
+only after accepting the configured limit.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=5522836
+sha256=0c81f79c5df5421bc35f4203aa806cd2b14c922506457b53e15cc69572ca54ba
+Successfully installed easy3d-0.1.0
+
+cmake --build build/windows-headless --config Debug --parallel 4
+ctest --test-dir build/windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.80 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 13
+Total Test time (real) = 1.74 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 13
+Total Test time (real) = 0.87 sec
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py -q
+..........                                                               [100%]
+10 passed in 0.44s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 66%]
+....................................                                     [100%]
+108 passed in 0.43s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "from easy3d import network; x=network.SimulatedLink(latency=.01); print(x.first.poll()[0].type.value, x.first.send(b'hi').value, x.in_flight_count)"
+connected queued 1
+```
+
+Phase 3.1: **DONE**. Immediate next task: Phase 3.2 — integrate a pinned
+GameNetworkingSockets Windows backend and audit its transitive build/license
+dependencies. No real socket transport is claimed by this checkpoint.

@@ -1,5 +1,6 @@
 #include "easy3d/core.hpp"
 #include "easy3d/assets.hpp"
+#include "easy3d/network.hpp"
 #include "easy3d/physics.hpp"
 #include "easy3d/renderer.hpp"
 #include "easy3d/scene.hpp"
@@ -27,9 +28,148 @@ PYBIND11_MODULE(_easy3d, module) {
     py::register_exception<easy3d::InvalidEntityError>(
         module, "InvalidEntityError", PyExc_ReferenceError);
     py::register_exception<easy3d::PhysicsError>(module, "PhysicsError", engine_error.ptr());
+    py::register_exception<easy3d::NetworkError>(module, "NetworkError", engine_error.ptr());
 
     module.def("engine_version", &easy3d::engine_version);
     module.def("native_add", &easy3d::native_add, py::arg("a"), py::arg("b"));
+    const auto network_delivery = [](const std::string& value) {
+        if (value == "reliable") {
+            return easy3d::NetworkDelivery::Reliable;
+        }
+        if (value == "unreliable") {
+            return easy3d::NetworkDelivery::Unreliable;
+        }
+        throw std::invalid_argument("network delivery must be 'reliable' or 'unreliable'");
+    };
+    const auto network_delivery_name = [](const easy3d::NetworkDelivery value) {
+        return value == easy3d::NetworkDelivery::Reliable ? "reliable" : "unreliable";
+    };
+    const auto send_status_name = [](const easy3d::SendStatus value) {
+        switch (value) {
+        case easy3d::SendStatus::Queued:
+            return "queued";
+        case easy3d::SendStatus::InvalidConnection:
+            return "invalid_connection";
+        case easy3d::SendStatus::MessageTooLarge:
+            return "message_too_large";
+        case easy3d::SendStatus::QueueFull:
+            return "queue_full";
+        }
+        return "invalid_connection";
+    };
+    const auto event_type_name = [](const easy3d::TransportEventType value) {
+        switch (value) {
+        case easy3d::TransportEventType::Connected:
+            return "connected";
+        case easy3d::TransportEventType::Disconnected:
+            return "disconnected";
+        case easy3d::TransportEventType::Message:
+            return "message";
+        }
+        return "message";
+    };
+    py::class_<easy3d::SimulatedNetwork>(module, "_NetworkSimulator")
+        .def(py::init([](const double latency_seconds,
+                         const double jitter_seconds,
+                         const double loss_probability,
+                         const std::uint64_t random_seed,
+                         const std::size_t in_flight_capacity,
+                         const std::size_t event_queue_capacity,
+                         const std::size_t maximum_message_size) {
+                 return std::make_unique<easy3d::SimulatedNetwork>(
+                     easy3d::SimulatedNetworkConfig{latency_seconds,
+                                                    jitter_seconds,
+                                                    loss_probability,
+                                                    random_seed,
+                                                    in_flight_capacity,
+                                                    event_queue_capacity,
+                                                    maximum_message_size});
+             }),
+             py::arg("latency_seconds") = 0.0,
+             py::arg("jitter_seconds") = 0.0,
+             py::arg("loss_probability") = 0.0,
+             py::arg("random_seed") = 1,
+             py::arg("in_flight_capacity") = 1024,
+             py::arg("event_queue_capacity") = 1024,
+             py::arg("maximum_message_size") = 64 * 1024)
+        .def_property_readonly("first_connection", [](easy3d::SimulatedNetwork& network) {
+            return network.first().connection().value;
+        })
+        .def_property_readonly("second_connection", [](easy3d::SimulatedNetwork& network) {
+            return network.second().connection().value;
+        })
+        .def("send",
+             [network_delivery, send_status_name](easy3d::SimulatedNetwork& network,
+                                                  const bool first,
+                                                  const std::uint64_t connection,
+                                                  const py::bytes& data,
+                                                  const std::string& delivery) {
+                 char* value = nullptr;
+                 py::ssize_t size = 0;
+                 if (PyBytes_AsStringAndSize(data.ptr(), &value, &size) != 0) {
+                     throw py::error_already_set();
+                 }
+                 easy3d::SimulatedNetwork::Endpoint& endpoint =
+                     first ? network.first() : network.second();
+                 const auto payload = std::span{
+                     reinterpret_cast<const std::uint8_t*>(value),
+                     static_cast<std::size_t>(size)};
+                 return send_status_name(endpoint.send(easy3d::ConnectionId{connection},
+                                                       payload,
+                                                       network_delivery(delivery)));
+             },
+             py::arg("first"),
+             py::arg("connection"),
+             py::arg("data"),
+             py::arg("delivery"))
+        .def("disconnect",
+             [](easy3d::SimulatedNetwork& network,
+                const bool first,
+                const std::uint64_t connection,
+                const std::string& reason) {
+                 easy3d::SimulatedNetwork::Endpoint& endpoint =
+                     first ? network.first() : network.second();
+                 endpoint.disconnect(easy3d::ConnectionId{connection}, reason);
+             },
+             py::arg("first"),
+             py::arg("connection"),
+             py::arg("reason") = "")
+        .def("poll",
+             [network_delivery_name, event_type_name](easy3d::SimulatedNetwork& network,
+                                                      const bool first,
+                                                      const std::size_t maximum_events) {
+                 easy3d::SimulatedNetwork::Endpoint& endpoint =
+                     first ? network.first() : network.second();
+                 py::list result;
+                 for (easy3d::TransportEvent& event : endpoint.poll(maximum_events)) {
+                     result.append(py::make_tuple(
+                         event_type_name(event.type),
+                         event.connection.value,
+                         network_delivery_name(event.delivery),
+                         py::bytes(reinterpret_cast<const char*>(event.payload.data()),
+                                   event.payload.size()),
+                         event.reason,
+                         event.sequence));
+                 }
+                 return result;
+             },
+             py::arg("first"),
+             py::arg("maximum_events") = 256)
+        .def("stats", [](easy3d::SimulatedNetwork& network, const bool first) {
+            const easy3d::TransportStats value =
+                (first ? network.first() : network.second()).stats();
+            return py::make_tuple(value.messages_sent,
+                                  value.messages_received,
+                                  value.messages_lost,
+                                  value.bytes_sent,
+                                  value.bytes_received,
+                                  value.queue_rejections,
+                                  value.event_overflows);
+        })
+        .def("advance", &easy3d::SimulatedNetwork::advance, py::arg("elapsed_seconds"))
+        .def_property_readonly("time_seconds", &easy3d::SimulatedNetwork::time_seconds)
+        .def_property_readonly("in_flight_count",
+                               &easy3d::SimulatedNetwork::in_flight_count);
     py::enum_<easy3d::TextureColorSpace>(module, "_TextureColorSpace")
         .value("LINEAR", easy3d::TextureColorSpace::Linear)
         .value("SRGB", easy3d::TextureColorSpace::Srgb);

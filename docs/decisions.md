@@ -686,3 +686,40 @@ removal.
   data beneath active contacts.
 - Compound, moving concave, hinge/slider/motor/breakable APIs remain scoped
   follow-up work and are not implied by this milestone.
+
+## ADR-0022: Bounded polled transport boundary with deterministic simulation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+The socket backend will eventually own native callbacks and possibly a worker
+thread, while Python gameplay and scenes have a single owning thread. Transport
+pressure, malformed sizes and callback bursts cannot be allowed to create
+unbounded memory growth or enter Python from an uncontrolled native thread.
+Loss and latency behavior also need repeatable tests before a platform socket
+dependency is introduced.
+
+### Decision
+
+Define a dependency-neutral `NetworkTransport` data-plane interface around
+opaque 64-bit connection IDs, copied transport events, explicit delivery intent
+and send status. Cross the worker/gameplay boundary through a mutex-protected
+FIFO queue with a fixed capacity; surface overflow as `NetworkError`. Provide a
+seeded, manually advanced two-endpoint datagram simulator implementing the same
+interface. Keep address/listen/connect creation on future concrete transports
+and higher-level client/server owners rather than forcing backend lifecycle into
+the data plane.
+
+### Consequences
+
+- Queue capacity, payload size, loss, delay, ordering, disconnect and statistics
+  are testable headlessly with no renderer or network access.
+- Future GameNetworkingSockets callbacks copy bounded data and return; Python
+  observes it only when the gameplay thread polls.
+- A connection ID is local opaque transport state, not a replicated entity ID
+  or authenticated player identity.
+- The simulator deliberately does not implement retransmission, encryption,
+  sockets, protocol framing or authority. Those capabilities are not implied by
+  a reliable delivery label and remain later milestones.

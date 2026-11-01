@@ -306,7 +306,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 
 ### PHASE 3 — Transport, roles, headless server
 
-- [ ] **3.1** Create platform-neutral `NetworkTransport` interface, connection IDs, bounded message queues and simulated loss/latency tests.
+- [x] **3.1** Create platform-neutral `NetworkTransport` interface, connection IDs, bounded message queues and simulated loss/latency tests.
 - [ ] **3.2** Integrate pinned GameNetworkingSockets Windows build and its tested Protobuf/crypto dependencies; use appropriate vcpkg/CMake wiring; license/audit docs.
 - [ ] **3.3** Implement protocol handshake: version/schema compatibility, limits, client/server role identification, disconnect reasons.
 - [ ] **3.4** Implement client connect/disconnect, IP/port, timeouts, error handling, callbacks, network metrics.

@@ -5,6 +5,7 @@ from ._easy3d import (
     EngineError,
     InvalidEntityError,
     MissingAssetError,
+    NetworkError,
     PhysicsError,
     engine_version,
     native_add,
@@ -28,7 +29,7 @@ from .components import (
     PhysicsMaterial,
     Rigidbody,
 )
-from . import debug, physics
+from . import debug, network, physics
 from .entity import Entity
 from ._version import __version__
 from .game import Game, RendererStats
@@ -75,6 +76,7 @@ __all__ = [
     "Light",
     "LightComponent",
     "MissingAssetError",
+    "NetworkError",
     "PhysicsError",
     "PhysicsMaterial",
     "PhysicsHit",
@@ -113,5 +115,6 @@ __all__ = [
     "load_image",
     "load_obj",
     "native_add",
+    "network",
 ]
 

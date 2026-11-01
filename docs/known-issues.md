@@ -60,6 +60,13 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
+Phase 3.1 provides only the native transport contract and deterministic
+in-memory impairment simulator. It does not open sockets, retransmit reliable
+messages, encrypt traffic, define a wire handshake, or provide a usable
+client/server API. Those are Phase 3.2–3.5 requirements. Simulated loss applies
+to both delivery labels because the simulator models the datagram link beneath
+reliability; GameNetworkingSockets will own actual reliable delivery.
+
 ## Input hardware validation
 
 Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,

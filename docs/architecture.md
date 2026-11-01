@@ -294,3 +294,27 @@ cascade so Python wrappers report stale state rather than retaining a solver
 pointer. CCD is an immutable rigid-body creation flag mapped to Jolt
 `LinearCast`; changing it requires the same transactional component rebuild as
 other construction-time body state.
+
+## Network transport boundary
+
+`NetworkTransport` is the dependency-neutral native data-plane contract. It
+accepts an opaque process-local `ConnectionId`, a borrowed payload that the
+implementation must consume or copy before returning, and reliable/unreliable
+delivery intent. Sends return explicit queued/invalid/oversize/full outcomes;
+they do not hide backpressure behind an unbounded allocation. Connection IDs
+are neither entity handles nor future replicated network-object IDs.
+
+Transport implementations publish copied `connected`, `disconnected`, and
+`message` events through `TransportEventQueue`. The queue is mutex protected,
+FIFO, and capacity bounded. An overflow is counted and surfaced as
+`NetworkError` when the owning transport is polled. A future socket worker may
+write this queue, but it must not call Python or mutate scenes. Python polls
+immutable snapshots on its owning gameplay thread.
+
+`SimulatedNetwork` provides two endpoints behind the same interface. Its
+seeded clock schedules bounded messages with one-way latency, jitter and loss,
+preserves a monotonic sequence for equal-time ordering, and records sent,
+received, lost, byte, rejection and overflow counters. It is a deterministic
+datagram impairment tool: reliable intent is metadata and is not retransmitted
+by the simulator. GameNetworkingSockets will supply actual reliable/unreliable
+semantics in Phase 3.2 without changing this public queue boundary.

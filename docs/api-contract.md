@@ -511,3 +511,24 @@ channels/options (specular/normal maps, illumination models, PBR extensions,
 multiple texture layers) are parsed by the dependency where possible but not
 represented or claimed by Easy3D. Smoothing-group normal generation is not yet
 implemented: provide normals for smooth shading, otherwise output is flat.
+
+## Network transport foundation
+
+`easy3d.network.NetworkTransport` is a runtime-checkable Python protocol for a
+polled endpoint. `send(bytes_like, delivery=...)` returns `SendStatus` instead
+of blocking or silently growing a queue. `poll(maximum_events)` returns immutable
+`NetworkEvent` snapshots; `stats` is an immutable counter snapshot. A
+`ConnectionId` is opaque local transport state and is never an entity or future
+replication ID.
+
+`SimulatedLink` owns `first` and `second` endpoints. `latency`, `jitter`, and
+manual `advance()` values are seconds; `loss` is in `[0, 1]`. The seed and
+explicit queue/message limits make impairment tests reproducible. Construction
+enqueues one connected event per endpoint. Disconnecting either side enqueues a
+disconnected event for both and invalidates further sends.
+
+The simulator preserves `Delivery.RELIABLE`/`UNRELIABLE` as intent only. It
+models datagram impairment and does not retransmit. Event queue exhaustion raises
+`NetworkError` once and leaves already-queued events available to a subsequent
+poll. No socket, server, client, handshake, or replication API is claimed by
+this foundation.
