@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.8 passed;
-Phase 2.9 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2 passed; Phase 3.1
+is next. Live relative-mouse behavior and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -2074,3 +2074,102 @@ build\venv311\Scripts\python.exe -c "from easy3d import *; from easy3d import ph
 
 Phase 2.8: **DONE**. Immediate next task: Phase 2.9 — playable single-player
 obstacle course and Phase 2 exit-gate regression suite.
+
+## 2026-11-01 — Phase 2.9 obstacle course and Phase 2 exit gate
+
+### Implemented
+
+- Added `examples/03_obstacle_course`, a playable public-API-only first-person
+  course with remappable keyboard/gamepad actions, mouse-look request, native
+  character movement, three-step climb, raised runway, slope and balance-beam
+  side challenges, CCD rigid-body obstacles, finish trigger, camera, lighting,
+  fall recovery, clean teardown, and an optional bounded run time.
+- Added a headless course regression that drives the same scene through the
+  fixed-step scheduler, crosses its physics terrain, receives the finish trigger,
+  verifies character/collider/rigid-body participation, and proves scene cleanup.
+- Re-ran the complete Phase 2 native Debug/headless/Release and Python matrices,
+  performed a fresh isolated editable build, and exercised the actual D3D11
+  course window on the interactive Windows desktop.
+
+### Interactive Windows evidence and limits
+
+The exact command `build\venv311\Scripts\python.exe
+examples\03_obstacle_course\main.py` opened a visible 1280x720 native window.
+The renderer reported:
+
+```text
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+```
+
+Computer-use inspection showed the complete rendered course: the center steps
+and raised runway, green finish gate, two dynamic balls, left balance beams and
+right slope. The focused window accepted input, rendered continuously, and an
+Escape action followed the public `Game.stop()` path. The process exited with
+code 0 and printed:
+
+```text
+obstacle_course: PASS finished=False frames=10137 draw_calls=12 fixed_ticks=3383
+```
+
+`finished=False` is expected for this visual lifecycle check because the
+automation driver emits taps rather than held movement; deterministic course
+completion is covered by the headless regression below. Pointer capture also
+made synthetic border dragging unreliable, so this run is not claimed as new
+relative-mouse or resize proof. The already-validated Phase 0 interactive
+resize evidence remains applicable to the same SDL/bgfx window path. No
+physical gamepad was available.
+
+### Failures found and corrected
+
+The first compile check used the nonexistent `src\easy3d` path and printed
+`Can't list 'src\\easy3d'`. `compileall` returns zero for that condition, so the
+command was explicitly corrected to the real `python` package directory and
+rerun successfully. The first editable install exceeded its initial output
+yield while the isolated CMake build was still active; process inspection
+confirmed that it was compiling rather than blocked. It completed successfully,
+and a second fully captured run supplied the exact wheel evidence below. No
+test or product failure was bypassed.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=5495632
+sha256=dce5ab388cbb291c24aa4f748a19d0de9afed39c6c29e2852edad6009267a4b2
+Successfully installed easy3d-0.1.0
+
+cmake --build build/windows-headless --config Debug --parallel 4
+ctest --test-dir build/windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.20 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.39 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.26 sec
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_obstacle_course.py -q
+.                                                                        [100%]
+1 passed in 0.09s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 73%]
+..........................                                               [100%]
+98 passed in 0.41s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+0.1.0
+```
+
+Phase 2.9 and the Phase 2 exit gate: **DONE**. Immediate next task: Phase 3.1 —
+platform-neutral transport interfaces, bounded queues, and deterministic
+loss/latency simulation tests. No networking implementation is claimed yet.

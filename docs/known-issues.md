@@ -35,12 +35,12 @@ scheduler: simulation objects belong in `fixed_update`, render objects in
 not an engine-managed timer service.
 
 The Jolt job backend is deliberately single-threaded. It establishes correct
-headless ownership/fixed stepping but is not a physics throughput claim. Phase
-2.5 exposes box/sphere colliders, static/kinematic/dynamic bodies, materials,
-forces/impulses and trigger configuration. Capsule/convex/mesh shapes, CCD and
-constraints remain Phase 2.8. Phase 2.6 queries cover ray, sphere/capsule cast,
-and box/sphere overlap, but do not yet include convex casts or arbitrary mesh
-query shapes. Physics entities cannot be parented until moving-parent pose
+headless ownership/fixed stepping but is not a physics throughput claim. The
+completed Phase 2 physics surface includes box/sphere/capsule/convex/static-mesh
+colliders, rigid bodies, materials, forces/impulses, triggers, linear-cast CCD,
+and fixed/distance constraints. Queries cover ray, sphere/capsule cast, and
+box/sphere overlap, but do not yet include convex casts or arbitrary mesh query
+shapes. Physics entities cannot be parented until moving-parent pose
 synchronization has a tested contract. Compound subshape contact aggregation is
 also deferred with compound shape support.
 Collider dimensions and material values are construction-time state in Phase
@@ -64,12 +64,13 @@ does not eliminate the documented extreme-angular-motion case.
 
 Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,
 and gamepad connect/disconnect behavior are covered by platform-neutral native
-tests. The desktop automation host did not retain focus on the diagnostic window
-long enough to observe applied SDL relative mouse mode after the strict focus
-guard was added, so live pointer lock remains **UNVERIFIED**. No physical
-gamepad was connected during this checkpoint, so real-controller button labels,
-hot-plug behavior, and axis hardware are also **UNVERIFIED**. The current API
-selects one primary gamepad; multi-gamepad player assignment is not yet exposed.
+tests. The Phase 2.9 D3D11 course received focus and accepted synthetic key
+taps, but the automation driver cannot represent held movement and its pointer
+capture prevented a reliable border-drag check. Live relative-mouse behavior
+therefore remains **UNVERIFIED**. No physical gamepad was connected during this
+checkpoint, so real-controller button labels, hot-plug behavior, and axis
+hardware are also **UNVERIFIED**. The current API selects one primary gamepad;
+multi-gamepad player assignment is not yet exposed.
 
 ## Visual Studio 2022 minimum is not independently exercised here
 

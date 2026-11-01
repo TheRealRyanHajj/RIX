@@ -1,13 +1,11 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. The current implementation includes the validated Phase 0 native
-foundation, generation-safe scene/entity lifetimes, native transform
-hierarchies, scene-owned cameras, and indexed solid/textured D3D11 materials
-with shared PNG/JPEG and OBJ/MTL loading. Native scene render components now
-power beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities with
-ambient/directional lighting and debug lines, without per-frame Python draw
-submission.
+native core. Phases 0–2 are validated: the engine has a native D3D11 renderer,
+generation-safe scenes and entities, shared assets and render components,
+Python gameplay callbacks and utilities, remappable input, and a headless Jolt
+physics foundation with rigid bodies, queries, events, character motors,
+advanced shapes, joints, and CCD.
 
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
@@ -289,6 +287,18 @@ jump speed, slope limit, step height, radius, and total capsule height are
 construction-time configuration. Character transforms are solver-owned; use
 `player.controller.teleport(...)` for an explicit discontinuity.
 
+Run the complete Phase 2 course with:
+
+```powershell
+python examples/03_obstacle_course/main.py
+```
+
+It combines the public input, script, character, rigid-body, trigger, lighting,
+camera, and scene APIs. Use WASD/arrows to move, mouse or Q/E to turn, Space to
+jump, and Escape to stop. See
+[`examples/03_obstacle_course/README.md`](examples/03_obstacle_course/README.md)
+for its gamepad controls and bounded smoke-run command.
+
 Advanced physics keeps the same component model. Capsules and convex hulls may
 be dynamic; OBJ triangle meshes are static-only. Fast dynamic bodies opt into
 linear-cast CCD, and scene-owned fixed/distance joints live in
@@ -359,8 +369,8 @@ hardware/workload measurements, not general capacity guarantees.
 
 ## Scope and license
 
-Advanced lighting, physics, broader asset pipelines, and multiplayer systems
-remain incomplete. The repository is private and
+Advanced lighting, broader asset pipelines, and multiplayer systems remain
+incomplete. The repository is private and
 proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 
