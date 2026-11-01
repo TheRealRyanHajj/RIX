@@ -206,17 +206,34 @@ class Entity:
 
         self._scene._destroy_entity(self)
 
+    def add_component(
+        self, component_type: type[_ComponentT], **kwargs: Any
+    ) -> _ComponentT:
+        """Attach a supported singleton component and return its live facade."""
+
+        from .components import Collider, Rigidbody
+
+        if component_type is Collider:
+            return cast(_ComponentT, Collider(self, **kwargs))
+        if component_type is Rigidbody:
+            return cast(_ComponentT, Rigidbody(self, **kwargs))
+        raise TypeError("unsupported component type for add_component")
+
     def has_component(self, component_type: type[_ComponentT]) -> bool:
-        from .components import LightComponent, MeshRenderer
+        from .components import Collider, LightComponent, MeshRenderer, Rigidbody
 
         if component_type is MeshRenderer:
             return self._scene._native.has_render_component(self._handle)
         if component_type is LightComponent:
             return self._scene._native.has_light_component(self._handle)
+        if component_type is Collider:
+            return self._scene._native.has_collider_component(self._handle)
+        if component_type is Rigidbody:
+            return self._scene._native.has_rigid_body_component(self._handle)
         raise TypeError("unsupported component type")
 
     def get_component(self, component_type: type[_ComponentT]) -> _ComponentT | None:
-        from .components import LightComponent, MeshRenderer
+        from .components import Collider, LightComponent, MeshRenderer, Rigidbody
 
         if component_type is MeshRenderer:
             return (
@@ -228,6 +245,18 @@ class Entity:
             return (
                 cast(_ComponentT, LightComponent(self))
                 if self.has_component(LightComponent)
+                else None
+            )
+        if component_type is Collider:
+            return (
+                cast(_ComponentT, Collider._existing(self))
+                if self.has_component(Collider)
+                else None
+            )
+        if component_type is Rigidbody:
+            return (
+                cast(_ComponentT, Rigidbody._existing(self))
+                if self.has_component(Rigidbody)
                 else None
             )
         raise TypeError("unsupported component type")

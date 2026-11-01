@@ -53,6 +53,13 @@ struct PhysicsWorldConfig final {
     std::size_t temporary_allocator_bytes{10U * 1024U * 1024U};
 };
 
+struct PhysicsMaterial final {
+    float friction{0.2F};
+    float restitution{0.0F};
+
+    void validate() const;
+};
+
 struct PhysicsBodySettings final {
     PhysicsShape shape{PhysicsShape::Box};
     PhysicsMotionType motion_type{PhysicsMotionType::Dynamic};
@@ -61,6 +68,10 @@ struct PhysicsBodySettings final {
     Quat rotation{};
     Vec3 half_extents{0.5F, 0.5F, 0.5F};
     float radius{0.5F};
+    PhysicsMaterial material{};
+    float mass{1.0F};
+    float gravity_factor{1.0F};
+    Vec3 linear_velocity{};
 };
 
 class PhysicsWorld final {
@@ -87,6 +98,10 @@ public:
     [[nodiscard]] Vec3 body_position(PhysicsBodyHandle handle) const;
     [[nodiscard]] Quat body_rotation(PhysicsBodyHandle handle) const;
     [[nodiscard]] Vec3 body_linear_velocity(PhysicsBodyHandle handle) const;
+    void set_body_linear_velocity(PhysicsBodyHandle handle, Vec3 velocity);
+    void set_body_transform(PhysicsBodyHandle handle, Vec3 position, Quat rotation);
+    void add_force(PhysicsBodyHandle handle, Vec3 force);
+    void add_impulse(PhysicsBodyHandle handle, Vec3 impulse);
 
     void step(float delta_seconds, std::uint32_t collision_steps = 1);
     [[nodiscard]] std::uint64_t step_count() const noexcept;

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeAlias
+
+from .math import Quat, Vec3
 
 if TYPE_CHECKING:
     from .entity import Entity
@@ -12,6 +15,9 @@ if TYPE_CHECKING:
 ColorValue: TypeAlias = tuple[float, float, float] | tuple[float, float, float, float]
 RenderKind: TypeAlias = Literal["cube", "plane", "sphere", "model"]
 LightKind: TypeAlias = Literal["ambient", "directional"]
+ColliderShape: TypeAlias = Literal["box", "sphere"]
+CollisionLayer: TypeAlias = Literal["static", "dynamic", "sensor", "character"]
+RigidBodyType: TypeAlias = Literal["dynamic", "kinematic"]
 
 
 def normalize_color(value: ColorValue) -> tuple[float, float, float, float]:
@@ -23,6 +29,36 @@ def normalize_color(value: ColorValue) -> tuple[float, float, float, float]:
     if len(components) == 3:
         return components[0], components[1], components[2], 1.0
     return components  # type: ignore[return-value]
+
+
+def _finite_non_negative(value: float, name: str) -> float:
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise ValueError(f"{name} must be finite and non-negative")
+    return result
+
+
+def _finite_positive(value: float, name: str) -> float:
+    result = float(value)
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError(f"{name} must be finite and positive")
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicsMaterial:
+    """Per-collider Coulomb friction and bounce coefficients."""
+
+    friction: float = 0.2
+    restitution: float = 0.0
+
+    def __post_init__(self) -> None:
+        friction = _finite_non_negative(self.friction, "friction")
+        restitution = float(self.restitution)
+        if not math.isfinite(restitution) or not 0 <= restitution <= 1:
+            raise ValueError("restitution must be finite and between 0 and 1")
+        object.__setattr__(self, "friction", friction)
+        object.__setattr__(self, "restitution", restitution)
 
 
 class MeshRenderer:
@@ -129,3 +165,202 @@ class LightComponent:
     def remove(self) -> None:
         self._entity.scene._require_mutable()
         self._entity.scene._native.remove_light_component(self._entity._handle)
+
+
+class Collider:
+    """Live facade for an entity's singleton native box or sphere collider."""
+
+    __slots__ = ("_entity",)
+
+    def __init__(
+        self,
+        entity: Entity,
+        *,
+        shape: ColliderShape = "box",
+        half_extents: Vec3 | tuple[float, float, float] = (0.5, 0.5, 0.5),
+        radius: float = 0.5,
+        trigger: bool = False,
+        layer: CollisionLayer = "dynamic",
+        material: PhysicsMaterial | None = None,
+    ) -> None:
+        if shape not in ("box", "sphere"):
+            raise ValueError("collider shape must be 'box' or 'sphere'")
+        if layer not in ("static", "dynamic", "sensor", "character"):
+            raise ValueError(
+                "collision layer must be static, dynamic, sensor, or character"
+            )
+        if not isinstance(trigger, bool):
+            raise TypeError("trigger must be a bool")
+        extents = Vec3.from_value(half_extents)
+        if min(extents.x, extents.y, extents.z) <= 0:
+            raise ValueError("collider half extents must be positive")
+        radius_value = _finite_positive(radius, "collider radius")
+        material_value = PhysicsMaterial() if material is None else material
+        if not isinstance(material_value, PhysicsMaterial):
+            raise TypeError("material must be an easy3d.PhysicsMaterial")
+        entity.scene._require_mutable()
+        entity.scene._native.add_collider_component(
+            entity._handle,
+            shape,
+            tuple(extents),
+            radius_value,
+            trigger,
+            layer,
+            material_value.friction,
+            material_value.restitution,
+        )
+        self._entity = entity
+
+    @classmethod
+    def _existing(cls, entity: Entity) -> Collider:
+        component = cls.__new__(cls)
+        component._entity = entity
+        return component
+
+    def _info(
+        self,
+    ) -> tuple[str, tuple[float, float, float], float, bool, str, float, float]:
+        shape, extents, radius, trigger, layer, friction, restitution = (
+            self._entity.scene._native.collider_component_info(
+                self._entity._handle
+            )
+        )
+        return shape, tuple(extents), radius, trigger, layer, friction, restitution
+
+    @property
+    def entity(self) -> Entity:
+        return self._entity
+
+    @property
+    def shape(self) -> ColliderShape:
+        return self._info()[0]  # type: ignore[return-value]
+
+    @property
+    def half_extents(self) -> Vec3:
+        return Vec3(self._info()[1])
+
+    @property
+    def radius(self) -> float:
+        return self._info()[2]
+
+    @property
+    def is_trigger(self) -> bool:
+        return self._info()[3]
+
+    @property
+    def layer(self) -> CollisionLayer:
+        return self._info()[4]  # type: ignore[return-value]
+
+    @property
+    def material(self) -> PhysicsMaterial:
+        info = self._info()
+        return PhysicsMaterial(info[5], info[6])
+
+    def remove(self) -> None:
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.remove_collider_component(self._entity._handle)
+
+
+class Rigidbody:
+    """Live facade for native rigid-body motion attached to a collider."""
+
+    __slots__ = ("_entity",)
+
+    def __init__(
+        self,
+        entity: Entity,
+        *,
+        body_type: RigidBodyType = "dynamic",
+        mass: float = 1.0,
+        use_gravity: bool = True,
+    ) -> None:
+        if body_type not in ("dynamic", "kinematic"):
+            raise ValueError("body_type must be 'dynamic' or 'kinematic'")
+        if not isinstance(use_gravity, bool):
+            raise TypeError("use_gravity must be a bool")
+        mass_value = _finite_positive(mass, "rigid body mass")
+        entity.scene._require_mutable()
+        entity.scene._native.add_rigid_body_component(
+            entity._handle, body_type, mass_value, use_gravity
+        )
+        self._entity = entity
+
+    @classmethod
+    def _existing(cls, entity: Entity) -> Rigidbody:
+        component = cls.__new__(cls)
+        component._entity = entity
+        return component
+
+    def _info(self) -> tuple[str, float, bool]:
+        return self._entity.scene._native.rigid_body_component_info(
+            self._entity._handle
+        )
+
+    @property
+    def entity(self) -> Entity:
+        return self._entity
+
+    @property
+    def body_type(self) -> RigidBodyType:
+        return self._info()[0]  # type: ignore[return-value]
+
+    @property
+    def mass(self) -> float:
+        return self._info()[1]
+
+    @property
+    def use_gravity(self) -> bool:
+        return self._info()[2]
+
+    @property
+    def linear_velocity(self) -> Vec3:
+        return Vec3(
+            self._entity.scene._native.rigid_body_linear_velocity(
+                self._entity._handle
+            )
+        )
+
+    @linear_velocity.setter
+    def linear_velocity(self, value: Vec3 | tuple[float, float, float]) -> None:
+        velocity = Vec3.from_value(value)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_rigid_body_linear_velocity(
+            self._entity._handle, tuple(velocity)
+        )
+
+    def add_force(self, force: Vec3 | tuple[float, float, float]) -> None:
+        value = Vec3.from_value(force)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.add_rigid_body_force(
+            self._entity._handle, tuple(value)
+        )
+
+    def add_impulse(self, impulse: Vec3 | tuple[float, float, float]) -> None:
+        value = Vec3.from_value(impulse)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.add_rigid_body_impulse(
+            self._entity._handle, tuple(value)
+        )
+
+    def teleport(
+        self,
+        position: Vec3 | tuple[float, float, float],
+        rotation: Quat | Vec3 | tuple[float, float, float] | None = None,
+    ) -> None:
+        target_position = Vec3.from_value(position)
+        if rotation is None:
+            target_rotation = self._entity.quaternion
+        elif isinstance(rotation, Quat):
+            target_rotation = rotation
+        else:
+            target_rotation = Quat.from_euler(rotation)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.teleport_rigid_body(
+            self._entity._handle,
+            tuple(target_position),
+            tuple(target_rotation),
+        )
+
+    def remove(self) -> None:
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.remove_rigid_body_component(self._entity._handle)

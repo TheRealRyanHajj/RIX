@@ -226,7 +226,15 @@ the complete falling-body/collision/lifetime regression runs in the
 graphics-disabled build.
 
 The scheduler's fixed phase is currently `Python fixed_update → deferred
-mutation commit → Jolt PhysicsSystem::Update`. Collision callback dispatch will
-be inserted after the native update in Phase 2.6. Render updates remain after
-all catch-up physics ticks. Entity/body transform synchronization belongs to the
-Phase 2.5 component layer and is intentionally not inferred yet.
+mutation commit → Jolt PhysicsSystem::Update → dynamic entity pose sync`.
+Collision callback dispatch will be inserted after the native update in Phase
+2.6. Render updates remain after all catch-up physics ticks.
+
+`Scene` owns a generation-qualified entity-to-body table. Collider creation
+builds a static Jolt body from the entity world pose; attaching/removing a rigid
+body transactionally replaces that body with dynamic/kinematic or static
+motion. Entity destruction removes the body before invalidating the entity.
+Static and kinematic entity changes push pose into Jolt, while dynamic pose
+changes are accepted only through the explicit teleport API and otherwise flow
+from Jolt to the entity after a step. Physics entities reject parenting until a
+local/world solver synchronization contract is implemented.

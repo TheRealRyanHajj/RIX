@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace easy3d {
@@ -60,6 +61,25 @@ struct LightComponent final {
     LightKind kind{LightKind::Directional};
     Color color{};
     float intensity{1.0F};
+
+    void validate() const;
+};
+
+struct ColliderComponent final {
+    PhysicsShape shape{PhysicsShape::Box};
+    Vec3 half_extents{0.5F, 0.5F, 0.5F};
+    float radius{0.5F};
+    bool trigger{false};
+    CollisionLayer layer{CollisionLayer::Dynamic};
+    PhysicsMaterial material{};
+
+    void validate() const;
+};
+
+struct RigidBodyComponent final {
+    PhysicsMotionType motion_type{PhysicsMotionType::Dynamic};
+    float mass{1.0F};
+    bool use_gravity{true};
 
     void validate() const;
 };
@@ -217,6 +237,20 @@ public:
     void set_light_intensity(EntityHandle handle, float intensity);
     void remove_light_component(EntityHandle handle);
 
+    void add_collider_component(EntityHandle handle, ColliderComponent component);
+    [[nodiscard]] bool has_collider_component(EntityHandle handle) const;
+    [[nodiscard]] const ColliderComponent& collider_component(EntityHandle handle) const;
+    void remove_collider_component(EntityHandle handle);
+    void add_rigid_body_component(EntityHandle handle, RigidBodyComponent component);
+    [[nodiscard]] bool has_rigid_body_component(EntityHandle handle) const;
+    [[nodiscard]] const RigidBodyComponent& rigid_body_component(EntityHandle handle) const;
+    void remove_rigid_body_component(EntityHandle handle);
+    [[nodiscard]] Vec3 rigid_body_linear_velocity(EntityHandle handle) const;
+    void set_rigid_body_linear_velocity(EntityHandle handle, Vec3 velocity);
+    void add_rigid_body_force(EntityHandle handle, Vec3 force);
+    void add_rigid_body_impulse(EntityHandle handle, Vec3 impulse);
+    void teleport_rigid_body(EntityHandle handle, Vec3 position, Quat rotation);
+
     [[nodiscard]] const Camera& camera() const noexcept;
     void set_camera(Camera camera);
     void add_debug_line(DebugLine line);
@@ -234,6 +268,17 @@ public:
     [[nodiscard]] const World& world() const noexcept;
 
 private:
+    struct PhysicsEntity final {
+        ColliderComponent collider;
+        std::optional<RigidBodyComponent> rigid_body;
+        PhysicsBodyHandle body;
+    };
+
+    [[nodiscard]] PhysicsEntity& require_physics_entity(EntityHandle handle);
+    [[nodiscard]] const PhysicsEntity& require_physics_entity(EntityHandle handle) const;
+    [[nodiscard]] PhysicsBodyHandle create_physics_body(EntityHandle handle,
+                                                        const PhysicsEntity& component);
+    void replace_physics_body(EntityHandle handle, PhysicsEntity& component);
     static void validate_name(std::string_view name);
 
     std::string name_;
@@ -242,6 +287,7 @@ private:
     Camera camera_;
     std::vector<DebugLine> debug_lines_;
     std::unique_ptr<PhysicsWorld> physics_;
+    std::unordered_map<std::uint64_t, PhysicsEntity> physics_entities_;
 };
 
 } // namespace easy3d

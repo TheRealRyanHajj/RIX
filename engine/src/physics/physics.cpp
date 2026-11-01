@@ -184,6 +184,16 @@ void validate_settings(const PhysicsBodySettings& settings) {
         (!std::isfinite(settings.radius) || settings.radius <= 0.0F)) {
         throw std::invalid_argument("sphere radius must be finite and positive");
     }
+    settings.material.validate();
+    if (!std::isfinite(settings.mass) || settings.mass <= 0.0F) {
+        throw std::invalid_argument("physics body mass must be finite and positive");
+    }
+    if (!std::isfinite(settings.gravity_factor) || settings.gravity_factor < 0.0F) {
+        throw std::invalid_argument("physics gravity factor must be finite and non-negative");
+    }
+    if (!finite(settings.linear_velocity)) {
+        throw std::invalid_argument("physics linear velocity must be finite");
+    }
 }
 
 } // namespace
@@ -196,12 +206,22 @@ std::uint64_t PhysicsBodyHandle::id() const noexcept {
     return (static_cast<std::uint64_t>(generation) << 32U) | index;
 }
 
+void PhysicsMaterial::validate() const {
+    if (!std::isfinite(friction) || friction < 0.0F) {
+        throw std::invalid_argument("physics friction must be finite and non-negative");
+    }
+    if (!std::isfinite(restitution) || restitution < 0.0F || restitution > 1.0F) {
+        throw std::invalid_argument("physics restitution must be finite and between 0 and 1");
+    }
+}
+
 class PhysicsWorld::Impl final {
 public:
     struct Slot final {
         JPH::BodyID body_id;
         std::uint32_t generation{1};
         bool alive{false};
+        PhysicsMotionType motion_type{PhysicsMotionType::Static};
     };
 
     explicit Impl(PhysicsWorldConfig world_config)
@@ -343,6 +363,14 @@ PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings)
                                             to_jolt(settings.motion_type),
                                             to_jolt(settings.layer));
     body_settings.mIsSensor = settings.layer == CollisionLayer::Sensor;
+    body_settings.mFriction = settings.material.friction;
+    body_settings.mRestitution = settings.material.restitution;
+    body_settings.mGravityFactor = settings.gravity_factor;
+    body_settings.mLinearVelocity = to_jolt(settings.linear_velocity);
+    if (settings.motion_type == PhysicsMotionType::Dynamic) {
+        body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+        body_settings.mMassPropertiesOverride.mMass = settings.mass;
+    }
     const JPH::EActivation activation = settings.motion_type == PhysicsMotionType::Static
                                             ? JPH::EActivation::DontActivate
                                             : JPH::EActivation::Activate;
@@ -363,6 +391,7 @@ PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings)
     Impl::Slot& slot = impl_->slots[index];
     slot.body_id = body_id;
     slot.alive = true;
+    slot.motion_type = settings.motion_type;
     ++impl_->body_count;
     return PhysicsBodyHandle{impl_->world_id, index, slot.generation};
 }
@@ -406,6 +435,55 @@ Quat PhysicsWorld::body_rotation(const PhysicsBodyHandle handle) const {
 Vec3 PhysicsWorld::body_linear_velocity(const PhysicsBodyHandle handle) const {
     const Impl::Slot& slot = impl_->require_slot(handle);
     return from_jolt_vec(impl_->physics_system.GetBodyInterface().GetLinearVelocity(slot.body_id));
+}
+
+void PhysicsWorld::set_body_linear_velocity(const PhysicsBodyHandle handle,
+                                            const Vec3 velocity) {
+    const Impl::Slot& slot = impl_->require_slot(handle);
+    if (slot.motion_type == PhysicsMotionType::Static) {
+        throw PhysicsError("static physics bodies do not have linear velocity");
+    }
+    if (!finite(velocity)) {
+        throw std::invalid_argument("physics linear velocity must be finite");
+    }
+    impl_->physics_system.GetBodyInterface().SetLinearVelocity(slot.body_id, to_jolt(velocity));
+}
+
+void PhysicsWorld::set_body_transform(const PhysicsBodyHandle handle,
+                                      const Vec3 position,
+                                      const Quat rotation) {
+    const Impl::Slot& slot = impl_->require_slot(handle);
+    if (!finite(position) || !finite(rotation)) {
+        throw std::invalid_argument("physics body transform must be finite");
+    }
+    impl_->physics_system.GetBodyInterface().SetPositionAndRotation(
+        slot.body_id,
+        to_jolt_position(position),
+        to_jolt(rotation.normalized()),
+        slot.motion_type == PhysicsMotionType::Static ? JPH::EActivation::DontActivate
+                                                       : JPH::EActivation::Activate);
+}
+
+void PhysicsWorld::add_force(const PhysicsBodyHandle handle, const Vec3 force) {
+    const Impl::Slot& slot = impl_->require_slot(handle);
+    if (slot.motion_type != PhysicsMotionType::Dynamic) {
+        throw PhysicsError("forces require a dynamic physics body");
+    }
+    if (!finite(force)) {
+        throw std::invalid_argument("physics force must be finite");
+    }
+    impl_->physics_system.GetBodyInterface().AddForce(slot.body_id, to_jolt(force));
+}
+
+void PhysicsWorld::add_impulse(const PhysicsBodyHandle handle, const Vec3 impulse) {
+    const Impl::Slot& slot = impl_->require_slot(handle);
+    if (slot.motion_type != PhysicsMotionType::Dynamic) {
+        throw PhysicsError("impulses require a dynamic physics body");
+    }
+    if (!finite(impulse)) {
+        throw std::invalid_argument("physics impulse must be finite");
+    }
+    impl_->physics_system.GetBodyInterface().AddImpulse(slot.body_id, to_jolt(impulse));
 }
 
 void PhysicsWorld::step(const float delta_seconds, const std::uint32_t collision_steps) {

@@ -44,9 +44,10 @@ except InvalidEntityError:
 
 Implemented entity properties include `id`, `name`, `enabled`, `visible`,
 `scene`, `is_alive`, local/world transforms, `parent`, and `children`.
-`MeshRenderer` is the first singleton native component and is available through
-typed `has_component`, `get_component`, and `remove_component`. Physics and
-network identity remain later checklist items.
+`MeshRenderer`, `Collider`, and `Rigidbody` are singleton native components and
+are available through typed `has_component`, `get_component`, and
+`remove_component`; physics components are attached with `add_component`.
+Network identity remains a later checklist item.
 
 ## Renderable entities and components
 
@@ -288,7 +289,26 @@ cannot call them twice. Unsubscribing a listener before its turn suppresses it;
 new listeners wait for the next emission. Nested dispatch is supported up to a
 configurable bound. Listener exceptions propagate without being hidden.
 
-## Physics foundation
+## Physics components and foundation
+
+```python
+from easy3d import Collider, Entity, PhysicsMaterial, Rigidbody, Scene
+
+world = Scene("physics")
+floor = Entity("floor", scene=world)
+floor.position = (0, -0.5, 0)
+floor.add_component(
+    Collider,
+    half_extents=(5, 0.5, 5),
+    material=PhysicsMaterial(friction=0.8, restitution=0.0),
+)
+
+ball = Entity("ball", scene=world)
+ball.position = (0, 3, 0)
+ball.add_component(Collider, shape="sphere", radius=0.5)
+body = ball.add_component(Rigidbody, mass=2.0)
+body.add_impulse((2, 0, 0))
+```
 
 Jolt Physics is private behind `easy3d::PhysicsWorld`; no Jolt type crosses the
 public engine boundary. `PhysicsBodyHandle` contains physics-world identity,
@@ -299,9 +319,29 @@ temporary allocation. Capacity update errors are surfaced rather than ignored.
 The baseline object layers are `Static`, `Dynamic`, `Sensor`, and `Character`.
 Static/static and sensor/sensor pairs do not collide; other baseline pairs do.
 Static objects use Jolt's non-moving broadphase; all other layers use the moving
-broadphase. The native body foundation accepts box and sphere shapes plus
-static, kinematic and dynamic motion for lifecycle/step validation. This is not
-yet the Phase 2.5 Python component API.
+broadphase. Public box/sphere `Collider` values use explicit meter dimensions;
+`Cube`, `Plane`, and `Sphere` can create matching colliders with
+`collider=True`. A collider without a `Rigidbody` is static. Attaching a
+`Rigidbody` selects dynamic or kinematic motion. Trigger colliders use Jolt
+sensor bodies; collision/trigger event snapshots remain Phase 2.6.
+Collider geometry is captured in world-meter dimensions at construction and is
+not implicitly resized by later entity-scale changes; remove/recreate the
+collider when changing shape dimensions.
+
+`PhysicsMaterial` validates non-negative friction and restitution in `[0,1]`.
+Rigid-body mass is positive kilograms, linear velocity is meters/second, force
+is newtons, and impulse is newton-seconds. `use_gravity=False` gives the body a
+zero gravity factor without changing its scene. Forces and impulses require a
+dynamic body. Component construction is transactional, entity destruction
+releases its body, removing a rigid body returns its collider to static motion,
+and removing a collider also removes rigid-body motion.
+
+Dynamic transforms are physics-owned and synchronized to entities after every
+native step. Direct entity transform writes are rejected while a dynamic body
+is attached; `Rigidbody.teleport(position, rotation)` is the explicit override.
+Static and kinematic transform writes update Jolt immediately. Physics entities
+cannot be parented in this release because local/world conversion under moving
+parents is not yet a defined solver contract.
 
 Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
 `(0, -9.81, 0)` without allocation and creates the world when changed. During a

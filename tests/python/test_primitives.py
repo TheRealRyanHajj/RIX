@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import Cube, MeshRenderer, Model, Plane, Scene, Sphere
+from easy3d import Collider, Cube, MeshRenderer, Model, Plane, Scene, Sphere, Vec3
 
 
 def test_primitive_entities_and_component_lookup() -> None:
@@ -58,6 +58,24 @@ def test_model_entity_and_transactional_constructor_failure(tmp_path: Path) -> N
     with pytest.raises(Exception, match="missing.obj"):
         Model(tmp_path / "missing.obj", scene=scene)
     assert scene.entity_count == before
+
+
+def test_primitive_collider_convenience_uses_world_meter_dimensions() -> None:
+    scene = Scene()
+    cube = Cube(size=(2.0, 4.0, 6.0), collider=True, scene=scene)
+    plane = Plane(size=(10.0, 8.0), collider=True, scene=scene)
+    sphere = Sphere(radius=1.5, collider=True, scene=scene)
+
+    cube_collider = cube.get_component(Collider)
+    plane_collider = plane.get_component(Collider)
+    sphere_collider = sphere.get_component(Collider)
+    assert cube_collider is not None
+    assert plane_collider is not None
+    assert sphere_collider is not None
+    assert cube_collider.half_extents.almost_equal(Vec3(1.0, 2.0, 3.0))
+    assert plane_collider.half_extents.almost_equal(Vec3(5.0, 0.05, 4.0))
+    assert sphere_collider.shape == "sphere"
+    assert sphere_collider.radius == pytest.approx(1.5)
 
 
 def test_primitive_validation() -> None:

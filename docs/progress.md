@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.4 passed;
-Phase 2.5 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.5 passed;
+Phase 2.6 is next. Live pointer lock and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -1771,3 +1771,77 @@ build\venv311\Scripts\python.exe -c "import easy3d; s=easy3d.Scene(); print(easy
 
 Phase 2.4: **DONE**. Immediate next task: Phase 2.5 — public collider and rigid
 body components, forces/impulses, physical materials and trigger behavior.
+
+## 2026-11-01 — Phase 2.5 public physics components
+
+### Implemented
+
+- Added scene-owned native `ColliderComponent` and `RigidBodyComponent` state
+  with deterministic entity/body teardown, singleton checks and generation-safe
+  lookups. Box/sphere colliders can be static, dynamic, kinematic or sensors.
+- Added validated `PhysicsMaterial` friction/restitution, positive mass, gravity
+  factor, linear velocity, force, impulse and explicit teleport operations.
+  Units are meters, kilograms, seconds, newtons and newton-seconds.
+- Added solver-to-entity synchronization after fixed steps. Dynamic transform
+  assignment is rejected in favor of explicit teleport; static/kinematic poses
+  push into Jolt. Physics parenting is rejected pending a tested moving-parent
+  contract.
+- Added typed Python `Collider`, `Rigidbody`, and `PhysicsMaterial` facades,
+  `Entity.add_component` integration, top-level/module exports, and matching
+  `collider=True` convenience for cube, plane and sphere primitives.
+- Added native and Python regression coverage for material/mass conversions,
+  impulses, forces, velocity, gravity opt-out, trigger configuration, fixed-step
+  pose synchronization, component removal, entity destruction and validation.
+  Trigger event delivery and queries remain correctly deferred to Phase 2.6.
+
+### Failures found and fixed
+
+The first focused Python run reported `1 failed, 5 passed`: a test compared a
+Jolt `float` friction round-trip (`0.800000011920929`) with Python `0.8` using
+exact dataclass equality. It now uses the documented approximate-float policy.
+The primitive convenience test initially passed tuples to `Vec3.almost_equal`,
+whose contract requires another `Vec3`; the test was corrected without relaxing
+the implementation. No engine failure was bypassed.
+
+### Exact final verification evidence
+
+```text
+cmake --build build/windows-headless --parallel
+ctest --test-dir build/windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.76 sec
+
+cmake --build build/windows-debug --config Debug --parallel
+ctest --test-dir build/windows-debug -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 1.66 sec
+
+cmake --build build/windows-release --config Release --parallel
+ctest --test-dir build/windows-release -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.77 sec
+
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3244778
+sha256=7276c55115d76aada1f324e33a8cefff4945d51f99057417d5ee8e848f6d2389
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_physics_components.py -q
+......                                                                   [100%]
+6 passed in 0.07s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 86%]
+...........                                                              [100%]
+83 passed in 0.22s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); e=Entity(scene=s); c=e.add_component(Collider, shape='sphere'); b=e.add_component(Rigidbody, mass=2); print(engine_version(), c.shape, b.mass, s.physics_step_count)"
+0.1.0 sphere 2.0 0
+```
+
+Phase 2.5: **DONE**. Immediate next task: Phase 2.6 — native physics queries and
+safe collision/trigger enter, stay and exit event snapshots.

@@ -117,6 +117,33 @@ void LightComponent::validate() const {
     }
 }
 
+void ColliderComponent::validate() const {
+    material.validate();
+    if (shape == PhysicsShape::Box &&
+        (!finite(half_extents) || half_extents.x <= 0.0F || half_extents.y <= 0.0F ||
+         half_extents.z <= 0.0F)) {
+        throw std::invalid_argument("collider half extents must be finite and positive");
+    }
+    if (shape == PhysicsShape::Sphere &&
+        (!std::isfinite(radius) || radius <= 0.0F)) {
+        throw std::invalid_argument("collider radius must be finite and positive");
+    }
+    if (static_cast<std::uint8_t>(layer) >
+        static_cast<std::uint8_t>(CollisionLayer::Character)) {
+        throw std::invalid_argument("unknown collider collision layer");
+    }
+}
+
+void RigidBodyComponent::validate() const {
+    if (motion_type == PhysicsMotionType::Static) {
+        throw std::invalid_argument(
+            "static colliders do not need a rigid body; use dynamic or kinematic");
+    }
+    if (!std::isfinite(mass) || mass <= 0.0F) {
+        throw std::invalid_argument("rigid body mass must be finite and positive");
+    }
+}
+
 World::World() : id_(next_world_id.fetch_add(1, std::memory_order_relaxed)) {
     if (id_ == 0) {
         throw EngineError("Easy3D exhausted native world identifiers");
@@ -577,10 +604,17 @@ EntityHandle Scene::create_entity(std::string name) {
 }
 
 void Scene::destroy_entity(const EntityHandle handle) {
+    (void)world_.entity_name(handle);
+    const auto physics_component = physics_entities_.find(handle.id());
+    if (physics_component != physics_entities_.end()) {
+        physics_->destroy_body(physics_component->second.body);
+        physics_entities_.erase(physics_component);
+    }
     world_.destroy_entity(handle);
 }
 
 void Scene::clear() noexcept {
+    physics_entities_.clear();
     world_.clear();
     debug_lines_.clear();
     if (physics_) {
@@ -629,7 +663,20 @@ Transform Scene::local_transform(const EntityHandle handle) const {
 }
 
 void Scene::set_local_transform(const EntityHandle handle, const Transform transform) {
+    (void)world_.entity_name(handle);
+    const auto physics_component = physics_entities_.find(handle.id());
+    if (physics_component != physics_entities_.end() &&
+        physics_component->second.rigid_body.has_value() &&
+        physics_component->second.rigid_body->motion_type == PhysicsMotionType::Dynamic) {
+        throw PhysicsError(
+            "dynamic rigid body transforms are physics-owned; use Rigidbody.teleport()");
+    }
     world_.set_local_transform(handle, transform);
+    if (physics_component != physics_entities_.end()) {
+        const Transform updated = world_.world_transform(handle);
+        physics_->set_body_transform(
+            physics_component->second.body, updated.position, updated.rotation);
+    }
 }
 
 Transform Scene::world_transform(const EntityHandle handle) const {
@@ -647,6 +694,10 @@ std::vector<EntityHandle> Scene::entity_children(const EntityHandle handle) cons
 void Scene::set_entity_parent(const EntityHandle child,
                               const std::optional<EntityHandle> parent,
                               const bool keep_world) {
+    (void)world_.entity_name(child);
+    if (parent.has_value() && physics_entities_.contains(child.id())) {
+        throw PhysicsError("physics entities cannot be parented in this release");
+    }
     world_.set_entity_parent(child, parent, keep_world);
 }
 
@@ -711,6 +762,124 @@ void Scene::remove_light_component(const EntityHandle handle) {
     world_.remove_light_component(handle);
 }
 
+void Scene::add_collider_component(const EntityHandle handle,
+                                   ColliderComponent component) {
+    (void)world_.entity_name(handle);
+    component.validate();
+    if (world_.entity_parent(handle).has_value()) {
+        throw PhysicsError("physics entities cannot be parented in this release");
+    }
+    if (physics_entities_.contains(handle.id())) {
+        throw std::invalid_argument("entity already has a collider component");
+    }
+
+    PhysicsEntity physics_component{std::move(component), std::nullopt, {}};
+    physics_component.body = create_physics_body(handle, physics_component);
+    try {
+        physics_entities_.emplace(handle.id(), std::move(physics_component));
+    } catch (...) {
+        physics_->destroy_body(physics_component.body);
+        throw;
+    }
+}
+
+bool Scene::has_collider_component(const EntityHandle handle) const {
+    (void)world_.entity_name(handle);
+    return physics_entities_.contains(handle.id());
+}
+
+const ColliderComponent& Scene::collider_component(const EntityHandle handle) const {
+    return require_physics_entity(handle).collider;
+}
+
+void Scene::remove_collider_component(const EntityHandle handle) {
+    PhysicsEntity& component = require_physics_entity(handle);
+    physics_->destroy_body(component.body);
+    physics_entities_.erase(handle.id());
+}
+
+void Scene::add_rigid_body_component(const EntityHandle handle,
+                                     RigidBodyComponent component) {
+    component.validate();
+    PhysicsEntity& physics_component = require_physics_entity(handle);
+    if (physics_component.rigid_body.has_value()) {
+        throw std::invalid_argument("entity already has a rigid body component");
+    }
+    physics_component.rigid_body = component;
+    try {
+        replace_physics_body(handle, physics_component);
+    } catch (...) {
+        physics_component.rigid_body.reset();
+        throw;
+    }
+}
+
+bool Scene::has_rigid_body_component(const EntityHandle handle) const {
+    (void)world_.entity_name(handle);
+    const auto component = physics_entities_.find(handle.id());
+    return component != physics_entities_.end() && component->second.rigid_body.has_value();
+}
+
+const RigidBodyComponent& Scene::rigid_body_component(const EntityHandle handle) const {
+    const PhysicsEntity& component = require_physics_entity(handle);
+    if (!component.rigid_body.has_value()) {
+        throw std::invalid_argument("entity does not have a rigid body component");
+    }
+    return *component.rigid_body;
+}
+
+void Scene::remove_rigid_body_component(const EntityHandle handle) {
+    PhysicsEntity& component = require_physics_entity(handle);
+    if (!component.rigid_body.has_value()) {
+        throw std::invalid_argument("entity does not have a rigid body component");
+    }
+    const RigidBodyComponent previous = *component.rigid_body;
+    component.rigid_body.reset();
+    try {
+        replace_physics_body(handle, component);
+    } catch (...) {
+        component.rigid_body = previous;
+        throw;
+    }
+}
+
+Vec3 Scene::rigid_body_linear_velocity(const EntityHandle handle) const {
+    const PhysicsEntity& component = require_physics_entity(handle);
+    (void)rigid_body_component(handle);
+    return physics_->body_linear_velocity(component.body);
+}
+
+void Scene::set_rigid_body_linear_velocity(const EntityHandle handle,
+                                           const Vec3 velocity) {
+    PhysicsEntity& component = require_physics_entity(handle);
+    (void)rigid_body_component(handle);
+    physics_->set_body_linear_velocity(component.body, velocity);
+}
+
+void Scene::add_rigid_body_force(const EntityHandle handle, const Vec3 force) {
+    PhysicsEntity& component = require_physics_entity(handle);
+    (void)rigid_body_component(handle);
+    physics_->add_force(component.body, force);
+}
+
+void Scene::add_rigid_body_impulse(const EntityHandle handle, const Vec3 impulse) {
+    PhysicsEntity& component = require_physics_entity(handle);
+    (void)rigid_body_component(handle);
+    physics_->add_impulse(component.body, impulse);
+}
+
+void Scene::teleport_rigid_body(const EntityHandle handle,
+                                const Vec3 position,
+                                const Quat rotation) {
+    PhysicsEntity& component = require_physics_entity(handle);
+    (void)rigid_body_component(handle);
+    Transform transform = world_.local_transform(handle);
+    transform.position = position;
+    transform.rotation = rotation;
+    world_.set_local_transform(handle, transform);
+    physics_->set_body_transform(component.body, position, rotation);
+}
+
 const Camera& Scene::camera() const noexcept {
     return camera_;
 }
@@ -744,6 +913,25 @@ void Scene::set_physics_gravity(const Vec3 gravity) {
 void Scene::step_physics(const float delta_seconds) {
     if (physics_) {
         physics_->step(delta_seconds);
+        for (const auto& [entity_id, component] : physics_entities_) {
+            (void)entity_id;
+            if (!component.rigid_body.has_value() ||
+                component.rigid_body->motion_type != PhysicsMotionType::Dynamic) {
+                continue;
+            }
+            Transform transform = world_.local_transform(EntityHandle{
+                world_.id(),
+                static_cast<std::uint32_t>(entity_id & 0xffff'ffffULL),
+                static_cast<std::uint32_t>(entity_id >> 32U),
+            });
+            transform.position = physics_->body_position(component.body);
+            transform.rotation = physics_->body_rotation(component.body);
+            world_.set_local_transform(
+                EntityHandle{world_.id(),
+                             static_cast<std::uint32_t>(entity_id & 0xffff'ffffULL),
+                             static_cast<std::uint32_t>(entity_id >> 32U)},
+                transform);
+        }
     }
 }
 
@@ -760,6 +948,55 @@ PhysicsWorld& Scene::physics() {
 
 const PhysicsWorld* Scene::physics_if_initialized() const noexcept {
     return physics_.get();
+}
+
+Scene::PhysicsEntity& Scene::require_physics_entity(const EntityHandle handle) {
+    (void)world_.entity_name(handle);
+    const auto component = physics_entities_.find(handle.id());
+    if (component == physics_entities_.end()) {
+        throw std::invalid_argument("entity does not have a collider component");
+    }
+    return component->second;
+}
+
+const Scene::PhysicsEntity& Scene::require_physics_entity(const EntityHandle handle) const {
+    (void)world_.entity_name(handle);
+    const auto component = physics_entities_.find(handle.id());
+    if (component == physics_entities_.end()) {
+        throw std::invalid_argument("entity does not have a collider component");
+    }
+    return component->second;
+}
+
+PhysicsBodyHandle Scene::create_physics_body(const EntityHandle handle,
+                                             const PhysicsEntity& component) {
+    const Transform transform = world_.world_transform(handle);
+    PhysicsBodySettings settings{};
+    settings.shape = component.collider.shape;
+    settings.position = transform.position;
+    settings.rotation = transform.rotation;
+    settings.half_extents = component.collider.half_extents;
+    settings.radius = component.collider.radius;
+    settings.material = component.collider.material;
+    settings.motion_type = component.rigid_body.has_value()
+                               ? component.rigid_body->motion_type
+                               : PhysicsMotionType::Static;
+    settings.layer = component.collider.trigger
+                         ? CollisionLayer::Sensor
+                         : (component.rigid_body.has_value() ? component.collider.layer
+                                                             : CollisionLayer::Static);
+    if (component.rigid_body.has_value()) {
+        settings.mass = component.rigid_body->mass;
+        settings.gravity_factor = component.rigid_body->use_gravity ? 1.0F : 0.0F;
+    }
+    return physics().create_body(settings);
+}
+
+void Scene::replace_physics_body(const EntityHandle handle,
+                                 PhysicsEntity& component) {
+    const PhysicsBodyHandle replacement = create_physics_body(handle, component);
+    physics_->destroy_body(component.body);
+    component.body = replacement;
 }
 
 World& Scene::world() noexcept {

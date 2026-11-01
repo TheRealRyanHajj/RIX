@@ -34,12 +34,17 @@ scheduler: simulation objects belong in `fixed_update`, render objects in
 `update`, and wall objects require `poll()`. This is an explicit ownership rule,
 not an engine-managed timer service.
 
-The Phase 2.4 Jolt job backend is deliberately single-threaded. It establishes
-correct headless ownership/fixed stepping but is not a physics throughput claim.
-Python collider/rigid-body components, entity transform synchronization,
-forces/materials, queries and collision/trigger callbacks remain Phase 2.5–2.6
-work. Only the native foundation and per-scene gravity/step diagnostic are
-public at this checkpoint.
+The Jolt job backend is deliberately single-threaded. It establishes correct
+headless ownership/fixed stepping but is not a physics throughput claim. Phase
+2.5 exposes box/sphere colliders, static/kinematic/dynamic bodies, materials,
+forces/impulses and trigger configuration. Capsule/convex/mesh shapes, CCD and
+constraints remain Phase 2.8. Queries and collision/trigger enter/stay/exit
+callbacks remain Phase 2.6; creating a trigger now does not yet provide a public
+notification. Physics entities cannot be parented until moving-parent pose
+synchronization has a tested contract.
+Collider dimensions and material values are construction-time state in Phase
+2.5. Later entity scaling does not silently rebuild Jolt shapes; callers must
+remove and recreate a collider when its physical geometry changes.
 
 ## Input hardware validation
 

@@ -6,7 +6,7 @@ import math
 from os import PathLike
 from typing import TYPE_CHECKING
 
-from .components import ColorValue, normalize_color
+from .components import Collider, ColorValue, normalize_color
 from .entity import Entity
 from .math import Vec3
 
@@ -48,6 +48,7 @@ class Cube(Entity):
         color: ColorValue = (1, 1, 1, 1),
         texture: str | PathLike[str] | None = None,
         lit: bool = True,
+        collider: bool = False,
         name: str = "Cube",
         scene: Scene | None = None,
     ) -> None:
@@ -60,6 +61,8 @@ class Cube(Entity):
             scale = Vec3(extent, extent, extent)
         native_color = normalize_color(color)
         native_lit = _lit(lit)
+        if not isinstance(collider, bool):
+            raise TypeError("collider must be a bool")
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_primitive_renderer(
@@ -70,6 +73,12 @@ class Cube(Entity):
             )
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, scale)
+            if collider:
+                self.add_component(
+                    Collider,
+                    shape="box",
+                    half_extents=(scale.x * 0.5, scale.y * 0.5, scale.z * 0.5),
+                )
         except Exception:
             self.scene._rollback_entity_construction(self)
             raise
@@ -85,6 +94,7 @@ class Plane(Entity):
         color: ColorValue = (1, 1, 1, 1),
         texture: str | PathLike[str] | None = None,
         lit: bool = True,
+        collider: bool = False,
         name: str = "Plane",
         scene: Scene | None = None,
     ) -> None:
@@ -97,6 +107,8 @@ class Plane(Entity):
             width = depth = _positive(size, "plane size")
         native_color = normalize_color(color)
         native_lit = _lit(lit)
+        if not isinstance(collider, bool):
+            raise TypeError("collider must be a bool")
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_primitive_renderer(
@@ -107,6 +119,12 @@ class Plane(Entity):
             )
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, (width, 1.0, depth))
+            if collider:
+                self.add_component(
+                    Collider,
+                    shape="box",
+                    half_extents=(width * 0.5, 0.05, depth * 0.5),
+                )
         except Exception:
             self.scene._rollback_entity_construction(self)
             raise
@@ -122,12 +140,16 @@ class Sphere(Entity):
         color: ColorValue = (1, 1, 1, 1),
         texture: str | PathLike[str] | None = None,
         lit: bool = True,
+        collider: bool = False,
         name: str = "Sphere",
         scene: Scene | None = None,
     ) -> None:
-        diameter = _positive(radius, "sphere radius") * 2.0
+        radius_value = _positive(radius, "sphere radius")
+        diameter = radius_value * 2.0
         native_color = normalize_color(color)
         native_lit = _lit(lit)
+        if not isinstance(collider, bool):
+            raise TypeError("collider must be a bool")
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_primitive_renderer(
@@ -138,6 +160,8 @@ class Sphere(Entity):
             )
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, (diameter, diameter, diameter))
+            if collider:
+                self.add_component(Collider, shape="sphere", radius=radius_value)
         except Exception:
             self.scene._rollback_entity_construction(self)
             raise

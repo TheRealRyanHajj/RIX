@@ -226,22 +226,35 @@ instead of silently changing gameplay timing. State callbacks cannot reenter
 the same machine; event listeners are synchronous, priority ordered, and safe
 to add/remove while a snapshot is being dispatched.
 
-## Physics foundation
+## Physics components
 
 Each `Scene` lazily owns an isolated Jolt Physics world. Gravity is already a
 typed scene property and the scheduler advances initialized worlds exactly once
 after every `fixed_update` phase:
 
 ```python
+from easy3d import Collider, Entity, PhysicsMaterial, Rigidbody, Scene
+
+scene = Scene("physics")
 scene.gravity = (0, -9.81, 0)
-print(scene.physics_step_count)
+floor = Entity("floor", scene=scene)
+floor.add_component(Collider, half_extents=(5, 0.5, 5),
+                    material=PhysicsMaterial(friction=0.8))
+
+ball = Entity("ball", scene=scene)
+ball.position = (0, 3, 0)
+ball.add_component(Collider, shape="sphere", radius=0.5)
+body = ball.add_component(Rigidbody, mass=2.0)
+body.add_impulse((2, 0, 0))
 ```
 
-The native C++ foundation provides generation- and world-checked body handles,
-static/dynamic/sensor/character collision layers, box/sphere storage, gravity,
-fixed stepping and complete clear/destruction ownership in graphics-disabled
-builds. Python entity collider and rigid-body components, forces/materials and
-trigger callbacks arrive in Phases 2.5–2.6; they are not claimed by this layer.
+`Cube`, `Plane`, and `Sphere` also accept `collider=True` for a matching static
+collider. Add a `Rigidbody` to make it dynamic or kinematic. Distances are
+meters, mass is kilograms, force is newtons, impulse is newton-seconds, and
+velocity is meters/second. Dynamic transforms are solver-owned; use
+`body.teleport(...)` for an explicit discontinuity. Trigger bodies can be
+created now, while overlap queries and enter/stay/exit callbacks remain Phase
+2.6 work.
 
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:

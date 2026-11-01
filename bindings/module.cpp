@@ -228,6 +228,48 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "unknown";
     };
+    const auto physics_shape = [](const std::string& value) {
+        if (value == "box") return easy3d::PhysicsShape::Box;
+        if (value == "sphere") return easy3d::PhysicsShape::Sphere;
+        throw std::invalid_argument("collider shape must be box or sphere");
+    };
+    const auto physics_shape_name = [](const easy3d::PhysicsShape value) {
+        switch (value) {
+        case easy3d::PhysicsShape::Box: return "box";
+        case easy3d::PhysicsShape::Sphere: return "sphere";
+        }
+        return "unknown";
+    };
+    const auto collision_layer = [](const std::string& value) {
+        if (value == "static") return easy3d::CollisionLayer::Static;
+        if (value == "dynamic") return easy3d::CollisionLayer::Dynamic;
+        if (value == "sensor") return easy3d::CollisionLayer::Sensor;
+        if (value == "character") return easy3d::CollisionLayer::Character;
+        throw std::invalid_argument(
+            "collision layer must be static, dynamic, sensor, or character");
+    };
+    const auto collision_layer_name = [](const easy3d::CollisionLayer value) {
+        switch (value) {
+        case easy3d::CollisionLayer::Static: return "static";
+        case easy3d::CollisionLayer::Dynamic: return "dynamic";
+        case easy3d::CollisionLayer::Sensor: return "sensor";
+        case easy3d::CollisionLayer::Character: return "character";
+        }
+        return "unknown";
+    };
+    const auto motion_type = [](const std::string& value) {
+        if (value == "kinematic") return easy3d::PhysicsMotionType::Kinematic;
+        if (value == "dynamic") return easy3d::PhysicsMotionType::Dynamic;
+        throw std::invalid_argument("rigid body type must be dynamic or kinematic");
+    };
+    const auto motion_type_name = [](const easy3d::PhysicsMotionType value) {
+        switch (value) {
+        case easy3d::PhysicsMotionType::Static: return "static";
+        case easy3d::PhysicsMotionType::Kinematic: return "kinematic";
+        case easy3d::PhysicsMotionType::Dynamic: return "dynamic";
+        }
+        return "unknown";
+    };
 
     py::class_<easy3d::InputSystem>(module, "_NativeInput")
         .def("bind_action",
@@ -566,6 +608,123 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("handle"),
              py::arg("intensity"))
         .def("remove_light_component", &easy3d::Scene::remove_light_component)
+        .def("add_collider_component",
+             [physics_shape, collision_layer](
+                 easy3d::Scene& scene,
+                 const easy3d::EntityHandle handle,
+                 const std::string& shape,
+                 const std::array<float, 3>& half_extents,
+                 const float radius,
+                 const bool trigger,
+                 const std::string& layer,
+                 const float friction,
+                 const float restitution) {
+                 scene.add_collider_component(
+                     handle,
+                     {physics_shape(shape),
+                      {half_extents[0], half_extents[1], half_extents[2]},
+                      radius,
+                      trigger,
+                      collision_layer(layer),
+                      {friction, restitution}});
+             },
+             py::arg("handle"),
+             py::arg("shape"),
+             py::arg("half_extents"),
+             py::arg("radius"),
+             py::arg("trigger"),
+             py::arg("layer"),
+             py::arg("friction"),
+             py::arg("restitution"))
+        .def("has_collider_component", &easy3d::Scene::has_collider_component)
+        .def("collider_component_info",
+             [physics_shape_name, collision_layer_name](
+                 const easy3d::Scene& scene, const easy3d::EntityHandle handle) {
+                 const easy3d::ColliderComponent& component =
+                     scene.collider_component(handle);
+                 return py::make_tuple(
+                     physics_shape_name(component.shape),
+                     py::make_tuple(component.half_extents.x,
+                                    component.half_extents.y,
+                                    component.half_extents.z),
+                     component.radius,
+                     component.trigger,
+                     collision_layer_name(component.layer),
+                     component.material.friction,
+                     component.material.restitution);
+             },
+             py::arg("handle"))
+        .def("remove_collider_component", &easy3d::Scene::remove_collider_component)
+        .def("add_rigid_body_component",
+             [motion_type](easy3d::Scene& scene,
+                           const easy3d::EntityHandle handle,
+                           const std::string& type,
+                           const float mass,
+                           const bool use_gravity) {
+                 scene.add_rigid_body_component(
+                     handle, {motion_type(type), mass, use_gravity});
+             },
+             py::arg("handle"),
+             py::arg("type"),
+             py::arg("mass"),
+             py::arg("use_gravity"))
+        .def("has_rigid_body_component", &easy3d::Scene::has_rigid_body_component)
+        .def("rigid_body_component_info",
+             [motion_type_name](const easy3d::Scene& scene,
+                                const easy3d::EntityHandle handle) {
+                 const easy3d::RigidBodyComponent& component =
+                     scene.rigid_body_component(handle);
+                 return py::make_tuple(motion_type_name(component.motion_type),
+                                       component.mass,
+                                       component.use_gravity);
+             },
+             py::arg("handle"))
+        .def("remove_rigid_body_component", &easy3d::Scene::remove_rigid_body_component)
+        .def("rigid_body_linear_velocity",
+             [](const easy3d::Scene& scene, const easy3d::EntityHandle handle) {
+                 const easy3d::Vec3 value = scene.rigid_body_linear_velocity(handle);
+                 return py::make_tuple(value.x, value.y, value.z);
+             },
+             py::arg("handle"))
+        .def("set_rigid_body_linear_velocity",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& velocity) {
+                 scene.set_rigid_body_linear_velocity(
+                     handle, {velocity[0], velocity[1], velocity[2]});
+             },
+             py::arg("handle"),
+             py::arg("velocity"))
+        .def("add_rigid_body_force",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& force) {
+                 scene.add_rigid_body_force(handle, {force[0], force[1], force[2]});
+             },
+             py::arg("handle"),
+             py::arg("force"))
+        .def("add_rigid_body_impulse",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& impulse) {
+                 scene.add_rigid_body_impulse(
+                     handle, {impulse[0], impulse[1], impulse[2]});
+             },
+             py::arg("handle"),
+             py::arg("impulse"))
+        .def("teleport_rigid_body",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& position,
+                const std::array<float, 4>& rotation) {
+                 scene.teleport_rigid_body(
+                     handle,
+                     {position[0], position[1], position[2]},
+                     {rotation[0], rotation[1], rotation[2], rotation[3]});
+             },
+             py::arg("handle"),
+             py::arg("position"),
+             py::arg("rotation"))
         .def("camera_info", [](const easy3d::Scene& scene) {
             const easy3d::Camera& camera = scene.camera();
             return py::make_tuple(

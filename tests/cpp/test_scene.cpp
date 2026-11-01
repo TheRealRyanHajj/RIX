@@ -79,6 +79,51 @@ int main() {
         return fail(10, "scene clear did not invalidate entities and physics bodies");
     }
 
+    easy3d::Scene physics_scene("physics components");
+    const easy3d::EntityHandle floor_entity = physics_scene.create_entity("floor");
+    easy3d::Transform floor_transform{};
+    floor_transform.position = {0.0F, -0.5F, 0.0F};
+    physics_scene.set_local_transform(floor_entity, floor_transform);
+    physics_scene.add_collider_component(
+        floor_entity,
+        {.shape = easy3d::PhysicsShape::Box,
+         .half_extents = {5.0F, 0.5F, 5.0F},
+         .material = {.friction = 0.8F, .restitution = 0.0F}});
+
+    const easy3d::EntityHandle dynamic_entity = physics_scene.create_entity("ball");
+    easy3d::Transform dynamic_transform{};
+    dynamic_transform.position = {0.0F, 3.0F, 0.0F};
+    physics_scene.set_local_transform(dynamic_entity, dynamic_transform);
+    physics_scene.add_collider_component(
+        dynamic_entity,
+        {.shape = easy3d::PhysicsShape::Sphere,
+         .radius = 0.5F,
+         .material = {.friction = 0.2F, .restitution = 0.1F}});
+    physics_scene.add_rigid_body_component(
+        dynamic_entity,
+        {.motion_type = easy3d::PhysicsMotionType::Dynamic,
+         .mass = 2.0F,
+         .use_gravity = true});
+    physics_scene.add_rigid_body_impulse(dynamic_entity, {2.0F, 0.0F, 0.0F});
+    for (int step = 0; step < 180; ++step) {
+        physics_scene.step_physics(1.0F / 60.0F);
+    }
+    if (!physics_scene.has_collider_component(dynamic_entity) ||
+        !physics_scene.has_rigid_body_component(dynamic_entity) ||
+        physics_scene.local_transform(dynamic_entity).position.y < 0.45F) {
+        return fail(15, "scene physics components did not synchronize dynamic pose");
+    }
+    physics_scene.teleport_rigid_body(
+        dynamic_entity, {1.0F, 4.0F, 0.0F}, easy3d::Quat{});
+    if (!easy3d::almost_equal(physics_scene.local_transform(dynamic_entity).position,
+                              easy3d::Vec3{1.0F, 4.0F, 0.0F})) {
+        return fail(16, "rigid body teleport did not synchronize entity pose");
+    }
+    physics_scene.destroy_entity(dynamic_entity);
+    if (physics_scene.physics().body_count() != 1) {
+        return fail(17, "entity destruction did not release its physics body");
+    }
+
     try {
         (void)easy3d::Scene("");
         return fail(11, "empty scene name was accepted");

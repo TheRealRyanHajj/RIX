@@ -95,6 +95,37 @@ int main() {
     world.destroy_body(local_live);
     assert(world.body_count() == 0);
 
+    PhysicsWorld force_world(PhysicsWorldConfig{
+        .max_bodies = 4,
+        .max_body_pairs = 4,
+        .max_contact_constraints = 4,
+        .temporary_allocator_bytes = 256U * 1024U,
+    });
+    force_world.set_gravity({0.0F, 0.0F, 0.0F});
+    PhysicsBodySettings force_body_settings{};
+    force_body_settings.shape = PhysicsShape::Sphere;
+    force_body_settings.mass = 2.0F;
+    force_body_settings.material = {.friction = 0.7F, .restitution = 0.25F};
+    const PhysicsBodyHandle force_body = force_world.create_body(force_body_settings);
+    force_world.add_impulse(force_body, {2.0F, 0.0F, 0.0F});
+    assert(almost_equal(force_world.body_linear_velocity(force_body),
+                        Vec3{1.0F, 0.0F, 0.0F},
+                        1.0e-4F));
+    force_world.add_force(force_body, {2.0F, 0.0F, 0.0F});
+    force_world.step(0.5F);
+    assert(force_world.body_linear_velocity(force_body).x > 1.4F);
+    force_world.set_body_linear_velocity(force_body, {0.0F, 2.0F, 0.0F});
+    force_world.set_body_transform(force_body, {4.0F, 5.0F, 6.0F}, Quat{});
+    assert(almost_equal(force_world.body_position(force_body), Vec3{4.0F, 5.0F, 6.0F}));
+
+    bool rejected_material = false;
+    try {
+        PhysicsMaterial{.friction = 0.2F, .restitution = 1.1F}.validate();
+    } catch (const std::invalid_argument&) {
+        rejected_material = true;
+    }
+    assert(rejected_material);
+
     std::cout << "easy3d_physics_tests: PASS\n";
     return 0;
 }

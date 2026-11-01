@@ -20,7 +20,7 @@ from .assets import (
     load_obj,
 )
 from .camera import Camera, Projection
-from .components import LightComponent, MeshRenderer
+from .components import Collider, LightComponent, MeshRenderer, PhysicsMaterial, Rigidbody
 from . import debug
 from .entity import Entity
 from ._version import __version__
@@ -49,6 +49,7 @@ __all__ = [
     "AssetError",
     "Camera",
     "CallbackStats",
+    "Collider",
     "ClockDomain",
     "Cooldown",
     "Cube",
@@ -63,6 +64,7 @@ __all__ = [
     "LightComponent",
     "MissingAssetError",
     "PhysicsError",
+    "PhysicsMaterial",
     "MeshRenderer",
     "Model",
     "ModelCache",
@@ -73,6 +75,7 @@ __all__ = [
     "Projection",
     "PointerState",
     "RendererStats",
+    "Rigidbody",
     "ActionState",
     "Binding",
     "Plane",

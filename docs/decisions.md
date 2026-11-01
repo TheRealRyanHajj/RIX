@@ -552,5 +552,43 @@ delta; scene clear owns body teardown.
 - Baseline CPU compatibility is favored over AVX-specific optimization.
 - The initial single-threaded job backend is safe and predictable but not a
   final performance claim; parallelism requires an owned engine job adapter.
-- Entity collider/body components and transform synchronization remain the next
-  milestone rather than leaking Jolt objects into Python now.
+- Easy3D-owned component/handle layers can extend this foundation without ever
+  leaking Jolt objects into Python.
+
+## ADR-0018: Entity-owned physics components and solver transform precedence
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Python gameplay needs safe collider/body facades without exposing Jolt objects.
+Entity lifetime, body lifetime and transform ownership must remain unambiguous,
+especially when render callbacks and fixed simulation ticks run at different
+rates.
+
+### Decision
+
+Store collider and optional rigid-body configuration in a scene-owned native
+table keyed by generation-qualified entity ID. A collider creates one Jolt body;
+attaching or removing rigid-body motion replaces it transactionally. Static and
+kinematic entity pose changes push to Jolt. Dynamic bodies own their entity pose
+after every physics step, and scripts must use an explicit teleport operation
+for discontinuous changes. Reject parenting of physics entities until moving
+parent transforms have a defined conversion policy.
+
+Expose immutable construction-time box/sphere geometry and material values,
+plus dynamic velocity, force, impulse and teleport operations. Keep trigger
+event delivery and queries in Phase 2.6 rather than implying callbacks from
+sensor configuration alone.
+
+### Consequences
+
+- Destroying an entity deterministically destroys its body and stale Python
+  facades fail through the entity handle checks.
+- Render-frame scripts cannot accidentally fight a dynamic solver body through
+  ordinary transform assignment.
+- Primitive `collider=True` remains beginner-friendly while rigid-body motion is
+  explicit and inspectable.
+- Runtime shape/material reconfiguration, physics parenting and advanced shapes
+  remain intentional future APIs rather than unsafe partial behavior.
