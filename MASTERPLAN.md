@@ -298,7 +298,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **2.4** Integrate Jolt world, collision layers, gravity, body lifetime and fixed stepping; test headless without renderer.
 - [x] **2.5** Expose basic colliders and rigid bodies, impulses/forces, physical materials, triggers; validate conversions and safety.
 - [x] **2.6** Expose physics queries and event callbacks; verify collision enter/stay/exit and trigger transitions.
-- [ ] **2.7** Build first-person and third-person native character motors with Python configuration hooks; movement, slope, jump and grounded detection.
+- [x] **2.7** Build first-person and third-person native character motors with Python configuration hooks; movement, slope, jump and grounded detection.
 - [ ] **2.8** Implement advanced shapes/constraints and CCD, in priority order after basic correctness.
 - [ ] **2.9** Deliver playable single-player obstacle-course example and physics regression suites.
 

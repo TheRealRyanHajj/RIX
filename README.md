@@ -268,6 +268,27 @@ Entity scripts can define `on_collision_enter/stay/exit(event)` and
 `on_trigger_enter/stay/exit(event)`. Events are immutable snapshots dispatched
 on the gameplay thread after the native fixed step; Jolt never calls Python.
 
+For player movement, `Player` creates a native capsule motor rather than a
+Python transform script:
+
+```python
+from easy3d import Cube, Player, Scene
+
+scene = Scene("course")
+Cube(position=(0, -0.5, 0), size=(20, 1, 20), collider=True, scene=scene)
+player = Player(position=(0, 0, 0), controller="first_person", scene=scene)
+
+# Call from fixed_update. +Z input means camera-forward (-Z at heading 0).
+player.move((0, 0, 1), heading_degrees=0, jump=False)
+print(player.controller.grounded, player.controller.linear_velocity)
+```
+
+Use `controller="third_person"` to face the entity toward its movement while
+retaining camera-heading-relative input. Speed, acceleration, air control,
+jump speed, slope limit, step height, radius, and total capsule height are
+construction-time configuration. Character transforms are solver-owned; use
+`player.controller.teleport(...)` for an explicit discontinuity.
+
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
 

@@ -47,6 +47,20 @@ struct PhysicsBodyHandle final {
     friend bool operator==(const PhysicsBodyHandle&, const PhysicsBodyHandle&) = default;
 };
 
+struct PhysicsCharacterHandle final {
+    static constexpr std::uint32_t invalid_index = std::numeric_limits<std::uint32_t>::max();
+
+    std::uint64_t world_id{0};
+    std::uint32_t index{invalid_index};
+    std::uint32_t generation{0};
+
+    [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] std::uint64_t id() const noexcept;
+
+    friend bool operator==(const PhysicsCharacterHandle&,
+                           const PhysicsCharacterHandle&) = default;
+};
+
 struct PhysicsWorldConfig final {
     std::uint32_t max_bodies{16'384};
     std::uint32_t max_body_pairs{65'536};
@@ -74,6 +88,39 @@ struct PhysicsBodySettings final {
     float gravity_factor{1.0F};
     Vec3 linear_velocity{};
     std::uint64_t user_data{0};
+};
+
+enum class CharacterMotorMode : std::uint8_t {
+    FirstPerson,
+    ThirdPerson,
+};
+
+struct CharacterMotorSettings final {
+    CharacterMotorMode mode{CharacterMotorMode::FirstPerson};
+    Vec3 position{};
+    float radius{0.4F};
+    float height{1.8F};
+    float speed{5.0F};
+    float acceleration{30.0F};
+    float air_control{0.25F};
+    float jump_speed{5.0F};
+    float max_slope_degrees{50.0F};
+    float step_height{0.4F};
+    std::uint64_t user_data{0};
+};
+
+struct CharacterMotorInput final {
+    Vec3 movement{};
+    float heading_degrees{0.0F};
+    bool jump{false};
+};
+
+struct CharacterMotorState final {
+    Vec3 position{};
+    Quat rotation{};
+    Vec3 linear_velocity{};
+    Vec3 ground_normal{};
+    bool grounded{false};
 };
 
 struct PhysicsQueryFilter final {
@@ -125,6 +172,15 @@ public:
     void clear() noexcept;
     [[nodiscard]] bool is_alive(PhysicsBodyHandle handle) const noexcept;
     [[nodiscard]] std::size_t body_count() const noexcept;
+
+    [[nodiscard]] PhysicsCharacterHandle create_character(
+        const CharacterMotorSettings& settings);
+    void destroy_character(PhysicsCharacterHandle handle);
+    [[nodiscard]] bool is_alive(PhysicsCharacterHandle handle) const noexcept;
+    [[nodiscard]] std::size_t character_count() const noexcept;
+    void set_character_input(PhysicsCharacterHandle handle, CharacterMotorInput input);
+    [[nodiscard]] CharacterMotorState character_state(PhysicsCharacterHandle handle) const;
+    void teleport_character(PhysicsCharacterHandle handle, Vec3 position, float heading_degrees);
 
     [[nodiscard]] Vec3 body_position(PhysicsBodyHandle handle) const;
     [[nodiscard]] Quat body_rotation(PhysicsBodyHandle handle) const;

@@ -47,6 +47,12 @@ Collider dimensions and material values are construction-time state in Phase
 2.5. Later entity scaling does not silently rebuild Jolt shapes; callers must
 remove and recreate a collider when its physical geometry changes.
 
+Phase 2.7 character radius, height and motor tuning are likewise
+construction-time state. Character entities cannot be parented or also own an
+ordinary collider. The first-/third-person distinction covers native movement
+and facing; camera placement, pitch, spring arms and obstruction avoidance are
+intentionally Python/game configuration rather than hidden motor policy.
+
 ## Input hardware validation
 
 Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,

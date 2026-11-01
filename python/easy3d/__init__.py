@@ -20,7 +20,14 @@ from .assets import (
     load_obj,
 )
 from .camera import Camera, Projection
-from .components import Collider, LightComponent, MeshRenderer, PhysicsMaterial, Rigidbody
+from .components import (
+    CharacterController,
+    Collider,
+    LightComponent,
+    MeshRenderer,
+    PhysicsMaterial,
+    Rigidbody,
+)
 from . import debug, physics
 from .entity import Entity
 from ._version import __version__
@@ -30,6 +37,7 @@ from .lights import Light
 from .math import Quat, Vec2, Vec3
 from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, PhysicsHit
+from .player import Player
 from .scene import Scene
 from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
 from .utilities import (
@@ -50,6 +58,7 @@ __all__ = [
     "AssetError",
     "Camera",
     "CallbackStats",
+    "CharacterController",
     "Collider",
     "CollisionEvent",
     "ClockDomain",
@@ -77,6 +86,7 @@ __all__ = [
     "Quat",
     "Projection",
     "PointerState",
+    "Player",
     "RendererStats",
     "Rigidbody",
     "ActionState",

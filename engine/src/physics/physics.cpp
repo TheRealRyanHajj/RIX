@@ -18,7 +18,9 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
@@ -165,6 +167,13 @@ public:
     return message.str();
 }
 
+[[nodiscard]] std::string invalid_handle_message(const PhysicsCharacterHandle handle) {
+    std::ostringstream message;
+    message << "invalid physics character handle (index=" << handle.index
+            << ", generation=" << handle.generation << ", world=" << handle.world_id << ')';
+    return message.str();
+}
+
 void validate_config(const PhysicsWorldConfig& config) {
     if (config.max_bodies == 0 || config.max_body_pairs == 0 ||
         config.max_contact_constraints == 0 || config.temporary_allocator_bytes == 0) {
@@ -207,6 +216,36 @@ void validate_settings(const PhysicsBodySettings& settings) {
     if (!finite(settings.linear_velocity)) {
         throw std::invalid_argument("physics linear velocity must be finite");
     }
+}
+
+void validate_settings(const CharacterMotorSettings& settings) {
+    if (!finite(settings.position) || !std::isfinite(settings.radius) ||
+        !std::isfinite(settings.height) || settings.radius <= 0.0F ||
+        settings.height <= settings.radius * 2.0F) {
+        throw std::invalid_argument(
+            "character requires a finite position, positive radius, and height > diameter");
+    }
+    if (!std::isfinite(settings.speed) || settings.speed < 0.0F ||
+        !std::isfinite(settings.acceleration) || settings.acceleration < 0.0F ||
+        !std::isfinite(settings.air_control) || settings.air_control < 0.0F ||
+        settings.air_control > 1.0F || !std::isfinite(settings.jump_speed) ||
+        settings.jump_speed < 0.0F) {
+        throw std::invalid_argument(
+            "character speed/acceleration/jump must be non-negative and air control in [0, 1]");
+    }
+    if (!std::isfinite(settings.max_slope_degrees) || settings.max_slope_degrees < 0.0F ||
+        settings.max_slope_degrees >= 90.0F || !std::isfinite(settings.step_height) ||
+        settings.step_height < 0.0F) {
+        throw std::invalid_argument(
+            "character slope must be in [0, 90) degrees and step height non-negative");
+    }
+}
+
+[[nodiscard]] float approach(const float current,
+                             const float target,
+                             const float maximum_delta) noexcept {
+    if (current < target) return std::min(current + maximum_delta, target);
+    return std::max(current - maximum_delta, target);
 }
 
 [[nodiscard]] std::uint64_t body_pair_key(const JPH::BodyID first,
@@ -425,6 +464,14 @@ bool PhysicsBodyHandle::valid() const noexcept {
     return world_id != 0 && index != invalid_index && generation != 0;
 }
 
+bool PhysicsCharacterHandle::valid() const noexcept {
+    return world_id != 0 && index != invalid_index && generation != 0;
+}
+
+std::uint64_t PhysicsCharacterHandle::id() const noexcept {
+    return (static_cast<std::uint64_t>(generation) << 32U) | index;
+}
+
 std::uint64_t PhysicsBodyHandle::id() const noexcept {
     return (static_cast<std::uint64_t>(generation) << 32U) | index;
 }
@@ -445,6 +492,14 @@ public:
         std::uint32_t generation{1};
         bool alive{false};
         PhysicsMotionType motion_type{PhysicsMotionType::Static};
+    };
+
+    struct CharacterSlot final {
+        JPH::Ref<JPH::CharacterVirtual> character;
+        CharacterMotorSettings settings;
+        CharacterMotorInput input;
+        std::uint32_t generation{1};
+        bool alive{false};
     };
 
     explicit Impl(PhysicsWorldConfig world_config)
@@ -468,6 +523,8 @@ public:
         physics_system.SetContactListener(&contact_recorder);
         slots.reserve(config.max_bodies);
         free_indices.reserve(config.max_bodies);
+        character_slots.reserve(32);
+        free_character_indices.reserve(32);
     }
 
     ~Impl() { clear(); }
@@ -492,7 +549,43 @@ public:
                slots[handle.index].generation == handle.generation;
     }
 
+    [[nodiscard]] CharacterSlot& require_slot(const PhysicsCharacterHandle handle) {
+        if (!is_alive(handle)) {
+            throw PhysicsError(invalid_handle_message(handle));
+        }
+        return character_slots[handle.index];
+    }
+
+    [[nodiscard]] const CharacterSlot& require_slot(
+        const PhysicsCharacterHandle handle) const {
+        if (!is_alive(handle)) {
+            throw PhysicsError(invalid_handle_message(handle));
+        }
+        return character_slots[handle.index];
+    }
+
+    [[nodiscard]] bool is_alive(const PhysicsCharacterHandle handle) const noexcept {
+        return handle.world_id == world_id && handle.valid() &&
+               handle.index < character_slots.size() && character_slots[handle.index].alive &&
+               character_slots[handle.index].generation == handle.generation;
+    }
+
     void clear() noexcept {
+        free_character_indices.clear();
+        free_character_indices.reserve(character_slots.size());
+        for (std::size_t index = 0; index < character_slots.size(); ++index) {
+            CharacterSlot& slot = character_slots[index];
+            if (slot.alive) {
+                slot.character = nullptr;
+                ++slot.generation;
+                if (slot.generation == 0) slot.generation = 1;
+            }
+            slot.alive = false;
+            slot.input = {};
+            free_character_indices.push_back(static_cast<std::uint32_t>(index));
+        }
+        character_count = 0;
+
         JPH::BodyInterface& bodies = physics_system.GetBodyInterface();
         free_indices.clear();
         free_indices.reserve(slots.size());
@@ -525,7 +618,10 @@ public:
     JPH::PhysicsSystem physics_system;
     std::vector<Slot> slots;
     std::vector<std::uint32_t> free_indices;
+    std::vector<CharacterSlot> character_slots;
+    std::vector<std::uint32_t> free_character_indices;
     std::size_t body_count{0};
+    std::size_t character_count{0};
     std::uint64_t steps{0};
 };
 
@@ -557,7 +653,7 @@ void PhysicsWorld::set_gravity(const Vec3 gravity_value) {
 
 PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings) {
     validate_settings(settings);
-    if (impl_->body_count >= impl_->config.max_bodies) {
+    if (impl_->body_count + impl_->character_count >= impl_->config.max_bodies) {
         throw PhysicsError("physics world body capacity exhausted");
     }
 
@@ -649,6 +745,130 @@ bool PhysicsWorld::is_alive(const PhysicsBodyHandle handle) const noexcept {
 
 std::size_t PhysicsWorld::body_count() const noexcept {
     return impl_->body_count;
+}
+
+PhysicsCharacterHandle PhysicsWorld::create_character(
+    const CharacterMotorSettings& settings) {
+    validate_settings(settings);
+    if (impl_->body_count + impl_->character_count >= impl_->config.max_bodies) {
+        throw PhysicsError("physics world character capacity exhausted");
+    }
+
+    const float cylinder_half_height = 0.5F * (settings.height - 2.0F * settings.radius);
+    JPH::ShapeSettings::ShapeResult shape_result = JPH::RotatedTranslatedShapeSettings(
+        JPH::Vec3(0.0F, 0.5F * settings.height, 0.0F),
+        JPH::Quat::sIdentity(),
+        new JPH::CapsuleShape(cylinder_half_height, settings.radius)).Create();
+    if (shape_result.HasError()) {
+        const auto& error = shape_result.GetError();
+        throw std::invalid_argument("Jolt rejected character capsule: " +
+                                    std::string(error.data(), error.size()));
+    }
+
+    JPH::Ref<JPH::CharacterVirtualSettings> character_settings =
+        new JPH::CharacterVirtualSettings();
+    character_settings->mShape = shape_result.Get();
+    character_settings->mMaxSlopeAngle = JPH::DegreesToRadians(settings.max_slope_degrees);
+    character_settings->mSupportingVolume =
+        JPH::Plane(JPH::Vec3::sAxisY(), -settings.radius);
+    character_settings->mEnhancedInternalEdgeRemoval = true;
+    JPH::ShapeSettings::ShapeResult inner_shape_result =
+        JPH::RotatedTranslatedShapeSettings(
+            JPH::Vec3(0.0F, 0.5F * settings.height, 0.0F),
+            JPH::Quat::sIdentity(),
+            new JPH::CapsuleShape(cylinder_half_height * 0.9F,
+                                  settings.radius * 0.9F)).Create();
+    if (inner_shape_result.HasError()) {
+        const auto& error = inner_shape_result.GetError();
+        throw std::invalid_argument("Jolt rejected character inner capsule: " +
+                                    std::string(error.data(), error.size()));
+    }
+    character_settings->mInnerBodyShape = inner_shape_result.Get();
+    character_settings->mInnerBodyLayer = character_layer;
+
+    JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
+        character_settings,
+        to_jolt_position(settings.position),
+        JPH::Quat::sIdentity(),
+        settings.user_data,
+        &impl_->physics_system);
+
+    std::uint32_t index = 0;
+    if (impl_->free_character_indices.empty()) {
+        index = static_cast<std::uint32_t>(impl_->character_slots.size());
+        impl_->character_slots.emplace_back();
+    } else {
+        index = impl_->free_character_indices.back();
+        impl_->free_character_indices.pop_back();
+    }
+    Impl::CharacterSlot& slot = impl_->character_slots[index];
+    slot.character = std::move(character);
+    slot.settings = settings;
+    slot.input = {};
+    slot.alive = true;
+    ++impl_->character_count;
+    return PhysicsCharacterHandle{impl_->world_id, index, slot.generation};
+}
+
+void PhysicsWorld::destroy_character(const PhysicsCharacterHandle handle) {
+    Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    slot.character = nullptr;
+    slot.alive = false;
+    slot.input = {};
+    ++slot.generation;
+    if (slot.generation == 0) slot.generation = 1;
+    impl_->free_character_indices.push_back(handle.index);
+    --impl_->character_count;
+}
+
+bool PhysicsWorld::is_alive(const PhysicsCharacterHandle handle) const noexcept {
+    return impl_->is_alive(handle);
+}
+
+std::size_t PhysicsWorld::character_count() const noexcept {
+    return impl_->character_count;
+}
+
+void PhysicsWorld::set_character_input(const PhysicsCharacterHandle handle,
+                                       CharacterMotorInput input) {
+    if (!finite(input.movement) || !std::isfinite(input.heading_degrees)) {
+        throw std::invalid_argument("character input must be finite");
+    }
+    input.movement.y = 0.0F;
+    const float length_squared = input.movement.length_squared();
+    if (length_squared > 1.0F) input.movement = input.movement.normalized();
+    impl_->require_slot(handle).input = input;
+}
+
+CharacterMotorState PhysicsWorld::character_state(
+    const PhysicsCharacterHandle handle) const {
+    const Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    return {from_jolt_position(slot.character->GetPosition()),
+            from_jolt(slot.character->GetRotation()),
+            from_jolt_vec(slot.character->GetLinearVelocity()),
+            from_jolt_vec(slot.character->GetGroundNormal()),
+            slot.character->GetGroundState() ==
+                JPH::CharacterVirtual::EGroundState::OnGround};
+}
+
+void PhysicsWorld::teleport_character(const PhysicsCharacterHandle handle,
+                                      const Vec3 position,
+                                      const float heading_degrees) {
+    if (!finite(position) || !std::isfinite(heading_degrees)) {
+        throw std::invalid_argument("character teleport must be finite");
+    }
+    Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    const float heading = JPH::DegreesToRadians(heading_degrees);
+    slot.character->SetPosition(to_jolt_position(position));
+    slot.character->SetRotation(
+        JPH::Quat::sRotation(JPH::Vec3::sAxisY(), heading));
+    slot.character->SetLinearVelocity(JPH::Vec3::sZero());
+    slot.character->RefreshContacts(
+        impl_->physics_system.GetDefaultBroadPhaseLayerFilter(character_layer),
+        impl_->physics_system.GetDefaultLayerFilter(character_layer),
+        {},
+        {},
+        impl_->temporary_allocator);
 }
 
 Vec3 PhysicsWorld::body_position(const PhysicsBodyHandle handle) const {
@@ -886,6 +1106,66 @@ void PhysicsWorld::step(const float delta_seconds, const std::uint32_t collision
     if (collision_steps == 0 || collision_steps > 64) {
         throw std::invalid_argument("physics collision steps must be between 1 and 64");
     }
+
+    const JPH::Vec3 world_gravity = impl_->physics_system.GetGravity();
+    for (Impl::CharacterSlot& slot : impl_->character_slots) {
+        if (!slot.alive) continue;
+        JPH::CharacterVirtual& character = *slot.character;
+        character.UpdateGroundVelocity();
+
+        const float heading = JPH::DegreesToRadians(slot.input.heading_degrees);
+        const JPH::Quat heading_rotation =
+            JPH::Quat::sRotation(JPH::Vec3::sAxisY(), heading);
+        const JPH::Vec3 local_movement(
+            slot.input.movement.x, 0.0F, -slot.input.movement.z);
+        const JPH::Vec3 desired_direction = heading_rotation * local_movement;
+        const JPH::Vec3 desired_horizontal = desired_direction * slot.settings.speed;
+
+        const bool on_walkable_ground = character.GetGroundState() ==
+                                        JPH::CharacterVirtual::EGroundState::OnGround;
+        const float control = on_walkable_ground ? 1.0F : slot.settings.air_control;
+        const float maximum_delta = slot.settings.acceleration * control * delta_seconds;
+        const JPH::Vec3 current = character.GetLinearVelocity();
+        JPH::Vec3 horizontal(approach(current.GetX(), desired_horizontal.GetX(), maximum_delta),
+                             0.0F,
+                             approach(current.GetZ(), desired_horizontal.GetZ(), maximum_delta));
+
+        JPH::Vec3 velocity = horizontal + current.GetY() * JPH::Vec3::sAxisY();
+        const JPH::Vec3 ground_velocity = character.GetGroundVelocity();
+        const bool moving_towards_ground = current.GetY() - ground_velocity.GetY() < 0.1F;
+        if (on_walkable_ground && moving_towards_ground) {
+            velocity = horizontal + ground_velocity;
+            if (slot.input.jump) velocity += slot.settings.jump_speed * JPH::Vec3::sAxisY();
+        }
+        velocity += world_gravity * delta_seconds;
+        character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(velocity));
+
+        if (slot.settings.mode == CharacterMotorMode::FirstPerson) {
+            character.SetRotation(heading_rotation);
+        } else if (!desired_direction.IsNearZero()) {
+            const float facing = std::atan2(-desired_direction.GetX(),
+                                            -desired_direction.GetZ());
+            character.SetRotation(
+                JPH::Quat::sRotation(JPH::Vec3::sAxisY(), facing));
+        }
+
+        JPH::CharacterVirtual::ExtendedUpdateSettings update_settings;
+        update_settings.mWalkStairsStepUp =
+            slot.settings.step_height * JPH::Vec3::sAxisY();
+        update_settings.mStickToFloorStepDown =
+            -slot.settings.step_height * JPH::Vec3::sAxisY();
+        character.ExtendedUpdate(
+            delta_seconds,
+            world_gravity,
+            update_settings,
+            impl_->physics_system.GetDefaultBroadPhaseLayerFilter(character_layer),
+            impl_->physics_system.GetDefaultLayerFilter(character_layer),
+            {},
+            {},
+            impl_->temporary_allocator);
+        slot.input.jump = false;
+    }
+
     const JPH::EPhysicsUpdateError error = impl_->physics_system.Update(
         delta_seconds,
         static_cast<int>(collision_steps),

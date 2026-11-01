@@ -182,6 +182,113 @@ int main() {
     }
     assert(rejected_material);
 
+    PhysicsWorld character_world(PhysicsWorldConfig{
+        .max_bodies = 32,
+        .max_body_pairs = 128,
+        .max_contact_constraints = 64,
+        .temporary_allocator_bytes = 1024U * 1024U,
+    });
+    PhysicsBodySettings character_floor{};
+    character_floor.motion_type = PhysicsMotionType::Static;
+    character_floor.layer = CollisionLayer::Static;
+    character_floor.position = {0.0F, -0.5F, 0.0F};
+    character_floor.half_extents = {10.0F, 0.5F, 10.0F};
+    (void)character_world.create_body(character_floor);
+    PhysicsBodySettings step_settings = character_floor;
+    step_settings.position = {0.0F, 0.15F, -2.0F};
+    step_settings.half_extents = {1.0F, 0.15F, 0.5F};
+    (void)character_world.create_body(step_settings);
+
+    const PhysicsCharacterHandle first_person = character_world.create_character(
+        CharacterMotorSettings{.mode = CharacterMotorMode::FirstPerson,
+                               .position = {0.0F, 0.0F, 0.0F},
+                               .speed = 3.0F,
+                               .acceleration = 30.0F,
+                               .jump_speed = 5.0F,
+                               .max_slope_degrees = 45.0F,
+                               .step_height = 0.4F});
+    for (int step = 0; step < 5; ++step) character_world.step(1.0F / 60.0F);
+    assert(character_world.character_state(first_person).grounded);
+    character_world.set_character_input(
+        first_person, {.movement = {0.0F, 0.0F, 1.0F}});
+    for (int step = 0; step < 120; ++step) character_world.step(1.0F / 60.0F);
+    const CharacterMotorState walked = character_world.character_state(first_person);
+    assert(walked.position.z < -4.0F);
+    assert(walked.position.y > -0.02F && walked.position.y < 0.05F);
+    assert(walked.grounded);
+
+    character_world.set_character_input(
+        first_person, {.movement = {}, .jump = true});
+    for (int step = 0; step < 10; ++step) character_world.step(1.0F / 60.0F);
+    const CharacterMotorState jumping = character_world.character_state(first_person);
+    assert(!jumping.grounded && jumping.position.y > 0.3F &&
+           jumping.linear_velocity.y > 0.0F);
+    for (int step = 0; step < 120; ++step) character_world.step(1.0F / 60.0F);
+    assert(character_world.character_state(first_person).grounded);
+
+    const PhysicsCharacterHandle third_person = character_world.create_character(
+        CharacterMotorSettings{.mode = CharacterMotorMode::ThirdPerson,
+                               .position = {3.0F, 0.0F, 0.0F},
+                               .speed = 2.0F,
+                               .acceleration = 30.0F});
+    character_world.set_character_input(
+        third_person, {.movement = {1.0F, 0.0F, 0.0F}});
+    for (int step = 0; step < 30; ++step) character_world.step(1.0F / 60.0F);
+    const CharacterMotorState third_state = character_world.character_state(third_person);
+    assert(third_state.position.x > 3.5F);
+    assert(std::abs(third_state.rotation.y) > 0.5F);
+    assert(character_world.character_count() == 2);
+
+    character_world.teleport_character(first_person, {-3.0F, 1.0F, 2.0F}, 90.0F);
+    assert(almost_equal(character_world.character_state(first_person).position,
+                        Vec3{-3.0F, 1.0F, 2.0F},
+                        1.0e-4F));
+    character_world.destroy_character(first_person);
+    assert(!character_world.is_alive(first_person));
+    assert(character_world.character_count() == 1);
+    character_world.clear();
+    assert(!character_world.is_alive(third_person));
+    assert(character_world.character_count() == 0);
+
+    PhysicsWorld slope_world(PhysicsWorldConfig{
+        .max_bodies = 16,
+        .max_body_pairs = 64,
+        .max_contact_constraints = 32,
+        .temporary_allocator_bytes = 1024U * 1024U,
+    });
+    PhysicsBodySettings slope_floor = character_floor;
+    slope_floor.half_extents = {10.0F, 0.5F, 10.0F};
+    (void)slope_world.create_body(slope_floor);
+    PhysicsBodySettings gentle_ramp = character_floor;
+    gentle_ramp.position = {-3.0F, 2.0F, -2.464F};
+    gentle_ramp.rotation = Quat::from_euler_degrees({30.0F, 0.0F, 0.0F});
+    gentle_ramp.half_extents = {1.0F, 0.1F, 4.0F};
+    (void)slope_world.create_body(gentle_ramp);
+    PhysicsBodySettings steep_ramp = character_floor;
+    steep_ramp.position = {3.0F, 3.464F, -1.0F};
+    steep_ramp.rotation = Quat::from_euler_degrees({60.0F, 0.0F, 0.0F});
+    steep_ramp.half_extents = {1.0F, 0.1F, 4.0F};
+    (void)slope_world.create_body(steep_ramp);
+    const PhysicsCharacterHandle gentle_climber = slope_world.create_character(
+        CharacterMotorSettings{.position = {-3.0F, 0.0F, 2.0F},
+                               .speed = 2.0F,
+                               .acceleration = 30.0F,
+                               .max_slope_degrees = 45.0F});
+    const PhysicsCharacterHandle steep_climber = slope_world.create_character(
+        CharacterMotorSettings{.position = {3.0F, 0.0F, 2.0F},
+                               .speed = 2.0F,
+                               .acceleration = 30.0F,
+                               .max_slope_degrees = 45.0F});
+    slope_world.set_character_input(
+        gentle_climber, {.movement = {0.0F, 0.0F, 1.0F}});
+    slope_world.set_character_input(
+        steep_climber, {.movement = {0.0F, 0.0F, 1.0F}});
+    for (int step = 0; step < 120; ++step) slope_world.step(1.0F / 60.0F);
+    const CharacterMotorState gentle_state = slope_world.character_state(gentle_climber);
+    const CharacterMotorState steep_state = slope_world.character_state(steep_climber);
+    assert(gentle_state.position.y > 1.0F && gentle_state.position.z < 0.0F);
+    assert(steep_state.position.y < 0.5F && steep_state.position.z > 0.0F);
+
     std::cout << "easy3d_physics_tests: PASS\n";
     return 0;
 }

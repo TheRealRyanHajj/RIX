@@ -622,3 +622,36 @@ per-recipient Python snapshots through the normal scheduler callback path.
   entity stale-handle checks still apply if a result is retained too long.
 - Event queue exhaustion is an explicit `PhysicsError`, not unbounded memory
   growth or silent loss.
+
+## ADR-0020: Jolt virtual characters with native command/state boundaries
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Player collision, grounded state, slopes, steps and jumping must run at the
+fixed physics rate and later support authoritative/predicted commands. A Python
+transform loop would duplicate collision logic and make network reconciliation
+unsafe, while exposing Jolt objects would break the engine boundary.
+
+### Decision
+
+Own `CharacterVirtual` motors inside each `PhysicsWorld` behind
+generation-checked handles. Python submits bounded movement/heading/jump
+commands and reads copied state only. Use a bottom-aligned capsule plus a
+smaller inner body on the character layer. Run `ExtendedUpdate` before the
+rigid-body update, with explicit acceleration, air control, jump, slope and
+step settings. First-person follows command heading; third-person faces
+movement. Scene pose synchronization occurs only after the native step.
+
+### Consequences
+
+- Character movement remains headless and no Jolt callback enters Python.
+- The input/state boundary can gain sequence numbers and replay in Phase 5.1
+  without replacing the collision motor.
+- Characters participate in normal queries, body collision, sensors and copied
+  contact events through their inner body.
+- Camera pitch/offset/obstruction remain explicit game-side behavior.
+- Runtime resizing/tuning and character parenting require future transactional
+  APIs rather than implicit shape mutation.

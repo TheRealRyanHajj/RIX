@@ -226,7 +226,8 @@ the complete falling-body/collision/lifetime regression runs in the
 graphics-disabled build.
 
 The scheduler's fixed phase is currently `Python fixed_update → deferred
-mutation commit → Jolt PhysicsSystem::Update → dynamic entity pose sync →
+mutation commit → native CharacterVirtual motor updates → Jolt
+PhysicsSystem::Update → dynamic/character entity pose sync →
 collision/trigger snapshot dispatch → deferred mutation commit`. Render updates
 remain after all catch-up physics ticks.
 
@@ -259,3 +260,19 @@ Contact reconciliation tracks which pairs were actually touched each step.
 Pairs retired only because all moving bodies slept remain logically active, so
 sleep does not fabricate an exit; an awakened pair that is no longer detected
 produces the deferred exit snapshot.
+
+## Character motor ownership
+
+Each scene stores generation-qualified entity-to-character records beside its
+body records. The physics Pimpl owns Jolt `CharacterVirtual` instances and a
+smaller kinematic inner capsule on the character layer. The public handle never
+contains a Jolt pointer. Character teardown precedes ordinary body teardown so
+Jolt can safely remove the inner body during scene clear.
+
+Input is compact native state: local right/forward movement, camera heading,
+and a one-shot jump bit. Per fixed step, the motor applies acceleration or air
+control, ground velocity, jump and gravity, clamps velocity against steep
+slopes, selects first-person heading or third-person movement-facing rotation,
+then calls `ExtendedUpdate` with explicit stair/floor distances. Only the
+resulting position, rotation, velocity and ground snapshot cross into scene or
+Python state. No Jolt callback invokes Python.

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .components import (
+    CharacterController,
+    CharacterMode,
     Collider,
     ColliderShape,
     CollisionLayer,
@@ -301,6 +303,8 @@ def capsule_cast(
     return hits[0] if hits else None
 
 __all__ = [
+    "CharacterController",
+    "CharacterMode",
     "Collider",
     "ColliderShape",
     "CollisionLayer",

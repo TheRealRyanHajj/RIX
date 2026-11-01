@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.6 passed;
-Phase 2.7 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.7 passed;
+Phase 2.8 is next. Live pointer lock and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -1924,3 +1924,79 @@ build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); e=Sphere(c
 
 Phase 2.6: **DONE**. Immediate next task: Phase 2.7 — native first-person and
 third-person character motors with Python configuration hooks.
+
+## 2026-11-01 — Phase 2.7 native character motors
+
+### Implemented
+
+- Added generation-checked native character handles and per-world Jolt
+  `CharacterVirtual` ownership. A bottom-aligned capsule provides collision and
+  a smaller inner capsule on the character layer provides ordinary query,
+  sensor, rigid-body and deferred-contact participation.
+- Added fixed-step native acceleration, air control, gravity, moving-ground
+  velocity, jump requests, slope cancellation, floor adhesion and stair
+  walking. First-person mode follows command heading; third-person mode faces
+  movement while both consume camera-heading-relative local input.
+- Added scene-owned `CharacterControllerComponent` state, physics-owned pose
+  synchronization, transactional creation/removal, explicit teleport, collider
+  exclusivity, parenting rejection, entity destruction and scene-clear
+  teardown.
+- Added typed Python `CharacterController` and convenience `Player` APIs with
+  validated radius/height, speed, acceleration, air control, jump speed, slope
+  and step configuration plus grounded/normal/velocity state snapshots.
+- Added native regressions for settling, stepping over a 0.3 m obstacle,
+  jumping/landing, first-/third-person facing, handle lifetime and explicit
+  30-degree walkable versus 60-degree rejected slopes at a 45-degree limit.
+  Python regressions cover the same public lifecycle, character-layer query,
+  transform ownership, validation and scene cleanup.
+
+### Failures found and fixed
+
+The first focused Python run reported `1 failed, 3 passed` after the player
+walked to the edge of a 12 m test floor before jumping; the equivalent native
+course used a 20 m floor and landed correctly. Enlarging only the Python test
+floor to 30 m removed the accidental fall without changing motor behavior. The
+corrected focused suite passes. No production failure was bypassed.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3306411
+sha256=e91fd21c2f89c9ee94859e631dd367335a356bbd6a887cfce5c0781f889043cb
+Successfully installed easy3d-0.1.0
+
+cmake --build build/windows-headless --config Debug --parallel 4
+ctest --test-dir build/windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.66 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 1.62 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.72 sec
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_character_controller.py -q
+....                                                                     [100%]
+4 passed in 0.10s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 80%]
+..................                                                       [100%]
+90 passed in 0.22s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests/python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); p=Player(scene=s); print(engine_version(), p.controller.mode, p.controller.grounded, p.has_component(CharacterController))"
+0.1.0 first_person False True
+```
+
+Phase 2.7: **DONE**. Immediate next task: Phase 2.8 — advanced shapes,
+constraints and continuous collision detection.

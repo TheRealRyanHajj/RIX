@@ -733,6 +733,118 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("handle"),
              py::arg("position"),
              py::arg("rotation"))
+        .def("add_character_controller_component",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::string& mode,
+                const float radius,
+                const float height,
+                const float speed,
+                const float acceleration,
+                const float air_control,
+                const float jump_speed,
+                const float max_slope_degrees,
+                const float step_height) {
+                 easy3d::CharacterMotorMode native_mode;
+                 if (mode == "first_person") {
+                     native_mode = easy3d::CharacterMotorMode::FirstPerson;
+                 } else if (mode == "third_person") {
+                     native_mode = easy3d::CharacterMotorMode::ThirdPerson;
+                 } else {
+                     throw std::invalid_argument(
+                         "character mode must be 'first_person' or 'third_person'");
+                 }
+                 scene.add_character_controller_component(
+                     handle,
+                     {native_mode,
+                      radius,
+                      height,
+                      speed,
+                      acceleration,
+                      air_control,
+                      jump_speed,
+                      max_slope_degrees,
+                      step_height});
+             },
+             py::arg("handle"),
+             py::arg("mode"),
+             py::arg("radius"),
+             py::arg("height"),
+             py::arg("speed"),
+             py::arg("acceleration"),
+             py::arg("air_control"),
+             py::arg("jump_speed"),
+             py::arg("max_slope_degrees"),
+             py::arg("step_height"))
+        .def("has_character_controller_component",
+             &easy3d::Scene::has_character_controller_component)
+        .def("character_controller_component_info",
+             [](const easy3d::Scene& scene, const easy3d::EntityHandle handle) {
+                 const easy3d::CharacterControllerComponent& component =
+                     scene.character_controller_component(handle);
+                 return py::make_tuple(
+                     component.mode == easy3d::CharacterMotorMode::FirstPerson
+                         ? "first_person"
+                         : "third_person",
+                     component.radius,
+                     component.height,
+                     component.speed,
+                     component.acceleration,
+                     component.air_control,
+                     component.jump_speed,
+                     component.max_slope_degrees,
+                     component.step_height);
+             },
+             py::arg("handle"))
+        .def("remove_character_controller_component",
+             &easy3d::Scene::remove_character_controller_component)
+        .def("set_character_input",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& movement,
+                const float heading_degrees,
+                const bool jump) {
+                 scene.set_character_input(
+                     handle,
+                     {movement[0], movement[1], movement[2]},
+                     heading_degrees,
+                     jump);
+             },
+             py::arg("handle"),
+             py::arg("movement"),
+             py::arg("heading_degrees"),
+             py::arg("jump") = false)
+        .def("character_state",
+             [](const easy3d::Scene& scene, const easy3d::EntityHandle handle) {
+                 const easy3d::CharacterMotorState state = scene.character_state(handle);
+                 return py::make_tuple(
+                     py::make_tuple(state.position.x, state.position.y, state.position.z),
+                     py::make_tuple(state.rotation.w,
+                                    state.rotation.x,
+                                    state.rotation.y,
+                                    state.rotation.z),
+                     py::make_tuple(state.linear_velocity.x,
+                                    state.linear_velocity.y,
+                                    state.linear_velocity.z),
+                     py::make_tuple(state.ground_normal.x,
+                                    state.ground_normal.y,
+                                    state.ground_normal.z),
+                     state.grounded);
+             },
+             py::arg("handle"))
+        .def("teleport_character",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& position,
+                const float heading_degrees) {
+                 scene.teleport_character(
+                     handle,
+                     {position[0], position[1], position[2]},
+                     heading_degrees);
+             },
+             py::arg("handle"),
+             py::arg("position"),
+             py::arg("heading_degrees") = 0.0F)
         .def("physics_raycast_all",
              [](const easy3d::Scene& scene,
                 const std::array<float, 3>& origin,

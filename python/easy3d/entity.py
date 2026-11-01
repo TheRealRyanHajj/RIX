@@ -211,16 +211,18 @@ class Entity:
     ) -> _ComponentT:
         """Attach a supported singleton component and return its live facade."""
 
-        from .components import Collider, Rigidbody
+        from .components import CharacterController, Collider, Rigidbody
 
         if component_type is Collider:
             return cast(_ComponentT, Collider(self, **kwargs))
         if component_type is Rigidbody:
             return cast(_ComponentT, Rigidbody(self, **kwargs))
+        if component_type is CharacterController:
+            return cast(_ComponentT, CharacterController(self, **kwargs))
         raise TypeError("unsupported component type for add_component")
 
     def has_component(self, component_type: type[_ComponentT]) -> bool:
-        from .components import Collider, LightComponent, MeshRenderer, Rigidbody
+        from .components import CharacterController, Collider, LightComponent, MeshRenderer, Rigidbody
 
         if component_type is MeshRenderer:
             return self._scene._native.has_render_component(self._handle)
@@ -230,10 +232,12 @@ class Entity:
             return self._scene._native.has_collider_component(self._handle)
         if component_type is Rigidbody:
             return self._scene._native.has_rigid_body_component(self._handle)
+        if component_type is CharacterController:
+            return self._scene._native.has_character_controller_component(self._handle)
         raise TypeError("unsupported component type")
 
     def get_component(self, component_type: type[_ComponentT]) -> _ComponentT | None:
-        from .components import Collider, LightComponent, MeshRenderer, Rigidbody
+        from .components import CharacterController, Collider, LightComponent, MeshRenderer, Rigidbody
 
         if component_type is MeshRenderer:
             return (
@@ -257,6 +261,12 @@ class Entity:
             return (
                 cast(_ComponentT, Rigidbody._existing(self))
                 if self.has_component(Rigidbody)
+                else None
+            )
+        if component_type is CharacterController:
+            return (
+                cast(_ComponentT, CharacterController._existing(self))
+                if self.has_component(CharacterController)
                 else None
             )
         raise TypeError("unsupported component type")

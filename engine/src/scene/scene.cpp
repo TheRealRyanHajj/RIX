@@ -144,6 +144,25 @@ void RigidBodyComponent::validate() const {
     }
 }
 
+void CharacterControllerComponent::validate() const {
+    if (!std::isfinite(radius) || radius <= 0.0F || !std::isfinite(height) ||
+        height <= radius * 2.0F) {
+        throw std::invalid_argument(
+            "character requires a positive radius and height greater than its diameter");
+    }
+    if (!std::isfinite(speed) || speed < 0.0F || !std::isfinite(acceleration) ||
+        acceleration < 0.0F || !std::isfinite(air_control) || air_control < 0.0F ||
+        air_control > 1.0F || !std::isfinite(jump_speed) || jump_speed < 0.0F) {
+        throw std::invalid_argument(
+            "character movement values must be non-negative and air control in [0, 1]");
+    }
+    if (!std::isfinite(max_slope_degrees) || max_slope_degrees < 0.0F ||
+        max_slope_degrees >= 90.0F || !std::isfinite(step_height) || step_height < 0.0F) {
+        throw std::invalid_argument(
+            "character slope must be in [0, 90) degrees and step height non-negative");
+    }
+}
+
 World::World() : id_(next_world_id.fetch_add(1, std::memory_order_relaxed)) {
     if (id_ == 0) {
         throw EngineError("Easy3D exhausted native world identifiers");
@@ -610,11 +629,17 @@ void Scene::destroy_entity(const EntityHandle handle) {
         physics_->destroy_body(physics_component->second.body);
         physics_entities_.erase(physics_component);
     }
+    const auto character_component = character_entities_.find(handle.id());
+    if (character_component != character_entities_.end()) {
+        physics_->destroy_character(character_component->second.character);
+        character_entities_.erase(character_component);
+    }
     world_.destroy_entity(handle);
 }
 
 void Scene::clear() noexcept {
     physics_entities_.clear();
+    character_entities_.clear();
     world_.clear();
     debug_lines_.clear();
     if (physics_) {
@@ -671,6 +696,10 @@ void Scene::set_local_transform(const EntityHandle handle, const Transform trans
         throw PhysicsError(
             "dynamic rigid body transforms are physics-owned; use Rigidbody.teleport()");
     }
+    if (character_entities_.contains(handle.id())) {
+        throw PhysicsError(
+            "character transforms are physics-owned; use CharacterController.teleport()");
+    }
     world_.set_local_transform(handle, transform);
     if (physics_component != physics_entities_.end()) {
         const Transform updated = world_.world_transform(handle);
@@ -695,7 +724,8 @@ void Scene::set_entity_parent(const EntityHandle child,
                               const std::optional<EntityHandle> parent,
                               const bool keep_world) {
     (void)world_.entity_name(child);
-    if (parent.has_value() && physics_entities_.contains(child.id())) {
+    if (parent.has_value() &&
+        (physics_entities_.contains(child.id()) || character_entities_.contains(child.id()))) {
         throw PhysicsError("physics entities cannot be parented in this release");
     }
     world_.set_entity_parent(child, parent, keep_world);
@@ -771,6 +801,10 @@ void Scene::add_collider_component(const EntityHandle handle,
     }
     if (physics_entities_.contains(handle.id())) {
         throw std::invalid_argument("entity already has a collider component");
+    }
+    if (character_entities_.contains(handle.id())) {
+        throw std::invalid_argument(
+            "character controller entities cannot also have collider components");
     }
 
     PhysicsEntity physics_component{std::move(component), std::nullopt, {}};
@@ -878,6 +912,86 @@ void Scene::teleport_rigid_body(const EntityHandle handle,
     transform.rotation = rotation;
     world_.set_local_transform(handle, transform);
     physics_->set_body_transform(component.body, position, rotation);
+}
+
+void Scene::add_character_controller_component(
+    const EntityHandle handle,
+    CharacterControllerComponent component) {
+    (void)world_.entity_name(handle);
+    component.validate();
+    if (world_.entity_parent(handle).has_value()) {
+        throw PhysicsError("physics entities cannot be parented in this release");
+    }
+    if (physics_entities_.contains(handle.id())) {
+        throw std::invalid_argument(
+            "character controller entities cannot also have collider components");
+    }
+    if (character_entities_.contains(handle.id())) {
+        throw std::invalid_argument("entity already has a character controller component");
+    }
+    const Transform transform = world_.world_transform(handle);
+    CharacterMotorSettings settings{};
+    settings.mode = component.mode;
+    settings.position = transform.position;
+    settings.radius = component.radius;
+    settings.height = component.height;
+    settings.speed = component.speed;
+    settings.acceleration = component.acceleration;
+    settings.air_control = component.air_control;
+    settings.jump_speed = component.jump_speed;
+    settings.max_slope_degrees = component.max_slope_degrees;
+    settings.step_height = component.step_height;
+    settings.user_data = handle.id();
+    const PhysicsCharacterHandle character = physics().create_character(settings);
+    try {
+        character_entities_.emplace(
+            handle.id(), CharacterEntity{std::move(component), character});
+    } catch (...) {
+        physics_->destroy_character(character);
+        throw;
+    }
+}
+
+bool Scene::has_character_controller_component(const EntityHandle handle) const {
+    (void)world_.entity_name(handle);
+    return character_entities_.contains(handle.id());
+}
+
+const CharacterControllerComponent& Scene::character_controller_component(
+    const EntityHandle handle) const {
+    return require_character_entity(handle).component;
+}
+
+void Scene::remove_character_controller_component(const EntityHandle handle) {
+    CharacterEntity& component = require_character_entity(handle);
+    physics_->destroy_character(component.character);
+    character_entities_.erase(handle.id());
+}
+
+void Scene::set_character_input(const EntityHandle handle,
+                                const Vec3 movement,
+                                const float heading_degrees,
+                                const bool jump) {
+    CharacterEntity& component = require_character_entity(handle);
+    physics_->set_character_input(
+        component.character, {movement, heading_degrees, jump});
+}
+
+CharacterMotorState Scene::character_state(const EntityHandle handle) const {
+    const CharacterEntity& component = require_character_entity(handle);
+    return physics_->character_state(component.character);
+}
+
+void Scene::teleport_character(const EntityHandle handle,
+                               const Vec3 position,
+                               const float heading_degrees) {
+    CharacterEntity& component = require_character_entity(handle);
+    physics_->teleport_character(component.character, position, heading_degrees);
+    const CharacterMotorState state = physics_->character_state(component.character);
+    Transform transform = world_.local_transform(handle);
+    transform.position = state.position;
+    transform.rotation = state.rotation;
+    world_.set_local_transform(handle, transform);
 }
 
 std::vector<ScenePhysicsQueryHit> Scene::raycast_all(
@@ -1095,6 +1209,18 @@ void Scene::step_physics(const float delta_seconds) {
                              static_cast<std::uint32_t>(entity_id >> 32U)},
                 transform);
         }
+        for (const auto& [entity_id, component] : character_entities_) {
+            const EntityHandle handle{
+                world_.id(),
+                static_cast<std::uint32_t>(entity_id & 0xffff'ffffULL),
+                static_cast<std::uint32_t>(entity_id >> 32U),
+            };
+            const CharacterMotorState state = physics_->character_state(component.character);
+            Transform transform = world_.local_transform(handle);
+            transform.position = state.position;
+            transform.rotation = state.rotation;
+            world_.set_local_transform(handle, transform);
+        }
     }
 }
 
@@ -1127,6 +1253,25 @@ const Scene::PhysicsEntity& Scene::require_physics_entity(const EntityHandle han
     const auto component = physics_entities_.find(handle.id());
     if (component == physics_entities_.end()) {
         throw std::invalid_argument("entity does not have a collider component");
+    }
+    return component->second;
+}
+
+Scene::CharacterEntity& Scene::require_character_entity(const EntityHandle handle) {
+    (void)world_.entity_name(handle);
+    const auto component = character_entities_.find(handle.id());
+    if (component == character_entities_.end()) {
+        throw std::invalid_argument("entity does not have a character controller component");
+    }
+    return component->second;
+}
+
+const Scene::CharacterEntity& Scene::require_character_entity(
+    const EntityHandle handle) const {
+    (void)world_.entity_name(handle);
+    const auto component = character_entities_.find(handle.id());
+    if (component == character_entities_.end()) {
+        throw std::invalid_argument("entity does not have a character controller component");
     }
     return component->second;
 }

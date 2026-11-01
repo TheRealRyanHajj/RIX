@@ -18,6 +18,7 @@ LightKind: TypeAlias = Literal["ambient", "directional"]
 ColliderShape: TypeAlias = Literal["box", "sphere"]
 CollisionLayer: TypeAlias = Literal["static", "dynamic", "sensor", "character"]
 RigidBodyType: TypeAlias = Literal["dynamic", "kinematic"]
+CharacterMode: TypeAlias = Literal["first_person", "third_person"]
 
 
 def normalize_color(value: ColorValue) -> tuple[float, float, float, float]:
@@ -364,3 +365,161 @@ class Rigidbody:
     def remove(self) -> None:
         self._entity.scene._require_mutable()
         self._entity.scene._native.remove_rigid_body_component(self._entity._handle)
+
+
+class CharacterController:
+    """Native capsule motor with slope, step, jump, and grounded handling."""
+
+    __slots__ = ("_entity",)
+
+    def __init__(
+        self,
+        entity: Entity,
+        *,
+        mode: CharacterMode = "first_person",
+        radius: float = 0.4,
+        height: float = 1.8,
+        speed: float = 5.0,
+        acceleration: float = 30.0,
+        air_control: float = 0.25,
+        jump_speed: float = 5.0,
+        max_slope_degrees: float = 50.0,
+        step_height: float = 0.4,
+    ) -> None:
+        if mode not in ("first_person", "third_person"):
+            raise ValueError("mode must be 'first_person' or 'third_person'")
+        radius_value = _finite_positive(radius, "character radius")
+        height_value = _finite_positive(height, "character height")
+        if height_value <= 2 * radius_value:
+            raise ValueError("character height must be greater than its diameter")
+        speed_value = _finite_non_negative(speed, "character speed")
+        acceleration_value = _finite_non_negative(
+            acceleration, "character acceleration"
+        )
+        air_control_value = float(air_control)
+        if not math.isfinite(air_control_value) or not 0 <= air_control_value <= 1:
+            raise ValueError("air_control must be finite and between 0 and 1")
+        jump_speed_value = _finite_non_negative(jump_speed, "jump_speed")
+        slope_value = float(max_slope_degrees)
+        if not math.isfinite(slope_value) or not 0 <= slope_value < 90:
+            raise ValueError("max_slope_degrees must be finite and in [0, 90)")
+        step_value = _finite_non_negative(step_height, "step_height")
+        entity.scene._require_mutable()
+        entity.scene._native.add_character_controller_component(
+            entity._handle,
+            mode,
+            radius_value,
+            height_value,
+            speed_value,
+            acceleration_value,
+            air_control_value,
+            jump_speed_value,
+            slope_value,
+            step_value,
+        )
+        self._entity = entity
+
+    @classmethod
+    def _existing(cls, entity: Entity) -> CharacterController:
+        component = cls.__new__(cls)
+        component._entity = entity
+        return component
+
+    def _info(self) -> tuple[str, float, float, float, float, float, float, float, float]:
+        return self._entity.scene._native.character_controller_component_info(
+            self._entity._handle
+        )
+
+    @property
+    def entity(self) -> Entity:
+        return self._entity
+
+    @property
+    def mode(self) -> CharacterMode:
+        return self._info()[0]  # type: ignore[return-value]
+
+    @property
+    def radius(self) -> float:
+        return self._info()[1]
+
+    @property
+    def height(self) -> float:
+        return self._info()[2]
+
+    @property
+    def speed(self) -> float:
+        return self._info()[3]
+
+    @property
+    def acceleration(self) -> float:
+        return self._info()[4]
+
+    @property
+    def air_control(self) -> float:
+        return self._info()[5]
+
+    @property
+    def jump_speed(self) -> float:
+        return self._info()[6]
+
+    @property
+    def max_slope_degrees(self) -> float:
+        return self._info()[7]
+
+    @property
+    def step_height(self) -> float:
+        return self._info()[8]
+
+    def _state(self) -> tuple[object, object, object, object, bool]:
+        return self._entity.scene._native.character_state(self._entity._handle)
+
+    @property
+    def linear_velocity(self) -> Vec3:
+        return Vec3(self._state()[2])  # type: ignore[arg-type]
+
+    @property
+    def ground_normal(self) -> Vec3:
+        return Vec3(self._state()[3])  # type: ignore[arg-type]
+
+    @property
+    def grounded(self) -> bool:
+        return self._state()[4]
+
+    def set_input(
+        self,
+        movement: Vec3 | tuple[float, float, float],
+        *,
+        heading_degrees: float = 0.0,
+        jump: bool = False,
+    ) -> None:
+        if not isinstance(jump, bool):
+            raise TypeError("jump must be a bool")
+        heading = float(heading_degrees)
+        if not math.isfinite(heading):
+            raise ValueError("heading_degrees must be finite")
+        value = Vec3.from_value(movement)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_character_input(
+            self._entity._handle, tuple(value), heading, jump
+        )
+
+    def teleport(
+        self,
+        position: Vec3 | tuple[float, float, float],
+        *,
+        heading_degrees: float = 0.0,
+    ) -> None:
+        heading = float(heading_degrees)
+        if not math.isfinite(heading):
+            raise ValueError("heading_degrees must be finite")
+        value = Vec3.from_value(position)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.teleport_character(
+            self._entity._handle, tuple(value), heading
+        )
+
+    def remove(self) -> None:
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.remove_character_controller_component(
+            self._entity._handle
+        )

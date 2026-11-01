@@ -44,7 +44,7 @@ except InvalidEntityError:
 
 Implemented entity properties include `id`, `name`, `enabled`, `visible`,
 `scene`, `is_alive`, local/world transforms, `parent`, and `children`.
-`MeshRenderer`, `Collider`, and `Rigidbody` are singleton native components and
+`MeshRenderer`, `Collider`, `Rigidbody`, and `CharacterController` are singleton native components and
 are available through typed `has_component`, `get_component`, and
 `remove_component`; physics components are attached with `add_component`.
 Network identity remains a later checklist item.
@@ -381,13 +381,41 @@ Jolt may retire solver contacts when all moving bodies sleep; Easy3D retains
 the logical pair without emitting a false exit, reports stay if it is detected
 again, and emits exit when an awake/separated or destroyed pair is reconciled.
 
+### Character controller
+
+`Player(controller="first_person" | "third_person")` is the convenience form
+of `Entity + CharacterController`. The controller is a native, bottom-aligned
+Y-axis capsule. Public `height` is total tip-to-tip height in meters. Its
+construction-time configuration includes `radius`, `height`, `speed`,
+`acceleration`, `air_control` in `[0,1]`, `jump_speed`,
+`max_slope_degrees` in `[0,90)`, and `step_height`.
+
+`set_input((right, 0, forward), heading_degrees=..., jump=...)` stores one
+fixed-tick command. Input magnitude is clamped to one. At heading zero,
+positive forward moves along world -Z; heading rotates movement around +Y.
+First-person mode makes the entity face the supplied heading. Third-person
+mode faces nonzero movement while still interpreting it relative to heading.
+Jump is a one-shot request consumed by the next native step; movement and
+heading persist until replaced. `grounded`, `ground_normal`, and
+`linear_velocity` are solver snapshots.
+
+The native fixed phase updates each character velocity and calls Jolt
+`CharacterVirtual::ExtendedUpdate` before `PhysicsSystem::Update`. This gives
+the motor slope cancellation, stair walking, floor adhesion, collision/sliding,
+moving-ground velocity, gravity, and jump behavior on the simulation thread.
+A smaller Jolt inner capsule makes characters visible to ordinary queries,
+rigid bodies, sensors, and deferred contact events on the `character` layer.
+Character transforms are physics-owned, cannot be parented, and must use
+`teleport(position, heading_degrees=...)` for discontinuities. A character
+controller and ordinary collider are mutually exclusive on one entity.
+
 Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
 `(0, -9.81, 0)` without allocation and creates the world when changed. During a
 simulation tick the scheduler runs all eligible Python `fixed_update(dt)` hooks,
 commits deferred mutations, then advances the initialized Jolt world once with
 that same fixed `dt`, synchronizes dynamic poses and dispatches copied contact
 events. `scene.physics_step_count` is a diagnostic. Scene clear
-destroys all native bodies and invalidates their handles. A scene with no
+destroys all native bodies and characters and invalidates their handles. A scene with no
 physics use pays no Jolt-world/temp-buffer allocation.
 
 ## Texture assets
