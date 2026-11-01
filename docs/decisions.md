@@ -121,3 +121,37 @@ exclusive between games.
   not a future network ID.
 - World mutation is gameplay-thread-only until later scheduler/threading work
   adds explicit synchronization boundaries.
+
+## ADR-0006: Easy3D math boundary with private GLM transform implementation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+GLM is the locked internal math dependency, but beginner-facing APIs must not
+leak third-party types. Entity vector component edits such as
+`entity.position.x += 1` must persist rather than mutate detached temporaries.
+Euler angles also have multiple valid representations for one orientation.
+
+### Decision
+
+Pin GLM 1.0.1 by commit and link it privately. Native Easy3D `Vec2`, `Vec3`,
+`Quat`, and `Transform` values own the C++ API boundary. Python exposes
+Easy3D-owned value types; entity local position, Euler rotation, and scale use
+live proxy instances whose component setters write through to native state.
+Native transform slots store quaternion rotation, local TRS, hierarchy links,
+cached world matrices, and recursive dirty state.
+
+Local matrices use translation × rotation × scale in a right-handed, +Y-up,
+-Z-forward convention. Reparenting preserves local transforms by default and
+offers explicit keep-world decomposition. Euler angles are a degree-based facade;
+orientation equality is quaternion-based because Euler triples are not unique.
+
+### Consequences
+
+- No GLM object appears in Python or stable Easy3D headers.
+- Cached descendant transforms recompute only after ancestor/local changes.
+- Direct component mutation on entity vector properties is persistent.
+- Keep-world TRS decomposition cannot represent arbitrary shear exactly; future
+  APIs must not imply general affine/shear support without changing storage.

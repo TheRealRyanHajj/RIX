@@ -24,8 +24,19 @@ created entities. `is_alive` is a non-throwing probe; other stale-handle access
 raises native `InvalidEntityError`, exposed to Python as a `ReferenceError`
 subclass.
 
-Entity names, `enabled`, and `visible` are native slot data. Transform and
-component storage will extend the same registry; they are not yet implemented.
+Entity names, `enabled`, `visible`, local TRS, hierarchy links, cached world
+matrices, and transform-dirty state are native slot data. Component storage will
+extend the same registry; it is not yet implemented.
+
+Parent changes validate world ownership and reject cycles. Local matrices are
+composed as translation × quaternion rotation × scale. Descendant caches are
+invalidated recursively when any ancestor changes. Optional keep-world
+reparenting calculates a new local TRS from the inverse parent matrix. Destroying
+a parent detaches direct children with their world transforms preserved.
+
+GLM 1.0.1 is an immutable, private implementation dependency for matrix and
+quaternion operations. Public native and Python boundaries use Easy3D-owned
+types so dependency representation changes cannot leak into gameplay code.
 
 ## Scene activation and construction contexts
 

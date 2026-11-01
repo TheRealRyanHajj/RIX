@@ -21,6 +21,22 @@ PYBIND11_MODULE(_easy3d, module) {
 
     module.def("engine_version", &easy3d::engine_version);
     module.def("native_add", &easy3d::native_add, py::arg("a"), py::arg("b"));
+    module.def("_quat_from_euler", [](const double x, const double y, const double z) {
+        const easy3d::Quat value = easy3d::Quat::from_euler_degrees(
+            {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+        return py::make_tuple(value.w, value.x, value.y, value.z);
+    });
+    module.def("_quat_to_euler", [](const double w,
+                                      const double x,
+                                      const double y,
+                                      const double z) {
+        const easy3d::Vec3 value = easy3d::Quat{static_cast<float>(w),
+                                                static_cast<float>(x),
+                                                static_cast<float>(y),
+                                                static_cast<float>(z)}
+                                       .to_euler_degrees();
+        return py::make_tuple(value.x, value.y, value.z);
+    });
     module.def("_raise_engine_error", [](const std::string& message) {
         throw easy3d::EngineError(message);
     });
@@ -91,6 +107,76 @@ PYBIND11_MODULE(_easy3d, module) {
         .def("set_entity_visible",
              &easy3d::Scene::set_entity_visible,
              py::arg("handle"),
-             py::arg("visible"));
+             py::arg("visible"))
+        .def("entity_local_position", [](const easy3d::Scene& scene,
+                                           const easy3d::EntityHandle handle) {
+            const easy3d::Vec3 value = scene.local_transform(handle).position;
+            return py::make_tuple(value.x, value.y, value.z);
+        })
+        .def("set_entity_local_position", [](easy3d::Scene& scene,
+                                               const easy3d::EntityHandle handle,
+                                               const double x,
+                                               const double y,
+                                               const double z) {
+            easy3d::Transform transform = scene.local_transform(handle);
+            transform.position = {static_cast<float>(x),
+                                  static_cast<float>(y),
+                                  static_cast<float>(z)};
+            scene.set_local_transform(handle, transform);
+        })
+        .def("entity_local_rotation", [](const easy3d::Scene& scene,
+                                           const easy3d::EntityHandle handle) {
+            const easy3d::Quat value = scene.local_transform(handle).rotation;
+            return py::make_tuple(value.w, value.x, value.y, value.z);
+        })
+        .def("set_entity_local_rotation", [](easy3d::Scene& scene,
+                                               const easy3d::EntityHandle handle,
+                                               const double w,
+                                               const double x,
+                                               const double y,
+                                               const double z) {
+            easy3d::Transform transform = scene.local_transform(handle);
+            transform.rotation = {static_cast<float>(w),
+                                  static_cast<float>(x),
+                                  static_cast<float>(y),
+                                  static_cast<float>(z)};
+            scene.set_local_transform(handle, transform);
+        })
+        .def("entity_local_scale", [](const easy3d::Scene& scene,
+                                        const easy3d::EntityHandle handle) {
+            const easy3d::Vec3 value = scene.local_transform(handle).scale;
+            return py::make_tuple(value.x, value.y, value.z);
+        })
+        .def("set_entity_local_scale", [](easy3d::Scene& scene,
+                                            const easy3d::EntityHandle handle,
+                                            const double x,
+                                            const double y,
+                                            const double z) {
+            easy3d::Transform transform = scene.local_transform(handle);
+            transform.scale = {static_cast<float>(x),
+                               static_cast<float>(y),
+                               static_cast<float>(z)};
+            scene.set_local_transform(handle, transform);
+        })
+        .def("entity_world_transform", [](const easy3d::Scene& scene,
+                                            const easy3d::EntityHandle handle) {
+            const easy3d::Transform transform = scene.world_transform(handle);
+            return py::make_tuple(
+                py::make_tuple(transform.position.x,
+                               transform.position.y,
+                               transform.position.z),
+                py::make_tuple(transform.rotation.w,
+                               transform.rotation.x,
+                               transform.rotation.y,
+                               transform.rotation.z),
+                py::make_tuple(transform.scale.x, transform.scale.y, transform.scale.z));
+        })
+        .def("entity_parent", &easy3d::Scene::entity_parent, py::arg("handle"))
+        .def("entity_children", &easy3d::Scene::entity_children, py::arg("handle"))
+        .def("set_entity_parent",
+             &easy3d::Scene::set_entity_parent,
+             py::arg("child"),
+             py::arg("parent") = std::nullopt,
+             py::arg("keep_world") = false);
 }
 

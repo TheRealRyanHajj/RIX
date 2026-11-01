@@ -278,7 +278,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 ### PHASE 1 — Scene, entities, transforms, rendering, assets
 
 - [x] **1.1** Define `World`, `Scene`, entity handle semantics and ownership/lifetime API; add create/destroy/reuse tests.
-- [ ] **1.2** Implement `Vec2`, `Vec3`, quaternion and Euler facade, transforms, parenting and dirty propagation; test local/global transform correctness.
+- [x] **1.2** Implement `Vec2`, `Vec3`, quaternion and Euler facade, transforms, parenting and dirty propagation; test local/global transform correctness.
 - [ ] **1.3** Create mesh/material abstractions and GPU buffer lifetime manager; render triangle, cube, plane, sphere with depth testing.
 - [ ] **1.4** Build camera/view/projection, configurable near/far planes, aspect ratio and resize handling.
 - [ ] **1.5** Build shared texture loading/caching (PNG/JPEG, UVs, sampler settings, sRGB); missing asset errors.

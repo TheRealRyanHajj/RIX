@@ -42,6 +42,28 @@ except InvalidEntityError:
     pass
 ```
 
-Implemented entity properties are `id`, `name`, `enabled`, `visible`, `scene`,
-and `is_alive`. Transform, hierarchy, components, rendering, physics, and
-network identity are later checklist items and are not available yet.
+Implemented entity properties include `id`, `name`, `enabled`, `visible`,
+`scene`, `is_alive`, local/world transforms, `parent`, and `children`. Component
+attachment, rendering, physics, and network identity are later checklist items
+and are not available yet.
+
+## Math and transform conventions
+
+`Vec2` and `Vec3` provide finite components, arithmetic, dot products,
+normalization, and explicit approximate comparison. `Vec3` also provides cross
+products. `Quat` is stored as `(w, x, y, z)` and supports normalization,
+multiplication, vector rotation, and degree-based Euler conversion.
+
+Entity `position`, `rotation`, and `scale` are local-space live properties:
+`entity.position.x += 1` writes through to native state. `world_position`,
+`world_rotation`, `world_quaternion`, and `world_scale` are calculated snapshots.
+The coordinate system is right-handed, +Y up, with camera-forward -Z. Euler
+angles are degrees and are not unique: reading a rotation may produce a different
+but orientation-equivalent triple. Compare quaternions when orientation identity
+matters.
+
+`entity.set_parent(parent, keep_world=False)` preserves the local transform by
+default. Pass `keep_world=True` to recompute local TRS while preserving the
+current world transform. Parenting rejects self-parenting, cycles, stale handles,
+and cross-scene relationships. Destroying a parent detaches its direct children
+while preserving their world transforms.

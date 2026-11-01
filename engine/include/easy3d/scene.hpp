@@ -1,10 +1,13 @@
 #pragma once
 
 #include "easy3d/core.hpp"
+#include "easy3d/math.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -55,6 +58,15 @@ public:
     [[nodiscard]] bool entity_visible(EntityHandle handle) const;
     void set_entity_visible(EntityHandle handle, bool visible);
 
+    [[nodiscard]] Transform local_transform(EntityHandle handle) const;
+    void set_local_transform(EntityHandle handle, Transform transform);
+    [[nodiscard]] Transform world_transform(EntityHandle handle) const;
+    [[nodiscard]] std::optional<EntityHandle> entity_parent(EntityHandle handle) const;
+    [[nodiscard]] std::vector<EntityHandle> entity_children(EntityHandle handle) const;
+    void set_entity_parent(EntityHandle child,
+                           std::optional<EntityHandle> parent,
+                           bool keep_world = false);
+
 private:
     struct Slot final {
         std::uint32_t generation{1};
@@ -62,12 +74,26 @@ private:
         bool enabled{true};
         bool visible{true};
         std::string name;
+        Transform local_transform{};
+        std::optional<std::uint32_t> parent_index;
+        std::vector<std::uint32_t> child_indices;
+        mutable std::array<float, 16> cached_world_matrix{
+            1.0F, 0.0F, 0.0F, 0.0F,
+            0.0F, 1.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F};
+        mutable bool transform_dirty{true};
     };
 
     [[nodiscard]] Slot& require_slot(EntityHandle handle);
     [[nodiscard]] const Slot& require_slot(EntityHandle handle) const;
     [[nodiscard]] EntityHandle handle_for(std::uint32_t index) const noexcept;
+    [[nodiscard]] const std::array<float, 16>& world_matrix(std::uint32_t index) const;
+    void mark_transform_dirty(std::uint32_t index) noexcept;
+    void detach_from_parent(std::uint32_t index) noexcept;
+    void set_local_from_matrix(std::uint32_t index, const std::array<float, 16>& matrix);
     static void validate_name(std::string_view name);
+    static void validate_transform(const Transform& transform);
     static void advance_generation(Slot& slot) noexcept;
 
     std::uint64_t id_;
@@ -104,6 +130,14 @@ public:
     void set_entity_enabled(EntityHandle handle, bool enabled);
     [[nodiscard]] bool entity_visible(EntityHandle handle) const;
     void set_entity_visible(EntityHandle handle, bool visible);
+    [[nodiscard]] Transform local_transform(EntityHandle handle) const;
+    void set_local_transform(EntityHandle handle, Transform transform);
+    [[nodiscard]] Transform world_transform(EntityHandle handle) const;
+    [[nodiscard]] std::optional<EntityHandle> entity_parent(EntityHandle handle) const;
+    [[nodiscard]] std::vector<EntityHandle> entity_children(EntityHandle handle) const;
+    void set_entity_parent(EntityHandle child,
+                           std::optional<EntityHandle> parent,
+                           bool keep_world = false);
 
     [[nodiscard]] World& world() noexcept;
     [[nodiscard]] const World& world() const noexcept;

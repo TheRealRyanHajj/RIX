@@ -19,8 +19,21 @@ configure_file(
     @ONLY
 )
 
+# GLM 1.0.1. Easy3D owns its public math types; GLM remains private.
+set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
+set(GLM_ENABLE_CXX_20 ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 0af55ccecd98d4e5a8d1fad7de25ba429d60e863
+    GIT_SHALLOW FALSE
+)
+FetchContent_MakeAvailable(glm)
+
 set(easy3d_core_sources
     engine/src/core/engine.cpp
+    engine/src/math/math.cpp
     engine/src/scene/scene.cpp
 )
 
@@ -74,6 +87,7 @@ target_include_directories(easy3d_core
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine/src"
 )
+target_link_libraries(easy3d_core PRIVATE glm::glm)
 
 if(MSVC)
     target_compile_options(easy3d_core PRIVATE /W4 /permissive- /EHsc /Zc:__cplusplus)
@@ -124,6 +138,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_scene_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_scene_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.scene COMMAND easy3d_scene_tests)
+
+    add_executable(easy3d_math_transform_tests tests/cpp/test_math_transform.cpp)
+    target_compile_features(easy3d_math_transform_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_math_transform_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.math_transform COMMAND easy3d_math_transform_tests)
 endif()
 
 if(EASY3D_BUILD_BENCHMARKS)

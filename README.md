@@ -2,9 +2,9 @@
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. The current implementation includes the validated Phase 0 native
-foundation and Phase 1.1's generation-safe scene/entity lifetime system.
-Rendering remains the Phase 0 blank D3D11 window until later Phase 1 milestones
-are completed.
+foundation, generation-safe scene/entity lifetimes, and native transform
+hierarchies with Easy3D-owned vector/quaternion APIs. Rendering remains the
+Phase 0 blank D3D11 window until later Phase 1 milestones are completed.
 
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
@@ -101,7 +101,7 @@ performance claim.
 
 ## Scope and license
 
-Transforms/renderable entities, physics, assets, and multiplayer systems remain
+Renderable components, physics, assets, and multiplayer systems remain
 incomplete. The repository is private and proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 

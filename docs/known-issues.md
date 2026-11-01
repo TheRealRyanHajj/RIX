@@ -5,11 +5,11 @@ machine.
 
 ## Phase 1 is incomplete
 
-Phase 1.1 scene/entity lifetime semantics are implemented. Transforms,
-hierarchy, component attachment, meshes, cameras, materials, textures, model
-loading, lighting, culling, and instancing remain unimplemented checklist work.
-The loaded scene therefore owns entity state but is not yet submitted to the
-renderer.
+Phase 1.1 scene/entity lifetime semantics and Phase 1.2 math/transform hierarchy
+are implemented. Component attachment, meshes, cameras, materials, textures,
+model loading, lighting, culling, and instancing remain unimplemented checklist
+work. The loaded scene therefore owns entity and transform state but is not yet
+submitted to the renderer.
 
 ## Visual Studio 2022 minimum is not independently exercised here
 
@@ -37,4 +37,12 @@ FetchContent checkout, but fully offline clean setup is not yet provided.
 Debug builds emit bgfx capability diagnostics and benign optional-tool notices
 for components such as RenderDoc or AMD AGS when those tools are absent. Release
 builds provide the concise selected-renderer and adapter log used by the example.
+
+## Pinned GLM emits CMake policy deprecation warnings
+
+GLM 1.0.1 is pinned by immutable commit and builds successfully, but its
+upstream CMake project requests compatibility with CMake versions older than
+3.10. CMake 4.0 therefore emits non-fatal deprecation warnings during a fresh
+configure. Easy3D does not suppress or patch vendored warnings; a future reviewed
+GLM pin update should re-evaluate them.
 

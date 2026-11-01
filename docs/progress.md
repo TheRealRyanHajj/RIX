@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1 PASSED; Phase 1.2 is next.**
-Earlier blocked checkpoints below are retained as diagnostic history.
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.2 PASSED; Phase 1.3 is
+next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
 
@@ -571,3 +571,103 @@ lifecycle regression.
 Immediate next task: Phase 1.2 — native `Vec2`/`Vec3`/`Quat`, public Euler
 facade, transform storage, parenting with cycle rejection and keep-world
 semantics, dirty propagation, and local/world correctness tests.
+
+## 2026-11-01 — Phase 1.2 math and transform hierarchy
+
+### Implemented
+
+- Immutable-pinned GLM 1.0.1 as a private implementation dependency.
+- Native Easy3D `Vec2`, `Vec3`, `Quat`, and `Transform` values with arithmetic,
+  normalization, dot/cross operations, quaternion multiplication/rotation,
+  approximate comparison, and degree-based Euler conversion.
+- Native local TRS storage, quaternion normalization, cached world matrices,
+  recursive dirty propagation, parent/child links, cycle/self/cross-world
+  rejection, keep-local and keep-world reparenting, and world-preserving child
+  detachment when a parent is destroyed.
+- Typed Python `Vec2`, `Vec3`, and `Quat` APIs. Entity `position`, `rotation`, and
+  `scale` are live proxies, so component mutation writes through to native state.
+  World transform snapshots, `parent`, `children`, and explicit `set_parent`
+  are public.
+- Right-handed, +Y-up, -Z-forward and Euler/quaternion semantics documented.
+
+### Failure and correction evidence
+
+The first Debug compile stopped before linking because pinned GLM requires an
+explicit opt-in for its matrix decomposition extension:
+
+```text
+glm/gtx/matrix_decompose.hpp(24): fatal error C1189:
+"GLM: GLM_GTX_matrix_decompose is an experimental extension ...
+Use #define GLM_ENABLE_EXPERIMENTAL before including it"
+ninja: build stopped: subcommand failed.
+```
+
+`GLM_ENABLE_EXPERIMENTAL` is now scoped to `scene.cpp`, the only translation
+unit using that pinned extension. The rebuild passed.
+
+The first Python run then exposed a non-unique Euler representation after
+incrementing yaw from 90° to 135°:
+
+```text
+entity.rotation
+Vec3(180.0, 45.000003814697266, 180.0)
+```
+
+That triple is orientation-equivalent to `(0, 135, 0)` and the native quaternion
+was correct. The regression now compares quaternion orientation, and the public
+contract explicitly states that Euler triples may canonicalize.
+
+### Verification evidence
+
+```text
+cmake --build --preset windows-debug
+# exit code 0
+
+ctest --preset windows-debug --output-on-failure
+Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-debug
+    Start 1: easy3d.core
+1/3 Test #1: easy3d.core ......................   Passed    0.05 sec
+    Start 2: easy3d.scene
+2/3 Test #2: easy3d.scene .....................   Passed    0.03 sec
+    Start 3: easy3d.math_transform
+3/3 Test #3: easy3d.math_transform ............   Passed    0.04 sec
+100% tests passed, 0 tests failed out of 3
+Total Test time (real) =   0.23 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl size=1780041 sha256=13469a18882f8b194165b862593805dbdb64604ba9d2d72c879e6bd97df33589
+Successfully built easy3d
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+............................                                             [100%]
+28 passed in 0.08s
+
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-release
+    Start 1: easy3d.core
+1/3 Test #1: easy3d.core ......................   Passed    0.04 sec
+    Start 2: easy3d.scene
+2/3 Test #2: easy3d.scene .....................   Passed    0.04 sec
+    Start 3: easy3d.math_transform
+3/3 Test #3: easy3d.math_transform ............   Passed    0.03 sec
+100% tests passed, 0 tests failed out of 3
+Total Test time (real) =   0.22 sec
+
+.\build\windows-release\Release\easy3d_window_lifecycle.exe
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+frames=52 running=0
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+```
+
+Tests cover vector/quaternion behavior, exact versus approximate equality,
+Euler orientation round-trip, live native property writes, local/global TRS,
+rotation and scale inheritance, cache invalidation after an ancestor mutation,
+cycle/self/cross-scene rejection, keep-world reparenting, and parent destruction.
+
+Phase 1.2: **DONE**. Immediate next task: Phase 1.3 — renderer abstraction,
+mesh/material handles, GPU resource lifetime, shaders, and indexed triangle/cube/
+plane/sphere rendering with depth testing.

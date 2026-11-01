@@ -1,14 +1,78 @@
 #include "easy3d/scene.hpp"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
+
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 namespace easy3d {
 namespace {
 
 std::atomic_uint64_t next_world_id{1};
+constexpr float minimum_scale = 1.0e-6F;
+
+[[nodiscard]] glm::vec3 to_glm(const Vec3 value) noexcept {
+    return {value.x, value.y, value.z};
+}
+
+[[nodiscard]] glm::quat to_glm(const Quat value) noexcept {
+    return {value.w, value.x, value.y, value.z};
+}
+
+[[nodiscard]] Vec3 from_glm(const glm::vec3 value) noexcept {
+    return {value.x, value.y, value.z};
+}
+
+[[nodiscard]] Quat from_glm(const glm::quat value) noexcept {
+    return {value.w, value.x, value.y, value.z};
+}
+
+[[nodiscard]] glm::mat4 to_glm(const std::array<float, 16>& matrix) noexcept {
+    return glm::make_mat4(matrix.data());
+}
+
+[[nodiscard]] std::array<float, 16> from_glm(const glm::mat4& matrix) noexcept {
+    std::array<float, 16> result{};
+    const float* values = glm::value_ptr(matrix);
+    std::copy_n(values, result.size(), result.begin());
+    return result;
+}
+
+[[nodiscard]] glm::mat4 compose_matrix(const Transform& transform) noexcept {
+    return glm::translate(glm::mat4(1.0F), to_glm(transform.position)) *
+           glm::mat4_cast(to_glm(transform.rotation)) *
+           glm::scale(glm::mat4(1.0F), to_glm(transform.scale));
+}
+
+[[nodiscard]] Transform decompose_matrix(const glm::mat4& matrix) {
+    glm::vec3 scale{};
+    glm::quat rotation{};
+    glm::vec3 translation{};
+    glm::vec3 skew{};
+    glm::vec4 perspective{};
+    if (!glm::decompose(matrix, scale, rotation, translation, skew, perspective)) {
+        throw EngineError("transform matrix could not be decomposed");
+    }
+    return Transform{from_glm(translation), from_glm(rotation).normalized(), from_glm(scale)};
+}
+
+[[nodiscard]] bool finite(const Vec3 value) noexcept {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+[[nodiscard]] bool finite(const Quat value) noexcept {
+    return std::isfinite(value.w) && std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z);
+}
 
 [[nodiscard]] std::string invalid_handle_message(const EntityHandle handle,
                                                  const std::uint64_t expected_world) {
@@ -55,12 +119,26 @@ EntityHandle World::create_entity(std::string name) {
     slot.enabled = true;
     slot.visible = true;
     slot.name = std::move(name);
+    slot.local_transform = {};
+    slot.parent_index.reset();
+    slot.child_indices.clear();
+    slot.transform_dirty = true;
     ++entity_count_;
     return handle_for(index);
 }
 
 void World::destroy_entity(const EntityHandle handle) {
     Slot& slot = require_slot(handle);
+
+    const std::vector<std::uint32_t> child_indices = slot.child_indices;
+    for (const std::uint32_t child_index : child_indices) {
+        const std::array<float, 16> child_world = world_matrix(child_index);
+        slots_[child_index].parent_index.reset();
+        set_local_from_matrix(child_index, child_world);
+    }
+    slot.child_indices.clear();
+    detach_from_parent(handle.index);
+
     slot.alive = false;
     slot.enabled = false;
     slot.visible = false;
@@ -82,6 +160,10 @@ void World::clear() noexcept {
         slot.enabled = false;
         slot.visible = false;
         slot.name.clear();
+        slot.local_transform = {};
+        slot.parent_index.reset();
+        slot.child_indices.clear();
+        slot.transform_dirty = true;
         free_indices_.push_back(static_cast<std::uint32_t>(index));
     }
     entity_count_ = 0;
@@ -136,6 +218,88 @@ void World::set_entity_visible(const EntityHandle handle, const bool visible) {
     require_slot(handle).visible = visible;
 }
 
+Transform World::local_transform(const EntityHandle handle) const {
+    return require_slot(handle).local_transform;
+}
+
+void World::set_local_transform(const EntityHandle handle, Transform transform) {
+    validate_transform(transform);
+    transform.rotation = transform.rotation.normalized();
+    require_slot(handle).local_transform = transform;
+    mark_transform_dirty(handle.index);
+}
+
+Transform World::world_transform(const EntityHandle handle) const {
+    (void)require_slot(handle);
+    return decompose_matrix(to_glm(world_matrix(handle.index)));
+}
+
+std::optional<EntityHandle> World::entity_parent(const EntityHandle handle) const {
+    const Slot& slot = require_slot(handle);
+    if (!slot.parent_index.has_value()) {
+        return std::nullopt;
+    }
+    return handle_for(*slot.parent_index);
+}
+
+std::vector<EntityHandle> World::entity_children(const EntityHandle handle) const {
+    const Slot& slot = require_slot(handle);
+    std::vector<EntityHandle> result;
+    result.reserve(slot.child_indices.size());
+    for (const std::uint32_t index : slot.child_indices) {
+        result.push_back(handle_for(index));
+    }
+    return result;
+}
+
+void World::set_entity_parent(const EntityHandle child_handle,
+                              const std::optional<EntityHandle> parent_handle,
+                              const bool keep_world) {
+    Slot& child = require_slot(child_handle);
+    std::optional<std::uint32_t> parent_index;
+    if (parent_handle.has_value()) {
+        (void)require_slot(*parent_handle);
+        if (*parent_handle == child_handle) {
+            throw std::invalid_argument("an entity cannot be parented to itself");
+        }
+        parent_index = parent_handle->index;
+
+        std::optional<std::uint32_t> ancestor = parent_index;
+        while (ancestor.has_value()) {
+            if (*ancestor == child_handle.index) {
+                throw std::invalid_argument("entity parenting would create a cycle");
+            }
+            ancestor = slots_[*ancestor].parent_index;
+        }
+    }
+
+    if (child.parent_index == parent_index) {
+        return;
+    }
+
+    Transform replacement_local = child.local_transform;
+    if (keep_world) {
+        glm::mat4 local_matrix = to_glm(world_matrix(child_handle.index));
+        if (parent_index.has_value()) {
+            const glm::mat4 parent_world = to_glm(world_matrix(*parent_index));
+            if (std::abs(glm::determinant(parent_world)) <= minimum_scale) {
+                throw EngineError("cannot preserve world transform under a singular parent");
+            }
+            local_matrix = glm::inverse(parent_world) * local_matrix;
+        }
+        replacement_local = decompose_matrix(local_matrix);
+        validate_transform(replacement_local);
+    }
+
+    detach_from_parent(child_handle.index);
+    child.parent_index = parent_index;
+    if (parent_index.has_value()) {
+        slots_[*parent_index].child_indices.push_back(child_handle.index);
+    }
+    child.local_transform = replacement_local;
+    mark_transform_dirty(child_handle.index);
+}
+
 World::Slot& World::require_slot(const EntityHandle handle) {
     if (!is_alive(handle)) {
         throw InvalidEntityError(invalid_handle_message(handle, id_));
@@ -154,9 +318,65 @@ EntityHandle World::handle_for(const std::uint32_t index) const noexcept {
     return EntityHandle{id_, index, slots_[index].generation};
 }
 
+const std::array<float, 16>& World::world_matrix(const std::uint32_t index) const {
+    const Slot& slot = slots_[index];
+    if (slot.transform_dirty) {
+        glm::mat4 matrix = compose_matrix(slot.local_transform);
+        if (slot.parent_index.has_value()) {
+            matrix = to_glm(world_matrix(*slot.parent_index)) * matrix;
+        }
+        slot.cached_world_matrix = from_glm(matrix);
+        slot.transform_dirty = false;
+    }
+    return slot.cached_world_matrix;
+}
+
+void World::mark_transform_dirty(const std::uint32_t index) noexcept {
+    Slot& slot = slots_[index];
+    if (slot.transform_dirty) {
+        return;
+    }
+    slot.transform_dirty = true;
+    for (const std::uint32_t child_index : slot.child_indices) {
+        mark_transform_dirty(child_index);
+    }
+}
+
+void World::detach_from_parent(const std::uint32_t index) noexcept {
+    Slot& slot = slots_[index];
+    if (!slot.parent_index.has_value()) {
+        return;
+    }
+    std::vector<std::uint32_t>& siblings = slots_[*slot.parent_index].child_indices;
+    siblings.erase(std::remove(siblings.begin(), siblings.end(), index), siblings.end());
+    slot.parent_index.reset();
+}
+
+void World::set_local_from_matrix(const std::uint32_t index,
+                                  const std::array<float, 16>& matrix) {
+    Transform transform = decompose_matrix(to_glm(matrix));
+    validate_transform(transform);
+    slots_[index].local_transform = transform;
+    mark_transform_dirty(index);
+}
+
 void World::validate_name(const std::string_view name) {
     if (name.empty()) {
         throw std::invalid_argument("entity name must not be empty");
+    }
+}
+
+void World::validate_transform(const Transform& transform) {
+    if (!finite(transform.position) || !finite(transform.rotation) || !finite(transform.scale)) {
+        throw std::invalid_argument("transform values must be finite");
+    }
+    if (std::abs(transform.scale.x) <= minimum_scale ||
+        std::abs(transform.scale.y) <= minimum_scale ||
+        std::abs(transform.scale.z) <= minimum_scale) {
+        throw std::invalid_argument("transform scale components must be nonzero");
+    }
+    if (transform.rotation.length_squared() <= minimum_scale) {
+        throw std::invalid_argument("transform rotation quaternion must be nonzero");
     }
 }
 
@@ -234,6 +454,32 @@ bool Scene::entity_visible(const EntityHandle handle) const {
 
 void Scene::set_entity_visible(const EntityHandle handle, const bool visible) {
     world_.set_entity_visible(handle, visible);
+}
+
+Transform Scene::local_transform(const EntityHandle handle) const {
+    return world_.local_transform(handle);
+}
+
+void Scene::set_local_transform(const EntityHandle handle, const Transform transform) {
+    world_.set_local_transform(handle, transform);
+}
+
+Transform Scene::world_transform(const EntityHandle handle) const {
+    return world_.world_transform(handle);
+}
+
+std::optional<EntityHandle> Scene::entity_parent(const EntityHandle handle) const {
+    return world_.entity_parent(handle);
+}
+
+std::vector<EntityHandle> Scene::entity_children(const EntityHandle handle) const {
+    return world_.entity_children(handle);
+}
+
+void Scene::set_entity_parent(const EntityHandle child,
+                              const std::optional<EntityHandle> parent,
+                              const bool keep_world) {
+    world_.set_entity_parent(child, parent, keep_world);
 }
 
 World& Scene::world() noexcept {

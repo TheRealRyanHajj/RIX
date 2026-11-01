@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ._easy3d import EntityHandle
+from .math import Quat, Vec3
 
 if TYPE_CHECKING:
     from .scene import Scene
@@ -77,6 +78,111 @@ class Entity:
         if not isinstance(value, bool):
             raise TypeError("visible must be a bool")
         self._scene._native.set_entity_visible(self._handle, value)
+
+    @property
+    def position(self) -> Vec3:
+        """Live local-space position. Component assignment persists natively."""
+
+        return Vec3._live(
+            lambda: tuple(self._scene._native.entity_local_position(self._handle)),
+            lambda value: self._scene._native.set_entity_local_position(
+                self._handle, *value
+            ),
+        )
+
+    @position.setter
+    def position(self, value: Vec3 | tuple[float, float, float]) -> None:
+        vector = Vec3.from_value(value)
+        self._scene._native.set_entity_local_position(self._handle, *vector)
+
+    @property
+    def rotation(self) -> Vec3:
+        """Live local Euler rotation in degrees (internally a quaternion)."""
+
+        def get_euler() -> tuple[float, float, float]:
+            return tuple(Quat(self._scene._native.entity_local_rotation(self._handle)).to_euler())
+
+        def set_euler(value: tuple[float, float, float]) -> None:
+            self._scene._native.set_entity_local_rotation(
+                self._handle, *Quat.from_euler(value)
+            )
+
+        return Vec3._live(get_euler, set_euler)
+
+    @rotation.setter
+    def rotation(self, value: Vec3 | tuple[float, float, float]) -> None:
+        self.quaternion = Quat.from_euler(value)
+
+    @property
+    def quaternion(self) -> Quat:
+        return Quat(self._scene._native.entity_local_rotation(self._handle))
+
+    @quaternion.setter
+    def quaternion(self, value: Quat) -> None:
+        if not isinstance(value, Quat):
+            raise TypeError("quaternion must be an easy3d.Quat")
+        self._scene._native.set_entity_local_rotation(self._handle, *value)
+
+    @property
+    def scale(self) -> Vec3:
+        """Live local-space scale. Scale components must remain nonzero."""
+
+        return Vec3._live(
+            lambda: tuple(self._scene._native.entity_local_scale(self._handle)),
+            lambda value: self._scene._native.set_entity_local_scale(self._handle, *value),
+        )
+
+    @scale.setter
+    def scale(self, value: Vec3 | tuple[float, float, float]) -> None:
+        vector = Vec3.from_value(value)
+        self._scene._native.set_entity_local_scale(self._handle, *vector)
+
+    def _world_components(self) -> tuple[tuple[float, float, float], tuple[float, float, float, float], tuple[float, float, float]]:
+        position, rotation, scale = self._scene._native.entity_world_transform(self._handle)
+        return tuple(position), tuple(rotation), tuple(scale)
+
+    @property
+    def world_position(self) -> Vec3:
+        return Vec3(self._world_components()[0])
+
+    @property
+    def world_quaternion(self) -> Quat:
+        return Quat(self._world_components()[1])
+
+    @property
+    def world_rotation(self) -> Vec3:
+        return self.world_quaternion.to_euler()
+
+    @property
+    def world_scale(self) -> Vec3:
+        return Vec3(self._world_components()[2])
+
+    @property
+    def parent(self) -> Entity | None:
+        handle = self._scene._native.entity_parent(self._handle)
+        return None if handle is None else Entity._from_handle(self._scene, handle)
+
+    @parent.setter
+    def parent(self, value: Entity | None) -> None:
+        self.set_parent(value)
+
+    @property
+    def children(self) -> tuple[Entity, ...]:
+        return tuple(
+            Entity._from_handle(self._scene, handle)
+            for handle in self._scene._native.entity_children(self._handle)
+        )
+
+    def set_parent(self, parent: Entity | None, *, keep_world: bool = False) -> None:
+        if parent is not None and not isinstance(parent, Entity):
+            raise TypeError("parent must be an easy3d.Entity or None")
+        if parent is not None and parent.scene is not self._scene:
+            raise ValueError("parent belongs to a different scene")
+        self._scene._native.set_entity_parent(
+            self._handle,
+            None if parent is None else parent._handle,
+            bool(keep_world),
+        )
 
     def destroy(self) -> None:
         """Destroy this entity and invalidate all wrappers to its handle."""
