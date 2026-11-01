@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Native builds and packaging
+build/
+build-*/
+_skbuild/
+dist/
+wheelhouse/
+CMakeUserPresets.json
+
+# Editors and operating systems
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+Thumbs.db
+.DS_Store
+

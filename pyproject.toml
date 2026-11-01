@@ -1,0 +1,51 @@
+[build-system]
+requires = [
+    "scikit-build-core==1.1.1",
+    "pybind11==3.1.0",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "easy3d"
+version = "0.1.0"
+description = "Private Windows-first Python/C++ 3D framework"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Easy3D contributors" }]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: Other/Proprietary License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+]
+
+[tool.scikit-build]
+cmake.version = ">=3.26"
+ninja.version = ">=1.11"
+build-dir = "build/scikit-build/{wheel_tag}"
+wheel.packages = ["python/easy3d"]
+editable.mode = "redirect"
+sdist.include = [
+    "CMakeLists.txt",
+    "cmake/**",
+    "engine/**",
+    "bindings/**",
+    "python/**",
+    "tests/cpp/**",
+    "LICENSES/**",
+]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests/python"]
+

@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import pytest
+
+from easy3d import Entity, Game, InvalidEntityError, Scene
+
+
+def test_explicit_scene_context_owns_entities() -> None:
+    scene = Scene("main")
+    with scene:
+        first = Entity("first")
+        second = Entity("second")
+
+    assert first.scene is scene
+    assert first.is_alive
+    assert second.is_alive
+    assert scene.entity_count == 2
+    assert set(scene.entities) == {first, second}
+    assert [entity.name for entity in scene] == ["first", "second"]
+
+
+def test_entity_requires_explicit_scene_outside_context() -> None:
+    with pytest.raises(RuntimeError, match="no active scene"):
+        Entity()
+
+
+def test_nested_scene_context_restores_previous_scene() -> None:
+    outer = Scene("outer")
+    inner = Scene("inner")
+    with outer:
+        outer_first = Entity("outer first")
+        with inner:
+            inner_entity = Entity("inner")
+        outer_second = Entity("outer second")
+
+    assert outer_first.scene is outer
+    assert outer_second.scene is outer
+    assert inner_entity.scene is inner
+
+
+def test_destroy_invalidates_handle_and_reuse_advances_generation() -> None:
+    scene = Scene("reuse")
+    entity = scene.create_entity("temporary")
+    old_id = entity.id
+    entity.destroy()
+
+    assert not entity.is_alive
+    with pytest.raises(InvalidEntityError, match="invalid entity handle"):
+        _ = entity.name
+    with pytest.raises(ReferenceError):
+        entity.destroy()
+
+    replacement = scene.create_entity("replacement")
+    assert replacement.id != old_id
+    assert replacement.is_alive
+
+
+def test_entity_properties_are_native_and_type_checked() -> None:
+    scene = Scene("properties")
+    entity = scene.create_entity("before")
+    entity.name = "after"
+    entity.enabled = False
+    entity.visible = False
+
+    assert entity.name == "after"
+    assert not entity.enabled
+    assert not entity.visible
+    assert scene.entities[0] == entity
+
+    with pytest.raises(TypeError):
+        entity.enabled = 1  # type: ignore[assignment]
+    with pytest.raises(ValueError):
+        entity.name = ""
+
+
+def test_scene_clear_and_close_have_explicit_lifetime() -> None:
+    scene = Scene("lifetime")
+    entity = scene.create_entity()
+    scene.clear()
+    assert len(scene) == 0
+    assert not entity.is_alive
+
+    scene.create_entity("new")
+    scene.close()
+    assert scene.closed
+    assert len(scene) == 0
+    scene.close()
+    with pytest.raises(RuntimeError, match="scene is closed"):
+        scene.create_entity()
+
+
+def test_scene_rejects_foreign_entity() -> None:
+    first = Scene("first")
+    second = Scene("second")
+    entity = first.create_entity()
+    with pytest.raises(ValueError, match="different scene"):
+        second.destroy_entity(entity)
+
+
+def test_game_enforces_single_scene_owner_and_scene_switching() -> None:
+    first_game = Game("first")
+    second_game = Game("second")
+    first_scene = Scene("first scene")
+    second_scene = Scene("second scene")
+
+    first_game.load_scene(first_scene)
+    assert first_game.scene is first_scene
+    assert first_scene.active
+    with pytest.raises(RuntimeError, match="another Game"):
+        second_game.load_scene(first_scene)
+    with pytest.raises(RuntimeError, match="loaded by a Game"):
+        first_scene.close()
+
+    first_game.load_scene(second_scene)
+    assert not first_scene.active
+    assert second_scene.active
+    assert first_game.unload_scene() is second_scene
+    assert first_game.scene is None
+    assert not second_scene.active

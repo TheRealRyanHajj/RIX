@@ -1,0 +1,4 @@
+"""Easy3D Python package version."""
+
+__version__ = "0.1.0"
+

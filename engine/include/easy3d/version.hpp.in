@@ -1,0 +1,4 @@
+#pragma once
+
+#define EASY3D_VERSION "@PROJECT_VERSION@"
+
