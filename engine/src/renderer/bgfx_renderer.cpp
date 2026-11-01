@@ -4,7 +4,6 @@
 #include "easy3d/renderer.hpp"
 
 #include <bgfx/bgfx.h>
-#include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -335,6 +334,10 @@ private:
             {plane, {{0.30F, 0.34F, 0.40F, 1.0F}}, translated(0.0F, -0.75F, 0.0F)},
             {sphere, {{0.95F, 0.75F, 0.20F, 1.0F}}, translated(2.0F, 0.0F, 0.0F)},
         };
+        camera_ = Camera::look_at({0.0F, 2.7F, 7.0F}, {0.0F, 0.0F, 0.0F});
+        camera_.vertical_fov_degrees = 55.0F;
+        camera_.near_plane = 0.1F;
+        camera_.far_plane = 100.0F;
     }
 
     void update_view_rect() const {
@@ -342,20 +345,10 @@ private:
     }
 
     void submit_geometry() const {
-        const glm::mat4 view = glm::lookAtRH(glm::vec3(0.0F, 2.7F, 7.0F),
-                                             glm::vec3(0.0F, 0.0F, 0.0F),
-                                             glm::vec3(0.0F, 1.0F, 0.0F));
-        const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-        const glm::mat4 projection = bgfx::getCaps()->homogeneousDepth
-                                         ? glm::perspectiveRH_NO(glm::radians(55.0F),
-                                                                 aspect,
-                                                                 0.1F,
-                                                                 100.0F)
-                                         : glm::perspectiveRH_ZO(glm::radians(55.0F),
-                                                                 aspect,
-                                                                 0.1F,
-                                                                 100.0F);
-        bgfx::setViewTransform(main_view, glm::value_ptr(view), glm::value_ptr(projection));
+        const Matrix4 view = camera_.view_matrix();
+        const Matrix4 projection = camera_.projection_matrix(
+            Camera::aspect_ratio(width_, height_), bgfx::getCaps()->homogeneousDepth);
+        bgfx::setViewTransform(main_view, view.data(), projection.data());
 
         for (const DrawItem& item : draw_items_) {
             const std::array<float, 4> color = {
@@ -382,6 +375,7 @@ private:
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
     std::unique_ptr<MeshLifetimeManager> mesh_resources_;
     std::vector<DrawItem> draw_items_;
+    Camera camera_{};
 };
 
 BgfxRenderer::BgfxRenderer(void* native_window,

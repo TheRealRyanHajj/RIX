@@ -3,9 +3,9 @@
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. The current implementation includes the validated Phase 0 native
 foundation, generation-safe scene/entity lifetimes, native transform
-hierarchies, and an indexed D3D11 geometry/material path. Scene render
-components and the public camera API remain later Phase 1 milestones, so the
-ordinary `Game` window stays blank until a renderable scene is attached.
+hierarchies, a typed camera API, and an indexed D3D11 geometry/material path.
+Scene render components remain a later Phase 1 milestone, so the ordinary
+`Game` window stays blank until a renderable scene is attached.
 
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
@@ -102,6 +102,12 @@ game.load_scene(world)
 Run `python examples/01_entity_lifecycle/main.py` for creation, destruction,
 stale-handle rejection, unload, and cleanup. See
 [docs/api-contract.md](docs/api-contract.md) for the implemented contract.
+
+`Camera` is available as a typed perspective-camera configuration with
+position/Euler rotation, `look_at`, basis vectors, configurable vertical FOV and
+near/far planes, and view/projection matrix queries. It is intentionally not yet
+an entity component; scene attachment arrives with the later render-component
+API.
 
 ## Benchmarks
 

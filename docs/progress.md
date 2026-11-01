@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.3 PASSED; Phase 1.4 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.4 PASSED; Phase 1.5 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -768,3 +768,73 @@ window and requires a real D3D11 desktop.
 
 Phase 1.3: **DONE**. Immediate next task: Phase 1.4 — scene-facing camera data,
 configurable near/far projection, aspect ratio, and resize behavior tests.
+
+## 2026-11-01 — Phase 1.4 camera, projection, and resize
+
+### Implemented
+
+- Easy3D-owned column-major `Matrix4` and perspective `Camera` native values.
+- Position/quaternion orientation, -Z forward/+Y up/+X right basis, validated
+  vertical FOV, configurable positive near/far planes, and robust `look_at`.
+- Backend-capability projection for D3D `[0,1]` and homogeneous `[-1,1]` depth.
+- Renderer diagnostic migrated from hard-coded GLM matrices to the native
+  camera. Projection aspect is recomputed from current SDL pixel dimensions
+  after swap-chain/view resize.
+- Typed public Python `Camera` with mutable `Vec3` position/Euler rotation,
+  basis vectors, `look_at`, aspect queries, and view/projection matrix tuples.
+  Scene attachment is explicitly deferred rather than simulated.
+
+### Verification evidence
+
+```text
+cmake --build --preset windows-debug
+ctest --preset windows-debug --output-on-failure
+1/5 easy3d.core             Passed
+2/5 easy3d.scene            Passed
+3/5 easy3d.math_transform   Passed
+4/5 easy3d.mesh             Passed
+5/5 easy3d.camera           Passed
+100% tests passed, 0 tests failed out of 5
+Total Test time (real) = 0.49 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3216116
+sha256=fa9d07defc6883d76a70584cec4919d08372b185acf1935bc3220e858d38b0ea
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+....................................                                     [100%]
+36 passed in 0.42s
+
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+1/5 easy3d.core             Passed
+2/5 easy3d.scene            Passed
+3/5 easy3d.math_transform   Passed
+4/5 easy3d.mesh             Passed
+5/5 easy3d.camera           Passed
+100% tests passed, 0 tests failed out of 5
+Total Test time (real) = 0.36 sec
+
+.\build\windows-release\Release\easy3d_geometry_lifecycle.exe
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+Easy3D geometry: GPU meshes=4, indexed triangles=783, depth-test=less
+easy3d_geometry_lifecycle: PASS frames=1033
+EXIT_CODE=0
+```
+
+Native camera tests verify look-at basis and view-space mapping, FOV/aspect
+projection terms, resize invariants, exact near/far depth mapping for both clip
+conventions, and invalid clipping/viewport/look-at rejection. Python tests
+verify the public facade and validation.
+
+A live Windows capture then resized the running D3D11 diagnostic from 962×572
+to 701×572 through the native window border. Rendering continued, the refreshed
+capture preserved cube and sphere proportions, and the plane/framing adapted to
+the narrower aspect. This directly exercises SDL pixel-size handling, bgfx reset
+and view-rect update, and per-frame camera projection recomputation.
+
+Phase 1.4: **DONE**. Immediate next task: Phase 1.5 — shared PNG/JPEG texture
+decode/upload/cache, sampler and sRGB semantics, UV shader path, and missing
+asset errors.

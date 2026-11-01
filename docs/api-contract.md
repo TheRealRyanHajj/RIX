@@ -47,7 +47,7 @@ Implemented entity properties include `id`, `name`, `enabled`, `visible`,
 attachment, scene-to-renderer submission, physics, and network identity are
 later checklist items and are not available yet. The native renderer does have
 validated mesh/material data and indexed D3D11 submission, but Phase 1.3 does
-not expose premature Python primitive or camera APIs.
+not expose premature Python primitive APIs.
 
 ## Math and transform conventions
 
@@ -69,3 +69,30 @@ default. Pass `keep_world=True` to recompute local TRS while preserving the
 current world transform. Parenting rejects self-parenting, cycles, stale handles,
 and cross-scene relationships. Destroying a parent detaches its direct children
 while preserving their world transforms.
+
+## Camera configuration
+
+```python
+from easy3d import Camera
+
+camera = Camera(
+    position=(0, 3, 8),
+    vertical_fov_degrees=60,
+    near_plane=0.1,
+    far_plane=500.0,
+)
+camera.look_at((0, 0, 0))
+view = camera.view_matrix()
+projection = camera.projection_matrix((1280, 720))
+```
+
+`Camera` is right-handed with local forward -Z and uses degree-based public
+Euler rotation backed by native quaternion math. FOV must be strictly between
+0° and 180°; near must be positive; far must exceed near. Projection matrices
+are column-major. D3D-style projection maps depth to `[0,1]`; the explicit
+`homogeneous_depth=True` query maps it to `[-1,1]` for backend testing.
+
+`Camera.aspect_ratio((width, height))` and `projection_matrix` reject zero or
+non-integer dimensions. The renderer uses current SDL pixel dimensions after
+every resize. This standalone camera is not yet attached to an entity or loaded
+scene; that is intentionally deferred to the render-component milestone.

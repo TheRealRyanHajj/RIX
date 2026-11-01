@@ -1,4 +1,5 @@
 #include "easy3d/core.hpp"
+#include "easy3d/renderer.hpp"
 #include "easy3d/scene.hpp"
 
 #include <pybind11/pybind11.h>
@@ -40,6 +41,71 @@ PYBIND11_MODULE(_easy3d, module) {
     module.def("_raise_engine_error", [](const std::string& message) {
         throw easy3d::EngineError(message);
     });
+    const auto matrix_tuple = [](const easy3d::Matrix4& matrix) {
+        py::tuple result(matrix.values.size());
+        for (std::size_t index = 0; index < matrix.values.size(); ++index) {
+            result[index] = matrix.values[index];
+        }
+        return result;
+    };
+    module.def("_camera_view_matrix",
+               [matrix_tuple](const double px,
+                              const double py,
+                              const double pz,
+                              const double qw,
+                              const double qx,
+                              const double qy,
+                              const double qz) {
+                   const easy3d::Camera camera{
+                       {static_cast<float>(px),
+                        static_cast<float>(py),
+                        static_cast<float>(pz)},
+                       {static_cast<float>(qw),
+                        static_cast<float>(qx),
+                        static_cast<float>(qy),
+                        static_cast<float>(qz)},
+                   };
+                   return matrix_tuple(camera.view_matrix());
+               });
+    module.def("_camera_projection_matrix",
+               [matrix_tuple](const double vertical_fov_degrees,
+                              const double near_plane,
+                              const double far_plane,
+                              const double aspect_ratio,
+                              const bool homogeneous_depth) {
+                   easy3d::Camera camera;
+                   camera.vertical_fov_degrees = static_cast<float>(vertical_fov_degrees);
+                   camera.near_plane = static_cast<float>(near_plane);
+                   camera.far_plane = static_cast<float>(far_plane);
+                   return matrix_tuple(camera.projection_matrix(
+                       static_cast<float>(aspect_ratio), homogeneous_depth));
+               });
+    module.def("_camera_look_at",
+               [](const double px,
+                  const double py,
+                  const double pz,
+                  const double tx,
+                  const double ty,
+                  const double tz,
+                  const double ux,
+                  const double uy,
+                  const double uz) {
+                   const easy3d::Camera camera = easy3d::Camera::look_at(
+                       {static_cast<float>(px),
+                        static_cast<float>(py),
+                        static_cast<float>(pz)},
+                       {static_cast<float>(tx),
+                        static_cast<float>(ty),
+                        static_cast<float>(tz)},
+                       {static_cast<float>(ux),
+                        static_cast<float>(uy),
+                        static_cast<float>(uz)});
+                   return py::make_tuple(camera.rotation.w,
+                                         camera.rotation.x,
+                                         camera.rotation.y,
+                                         camera.rotation.z);
+               });
+    module.def("_camera_aspect_ratio", &easy3d::Camera::aspect_ratio);
 
     py::class_<easy3d::Engine>(module, "Engine")
         .def(py::init([](std::string title,

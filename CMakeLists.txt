@@ -35,6 +35,7 @@ FetchContent_MakeAvailable(glm)
 set(easy3d_core_sources
     engine/src/core/engine.cpp
     engine/src/math/math.cpp
+    engine/src/renderer/camera.cpp
     engine/src/renderer/mesh.cpp
     engine/src/scene/scene.cpp
 )
@@ -197,6 +198,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_mesh_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_mesh_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.mesh COMMAND easy3d_mesh_tests)
+
+    add_executable(easy3d_camera_tests tests/cpp/test_camera.cpp)
+    target_compile_features(easy3d_camera_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_camera_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.camera COMMAND easy3d_camera_tests)
 endif()
 
 if(EASY3D_BUILD_BENCHMARKS)

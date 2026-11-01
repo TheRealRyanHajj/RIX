@@ -191,3 +191,35 @@ world or a substitute for the Phase 1.4 camera and Phase 1.7 render components.
   orders all releases before bgfx/device destruction.
 - Additional renderer backends require their own generated artifacts and
   runtime evidence before they can be claimed.
+
+## ADR-0008: Camera matrices use an Easy3D-owned column-major boundary
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Camera projection must be independently testable without exposing GLM or bgfx
+types. D3D and OpenGL-family backends also differ in normalized depth range, and
+high-DPI SDL windows distinguish logical dimensions from drawable pixel size.
+
+### Decision
+
+Expose Easy3D-owned `Camera` and `Matrix4` native values. Matrices are
+column-major; coordinates are right-handed, +Y up, and camera-forward -Z.
+Perspective projection takes vertical FOV, explicit near/far planes, aspect,
+and a renderer-capability `homogeneous_depth` choice. The D3D path maps depth to
+`[0,1]`; homogeneous depth maps to `[-1,1]`.
+
+The renderer retains current pixel width/height and calculates aspect on every
+geometry submission after SDL size events. Python exposes the same native math
+through a typed standalone `Camera`; entity/component attachment is deferred
+until that ownership API exists.
+
+### Consequences
+
+- GLM remains private while native and Python tests can inspect exact matrices.
+- Resizing changes horizontal projection without distorting vertical FOV.
+- A camera can be configured and validated before scene components are added,
+  without inventing implicit global-camera ownership.
+- Orthographic projection and multi-camera render targets are not claimed.

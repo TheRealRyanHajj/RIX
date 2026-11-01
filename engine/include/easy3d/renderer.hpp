@@ -2,6 +2,7 @@
 
 #include "easy3d/math.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -46,6 +47,44 @@ struct Material final {
     bool cull_back_faces{true};
 
     void validate() const;
+};
+
+struct Matrix4 final {
+    // Column-major storage, matching bgfx and the renderer shader convention.
+    std::array<float, 16> values{
+        1.0F, 0.0F, 0.0F, 0.0F,
+        0.0F, 1.0F, 0.0F, 0.0F,
+        0.0F, 0.0F, 1.0F, 0.0F,
+        0.0F, 0.0F, 0.0F, 1.0F,
+    };
+
+    [[nodiscard]] float at(std::size_t row, std::size_t column) const;
+    [[nodiscard]] const float* data() const noexcept;
+    [[nodiscard]] Vec3 transform_point(Vec3 point) const;
+
+    friend bool operator==(const Matrix4&, const Matrix4&) = default;
+};
+
+struct Camera final {
+    Vec3 position{};
+    Quat rotation{};
+    float vertical_fov_degrees{60.0F};
+    float near_plane{0.1F};
+    float far_plane{1000.0F};
+
+    void validate() const;
+    [[nodiscard]] Vec3 forward() const;
+    [[nodiscard]] Vec3 right() const;
+    [[nodiscard]] Vec3 up() const;
+    [[nodiscard]] Matrix4 view_matrix() const;
+    [[nodiscard]] Matrix4 projection_matrix(float aspect_ratio,
+                                            bool homogeneous_depth) const;
+
+    [[nodiscard]] static float aspect_ratio(std::uint32_t width,
+                                            std::uint32_t height);
+    [[nodiscard]] static Camera look_at(Vec3 position,
+                                        Vec3 target,
+                                        Vec3 up = {0.0F, 1.0F, 0.0F});
 };
 
 [[nodiscard]] MeshData make_triangle_mesh();
