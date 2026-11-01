@@ -276,3 +276,21 @@ slopes, selects first-person heading or third-person movement-facing rotation,
 then calls `ExtendedUpdate` with explicit stair/floor distances. Only the
 resulting position, rotation, velocity and ground snapshot cross into scene or
 Python state. No Jolt callback invokes Python.
+
+## Advanced physics resources
+
+Capsule, convex-hull and triangle-mesh settings are converted to Jolt shapes
+inside the physics Pimpl. OBJ meshes cross the Python binding only as an asset
+path; native model data is combined into one indexed collision shape. Convex
+and mesh points are scaled once from the entity transform before body creation.
+Jolt shape pointers and triangle acceleration data never enter scene or Python
+state.
+
+Constraints have their own world/slot/generation handles and scene ownership
+records containing generation-qualified endpoint entities. Fixed and distance
+settings lock both Jolt bodies only while constructing the native constraint.
+Body removal first removes every referencing constraint; scene maps mirror that
+cascade so Python wrappers report stale state rather than retaining a solver
+pointer. CCD is an immutable rigid-body creation flag mapped to Jolt
+`LinearCast`; changing it requires the same transactional component rebuild as
+other construction-time body state.

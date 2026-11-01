@@ -128,6 +128,28 @@ void ColliderComponent::validate() const {
         (!std::isfinite(radius) || radius <= 0.0F)) {
         throw std::invalid_argument("collider radius must be finite and positive");
     }
+    if (shape == PhysicsShape::Capsule &&
+        (!std::isfinite(radius) || radius <= 0.0F || !std::isfinite(height) ||
+         height <= 2.0F * radius)) {
+        throw std::invalid_argument(
+            "capsule radius must be positive and height greater than its diameter");
+    }
+    if (shape == PhysicsShape::ConvexHull &&
+        (vertices.size() < 4U || vertices.size() > 256U ||
+         !std::all_of(vertices.begin(), vertices.end(),
+                      [](const Vec3 point) { return finite(point); }))) {
+        throw std::invalid_argument("convex collider requires 4 to 256 finite points");
+    }
+    if (shape == PhysicsShape::TriangleMesh &&
+        (vertices.size() < 3U || indices.size() < 3U || indices.size() % 3U != 0U ||
+         !std::all_of(vertices.begin(), vertices.end(),
+                      [](const Vec3 point) { return finite(point); }) ||
+         std::any_of(indices.begin(), indices.end(), [&](const auto index) {
+             return index >= vertices.size();
+         }))) {
+        throw std::invalid_argument(
+            "mesh collider requires finite vertices and valid triangle indices");
+    }
     if (static_cast<std::uint8_t>(layer) >
         static_cast<std::uint8_t>(CollisionLayer::Character)) {
         throw std::invalid_argument("unknown collider collision layer");
@@ -624,6 +646,7 @@ EntityHandle Scene::create_entity(std::string name) {
 
 void Scene::destroy_entity(const EntityHandle handle) {
     (void)world_.entity_name(handle);
+    remove_constraints_for(handle);
     const auto physics_component = physics_entities_.find(handle.id());
     if (physics_component != physics_entities_.end()) {
         physics_->destroy_body(physics_component->second.body);
@@ -638,6 +661,7 @@ void Scene::destroy_entity(const EntityHandle handle) {
 }
 
 void Scene::clear() noexcept {
+    constraints_.clear();
     physics_entities_.clear();
     character_entities_.clear();
     world_.clear();
@@ -828,6 +852,7 @@ const ColliderComponent& Scene::collider_component(const EntityHandle handle) co
 
 void Scene::remove_collider_component(const EntityHandle handle) {
     PhysicsEntity& component = require_physics_entity(handle);
+    remove_constraints_for(handle);
     physics_->destroy_body(component.body);
     physics_entities_.erase(handle.id());
 }
@@ -868,6 +893,7 @@ void Scene::remove_rigid_body_component(const EntityHandle handle) {
         throw std::invalid_argument("entity does not have a rigid body component");
     }
     const RigidBodyComponent previous = *component.rigid_body;
+    remove_constraints_for(handle);
     component.rigid_body.reset();
     try {
         replace_physics_body(handle, component);
@@ -992,6 +1018,67 @@ void Scene::teleport_character(const EntityHandle handle,
     transform.position = state.position;
     transform.rotation = state.rotation;
     world_.set_local_transform(handle, transform);
+}
+
+PhysicsConstraintHandle Scene::add_fixed_constraint(const EntityHandle first,
+                                                    const EntityHandle second) {
+    const PhysicsEntity& first_component = require_physics_entity(first);
+    const PhysicsEntity& second_component = require_physics_entity(second);
+    const PhysicsConstraintHandle constraint = physics_->create_constraint(
+        {.type = PhysicsConstraintType::Fixed,
+         .first = first_component.body,
+         .second = second_component.body});
+    try {
+        constraints_.emplace(
+            constraint.id(), SceneConstraint{constraint, first, second});
+    } catch (...) {
+        physics_->destroy_constraint(constraint);
+        throw;
+    }
+    return constraint;
+}
+
+PhysicsConstraintHandle Scene::add_distance_constraint(
+    const EntityHandle first,
+    const EntityHandle second,
+    const Vec3 first_anchor,
+    const Vec3 second_anchor,
+    const float minimum_distance,
+    const float maximum_distance) {
+    const PhysicsEntity& first_component = require_physics_entity(first);
+    const PhysicsEntity& second_component = require_physics_entity(second);
+    const PhysicsConstraintHandle constraint = physics_->create_constraint(
+        {.type = PhysicsConstraintType::Distance,
+         .first = first_component.body,
+         .second = second_component.body,
+         .first_anchor = first_anchor,
+         .second_anchor = second_anchor,
+         .minimum_distance = minimum_distance,
+         .maximum_distance = maximum_distance});
+    try {
+        constraints_.emplace(
+            constraint.id(), SceneConstraint{constraint, first, second});
+    } catch (...) {
+        physics_->destroy_constraint(constraint);
+        throw;
+    }
+    return constraint;
+}
+
+void Scene::remove_constraint(const PhysicsConstraintHandle handle) {
+    const auto constraint = constraints_.find(handle.id());
+    if (constraint == constraints_.end() || constraint->second.constraint != handle ||
+        !physics_ || !physics_->is_alive(handle)) {
+        throw PhysicsError("invalid or stale scene constraint handle");
+    }
+    physics_->destroy_constraint(handle);
+    constraints_.erase(constraint);
+}
+
+bool Scene::has_constraint(const PhysicsConstraintHandle handle) const noexcept {
+    const auto constraint = constraints_.find(handle.id());
+    return constraint != constraints_.end() && constraint->second.constraint == handle &&
+           physics_ && physics_->is_alive(handle);
 }
 
 std::vector<ScenePhysicsQueryHit> Scene::raycast_all(
@@ -1285,6 +1372,17 @@ PhysicsBodyHandle Scene::create_physics_body(const EntityHandle handle,
     settings.rotation = transform.rotation;
     settings.half_extents = component.collider.half_extents;
     settings.radius = component.collider.radius;
+    settings.height = component.collider.height;
+    settings.vertices = component.collider.vertices;
+    settings.indices = component.collider.indices;
+    if (settings.shape == PhysicsShape::ConvexHull ||
+        settings.shape == PhysicsShape::TriangleMesh) {
+        for (Vec3& vertex : settings.vertices) {
+            vertex.x *= transform.scale.x;
+            vertex.y *= transform.scale.y;
+            vertex.z *= transform.scale.z;
+        }
+    }
     settings.material = component.collider.material;
     settings.user_data = handle.id();
     settings.motion_type = component.rigid_body.has_value()
@@ -1297,15 +1395,30 @@ PhysicsBodyHandle Scene::create_physics_body(const EntityHandle handle,
     if (component.rigid_body.has_value()) {
         settings.mass = component.rigid_body->mass;
         settings.gravity_factor = component.rigid_body->use_gravity ? 1.0F : 0.0F;
+        settings.continuous = component.rigid_body->continuous;
     }
     return physics().create_body(settings);
 }
 
 void Scene::replace_physics_body(const EntityHandle handle,
                                  PhysicsEntity& component) {
+    remove_constraints_for(handle);
     const PhysicsBodyHandle replacement = create_physics_body(handle, component);
     physics_->destroy_body(component.body);
     component.body = replacement;
+}
+
+void Scene::remove_constraints_for(const EntityHandle handle) noexcept {
+    for (auto constraint = constraints_.begin(); constraint != constraints_.end();) {
+        if (constraint->second.first != handle && constraint->second.second != handle) {
+            ++constraint;
+            continue;
+        }
+        if (physics_ && physics_->is_alive(constraint->second.constraint)) {
+            physics_->destroy_constraint(constraint->second.constraint);
+        }
+        constraint = constraints_.erase(constraint);
+    }
 }
 
 EntityHandle Scene::handle_from_id(const std::uint64_t id) const noexcept {

@@ -16,11 +16,16 @@
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
@@ -174,6 +179,13 @@ public:
     return message.str();
 }
 
+[[nodiscard]] std::string invalid_handle_message(const PhysicsConstraintHandle handle) {
+    std::ostringstream message;
+    message << "invalid physics constraint handle (index=" << handle.index
+            << ", generation=" << handle.generation << ", world=" << handle.world_id << ')';
+    return message.str();
+}
+
 void validate_config(const PhysicsWorldConfig& config) {
     if (config.max_bodies == 0 || config.max_body_pairs == 0 ||
         config.max_contact_constraints == 0 || config.temporary_allocator_bytes == 0) {
@@ -206,6 +218,35 @@ void validate_settings(const PhysicsBodySettings& settings) {
         (!std::isfinite(settings.radius) || settings.radius <= 0.0F)) {
         throw std::invalid_argument("sphere radius must be finite and positive");
     }
+    if (settings.shape == PhysicsShape::Capsule &&
+        (!std::isfinite(settings.radius) || settings.radius <= 0.0F ||
+         !std::isfinite(settings.height) || settings.height <= 2.0F * settings.radius)) {
+        throw std::invalid_argument(
+            "capsule radius must be positive and total height greater than its diameter");
+    }
+    if (settings.shape == PhysicsShape::ConvexHull) {
+        if (settings.vertices.size() < 4U || settings.vertices.size() > 256U ||
+            !std::all_of(settings.vertices.begin(), settings.vertices.end(),
+                         [](const Vec3 point) { return finite(point); })) {
+            throw std::invalid_argument(
+                "convex hull requires between 4 and 256 finite points");
+        }
+    }
+    if (settings.shape == PhysicsShape::TriangleMesh) {
+        if (settings.motion_type != PhysicsMotionType::Static) {
+            throw std::invalid_argument("triangle mesh colliders must be static");
+        }
+        if (settings.vertices.size() < 3U || settings.indices.size() < 3U ||
+            settings.indices.size() % 3U != 0U ||
+            !std::all_of(settings.vertices.begin(), settings.vertices.end(),
+                         [](const Vec3 point) { return finite(point); }) ||
+            std::any_of(settings.indices.begin(), settings.indices.end(), [&](const auto index) {
+                return index >= settings.vertices.size();
+            })) {
+            throw std::invalid_argument(
+                "triangle mesh requires finite vertices and valid triangle indices");
+        }
+    }
     settings.material.validate();
     if (!std::isfinite(settings.mass) || settings.mass <= 0.0F) {
         throw std::invalid_argument("physics body mass must be finite and positive");
@@ -213,8 +254,12 @@ void validate_settings(const PhysicsBodySettings& settings) {
     if (!std::isfinite(settings.gravity_factor) || settings.gravity_factor < 0.0F) {
         throw std::invalid_argument("physics gravity factor must be finite and non-negative");
     }
-    if (!finite(settings.linear_velocity)) {
-        throw std::invalid_argument("physics linear velocity must be finite");
+    if (!finite(settings.linear_velocity) || settings.linear_velocity.length() > 500.0F) {
+        throw std::invalid_argument(
+            "physics linear velocity must be finite and no greater than 500 m/s");
+    }
+    if (settings.continuous && settings.motion_type != PhysicsMotionType::Dynamic) {
+        throw std::invalid_argument("continuous collision detection requires a dynamic body");
     }
 }
 
@@ -472,6 +517,14 @@ std::uint64_t PhysicsCharacterHandle::id() const noexcept {
     return (static_cast<std::uint64_t>(generation) << 32U) | index;
 }
 
+bool PhysicsConstraintHandle::valid() const noexcept {
+    return world_id != 0 && index != invalid_index && generation != 0;
+}
+
+std::uint64_t PhysicsConstraintHandle::id() const noexcept {
+    return (static_cast<std::uint64_t>(generation) << 32U) | index;
+}
+
 std::uint64_t PhysicsBodyHandle::id() const noexcept {
     return (static_cast<std::uint64_t>(generation) << 32U) | index;
 }
@@ -502,6 +555,14 @@ public:
         bool alive{false};
     };
 
+    struct ConstraintSlot final {
+        JPH::Ref<JPH::Constraint> constraint;
+        JPH::BodyID first_body;
+        JPH::BodyID second_body;
+        std::uint32_t generation{1};
+        bool alive{false};
+    };
+
     explicit Impl(PhysicsWorldConfig world_config)
         : runtime(jolt_runtime()),
           world_id(next_physics_world_id.fetch_add(1, std::memory_order_relaxed)),
@@ -525,6 +586,8 @@ public:
         free_indices.reserve(config.max_bodies);
         character_slots.reserve(32);
         free_character_indices.reserve(32);
+        constraint_slots.reserve(32);
+        free_constraint_indices.reserve(32);
     }
 
     ~Impl() { clear(); }
@@ -570,7 +633,56 @@ public:
                character_slots[handle.index].generation == handle.generation;
     }
 
+    [[nodiscard]] ConstraintSlot& require_slot(const PhysicsConstraintHandle handle) {
+        if (!is_alive(handle)) throw PhysicsError(invalid_handle_message(handle));
+        return constraint_slots[handle.index];
+    }
+
+    [[nodiscard]] bool is_alive(const PhysicsConstraintHandle handle) const noexcept {
+        return handle.world_id == world_id && handle.valid() &&
+               handle.index < constraint_slots.size() && constraint_slots[handle.index].alive &&
+               constraint_slots[handle.index].generation == handle.generation;
+    }
+
+    void destroy_constraint_slot(const std::uint32_t index) noexcept {
+        ConstraintSlot& slot = constraint_slots[index];
+        if (!slot.alive) return;
+        physics_system.RemoveConstraint(slot.constraint);
+        slot.constraint = nullptr;
+        slot.alive = false;
+        ++slot.generation;
+        if (slot.generation == 0) slot.generation = 1;
+        free_constraint_indices.push_back(index);
+        --constraint_count;
+    }
+
+    void destroy_constraints_for_body(const JPH::BodyID body) noexcept {
+        for (std::uint32_t index = 0;
+             index < static_cast<std::uint32_t>(constraint_slots.size());
+             ++index) {
+            const ConstraintSlot& slot = constraint_slots[index];
+            if (slot.alive && (slot.first_body == body || slot.second_body == body)) {
+                destroy_constraint_slot(index);
+            }
+        }
+    }
+
     void clear() noexcept {
+        free_constraint_indices.clear();
+        free_constraint_indices.reserve(constraint_slots.size());
+        for (std::uint32_t index = 0;
+             index < static_cast<std::uint32_t>(constraint_slots.size());
+             ++index) {
+            if (constraint_slots[index].alive) destroy_constraint_slot(index);
+        }
+        free_constraint_indices.clear();
+        for (std::uint32_t index = 0;
+             index < static_cast<std::uint32_t>(constraint_slots.size());
+             ++index) {
+            free_constraint_indices.push_back(index);
+        }
+        constraint_count = 0;
+
         free_character_indices.clear();
         free_character_indices.reserve(character_slots.size());
         for (std::size_t index = 0; index < character_slots.size(); ++index) {
@@ -620,8 +732,11 @@ public:
     std::vector<std::uint32_t> free_indices;
     std::vector<CharacterSlot> character_slots;
     std::vector<std::uint32_t> free_character_indices;
+    std::vector<ConstraintSlot> constraint_slots;
+    std::vector<std::uint32_t> free_constraint_indices;
     std::size_t body_count{0};
     std::size_t character_count{0};
+    std::size_t constraint_count{0};
     std::uint64_t steps{0};
 };
 
@@ -657,27 +772,58 @@ PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings)
         throw PhysicsError("physics world body capacity exhausted");
     }
 
+    const auto checked_shape = [](JPH::ShapeSettings::ShapeResult result,
+                                  const std::string_view label) -> JPH::ShapeRefC {
+        if (result.HasError()) {
+            const auto& error = result.GetError();
+            throw std::invalid_argument("Jolt rejected " + std::string(label) + ": " +
+                                        std::string(error.data(), error.size()));
+        }
+        return result.Get();
+    };
     JPH::ShapeRefC shape;
-    if (settings.shape == PhysicsShape::Box) {
-        JPH::BoxShapeSettings shape_settings(to_jolt(settings.half_extents));
-        shape_settings.SetEmbedded();
-        JPH::ShapeSettings::ShapeResult result = shape_settings.Create();
-        if (result.HasError()) {
-            const auto& error = result.GetError();
-            throw std::invalid_argument("Jolt rejected box shape: " +
-                                        std::string(error.data(), error.size()));
+    switch (settings.shape) {
+    case PhysicsShape::Box:
+        shape = checked_shape(JPH::BoxShapeSettings(to_jolt(settings.half_extents)).Create(),
+                              "box shape");
+        break;
+    case PhysicsShape::Sphere:
+        shape = checked_shape(JPH::SphereShapeSettings(settings.radius).Create(),
+                              "sphere shape");
+        break;
+    case PhysicsShape::Capsule:
+        shape = checked_shape(
+            JPH::CapsuleShapeSettings(0.5F * settings.height - settings.radius,
+                                      settings.radius).Create(),
+            "capsule shape");
+        break;
+    case PhysicsShape::ConvexHull: {
+        JPH::Array<JPH::Vec3> points;
+        points.reserve(settings.vertices.size());
+        for (const Vec3 point : settings.vertices) points.push_back(to_jolt(point));
+        shape = checked_shape(JPH::ConvexHullShapeSettings(points).Create(),
+                              "convex hull shape");
+        break;
+    }
+    case PhysicsShape::TriangleMesh: {
+        JPH::VertexList vertices;
+        vertices.reserve(settings.vertices.size());
+        for (const Vec3 point : settings.vertices) {
+            vertices.emplace_back(point.x, point.y, point.z);
         }
-        shape = result.Get();
-    } else {
-        JPH::SphereShapeSettings shape_settings(settings.radius);
-        shape_settings.SetEmbedded();
-        JPH::ShapeSettings::ShapeResult result = shape_settings.Create();
-        if (result.HasError()) {
-            const auto& error = result.GetError();
-            throw std::invalid_argument("Jolt rejected sphere shape: " +
-                                        std::string(error.data(), error.size()));
+        JPH::IndexedTriangleList triangles;
+        triangles.reserve(settings.indices.size() / 3U);
+        for (std::size_t index = 0; index < settings.indices.size(); index += 3U) {
+            triangles.emplace_back(settings.indices[index],
+                                   settings.indices[index + 1U],
+                                   settings.indices[index + 2U],
+                                   0U);
         }
-        shape = result.Get();
+        shape = checked_shape(
+            JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create(),
+            "triangle mesh shape");
+        break;
+    }
     }
 
     const Quat normalized_rotation = settings.rotation.normalized();
@@ -691,6 +837,8 @@ PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings)
     body_settings.mRestitution = settings.material.restitution;
     body_settings.mGravityFactor = settings.gravity_factor;
     body_settings.mLinearVelocity = to_jolt(settings.linear_velocity);
+    body_settings.mMotionQuality = settings.continuous ? JPH::EMotionQuality::LinearCast
+                                                        : JPH::EMotionQuality::Discrete;
     body_settings.mUserData = settings.user_data;
     if (settings.motion_type == PhysicsMotionType::Dynamic) {
         body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
@@ -723,6 +871,7 @@ PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings)
 
 void PhysicsWorld::destroy_body(const PhysicsBodyHandle handle) {
     Impl::Slot& slot = impl_->require_slot(handle);
+    impl_->destroy_constraints_for_body(slot.body_id);
     JPH::BodyInterface& bodies = impl_->physics_system.GetBodyInterface();
     bodies.RemoveBody(slot.body_id);
     bodies.DestroyBody(slot.body_id);
@@ -871,6 +1020,90 @@ void PhysicsWorld::teleport_character(const PhysicsCharacterHandle handle,
         impl_->temporary_allocator);
 }
 
+PhysicsConstraintHandle PhysicsWorld::create_constraint(
+    const PhysicsConstraintSettings& settings) {
+    const Impl::Slot& first_slot = impl_->require_slot(settings.first);
+    const Impl::Slot& second_slot = impl_->require_slot(settings.second);
+    if (settings.first == settings.second) {
+        throw std::invalid_argument("a constraint requires two different bodies");
+    }
+    if (first_slot.motion_type == PhysicsMotionType::Static &&
+        second_slot.motion_type == PhysicsMotionType::Static) {
+        throw std::invalid_argument("a constraint requires at least one moving body");
+    }
+    if (!finite(settings.first_anchor) || !finite(settings.second_anchor)) {
+        throw std::invalid_argument("constraint anchors must be finite");
+    }
+    if (impl_->constraint_count >= impl_->config.max_contact_constraints) {
+        throw PhysicsError("physics world constraint capacity exhausted");
+    }
+
+    JPH::BodyID body_ids[]{first_slot.body_id, second_slot.body_id};
+    JPH::BodyLockMultiWrite lock(
+        impl_->physics_system.GetBodyLockInterface(), body_ids, 2);
+    JPH::Body* first_body = lock.GetBody(0);
+    JPH::Body* second_body = lock.GetBody(1);
+    if (first_body == nullptr || second_body == nullptr) {
+        throw PhysicsError("constraint bodies are no longer available");
+    }
+
+    JPH::Ref<JPH::Constraint> constraint;
+    if (settings.type == PhysicsConstraintType::Fixed) {
+        JPH::FixedConstraintSettings native_settings;
+        native_settings.mAutoDetectPoint = settings.auto_detect_fixed_point;
+        native_settings.mPoint1 = to_jolt_position(settings.first_anchor);
+        native_settings.mPoint2 = to_jolt_position(settings.second_anchor);
+        constraint = native_settings.Create(*first_body, *second_body);
+    } else {
+        const bool automatic_distance = settings.minimum_distance < 0.0F &&
+                                        settings.maximum_distance < 0.0F;
+        if (!automatic_distance &&
+            (!std::isfinite(settings.minimum_distance) ||
+             !std::isfinite(settings.maximum_distance) ||
+             settings.minimum_distance < 0.0F ||
+             settings.maximum_distance < settings.minimum_distance)) {
+            throw std::invalid_argument(
+                "distance limits must both be negative for automatic length or satisfy 0 <= min <= max");
+        }
+        JPH::DistanceConstraintSettings native_settings;
+        native_settings.mPoint1 = to_jolt_position(settings.first_anchor);
+        native_settings.mPoint2 = to_jolt_position(settings.second_anchor);
+        native_settings.mMinDistance = settings.minimum_distance;
+        native_settings.mMaxDistance = settings.maximum_distance;
+        constraint = native_settings.Create(*first_body, *second_body);
+    }
+    if (constraint == nullptr) throw PhysicsError("Jolt could not create constraint");
+    std::uint32_t index = 0;
+    if (impl_->free_constraint_indices.empty()) {
+        index = static_cast<std::uint32_t>(impl_->constraint_slots.size());
+        impl_->constraint_slots.emplace_back();
+    } else {
+        index = impl_->free_constraint_indices.back();
+        impl_->free_constraint_indices.pop_back();
+    }
+    Impl::ConstraintSlot& slot = impl_->constraint_slots[index];
+    slot.constraint = std::move(constraint);
+    slot.first_body = first_slot.body_id;
+    slot.second_body = second_slot.body_id;
+    slot.alive = true;
+    impl_->physics_system.AddConstraint(slot.constraint);
+    ++impl_->constraint_count;
+    return {impl_->world_id, index, slot.generation};
+}
+
+void PhysicsWorld::destroy_constraint(const PhysicsConstraintHandle handle) {
+    (void)impl_->require_slot(handle);
+    impl_->destroy_constraint_slot(handle.index);
+}
+
+bool PhysicsWorld::is_alive(const PhysicsConstraintHandle handle) const noexcept {
+    return impl_->is_alive(handle);
+}
+
+std::size_t PhysicsWorld::constraint_count() const noexcept {
+    return impl_->constraint_count;
+}
+
 Vec3 PhysicsWorld::body_position(const PhysicsBodyHandle handle) const {
     const Impl::Slot& slot = impl_->require_slot(handle);
     return from_jolt_position(impl_->physics_system.GetBodyInterface().GetPosition(slot.body_id));
@@ -892,8 +1125,9 @@ void PhysicsWorld::set_body_linear_velocity(const PhysicsBodyHandle handle,
     if (slot.motion_type == PhysicsMotionType::Static) {
         throw PhysicsError("static physics bodies do not have linear velocity");
     }
-    if (!finite(velocity)) {
-        throw std::invalid_argument("physics linear velocity must be finite");
+    if (!finite(velocity) || velocity.length() > 500.0F) {
+        throw std::invalid_argument(
+            "physics linear velocity must be finite and no greater than 500 m/s");
     }
     impl_->physics_system.GetBodyInterface().SetLinearVelocity(slot.body_id, to_jolt(velocity));
 }

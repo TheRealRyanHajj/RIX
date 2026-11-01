@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.7 passed;
-Phase 2.8 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.8 passed;
+Phase 2.9 is next. Live pointer lock and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -2000,3 +2000,77 @@ build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); p=Player(s
 
 Phase 2.7: **DONE**. Immediate next task: Phase 2.8 — advanced shapes,
 constraints and continuous collision detection.
+
+## 2026-11-01 — Phase 2.8 advanced physics
+
+### Implemented
+
+- Added native/public capsule and convex-hull colliders plus static OBJ
+  triangle-mesh colliders. Convex inputs are bounded to 4–256 finite points;
+  indexed meshes validate all triangles and reject moving concave bodies.
+- Added `Model(..., collider="mesh" | "convex")`. Native OBJ parts are combined
+  into collision vertices/indices and entity scale is baked once when the
+  advanced collider is created.
+- Added dynamic `Rigidbody(continuous=True)`, mapped to Jolt linear-cast motion
+  quality, with explicit rejection for static/kinematic bodies and unsafe
+  initial/set linear velocity above Jolt's 500 m/s body limit.
+- Added generation-checked, scene-owned fixed and distance constraints with
+  world anchors, automatic or bounded distance, explicit removal and cascading
+  cleanup before endpoint replacement/destruction.
+- Added solver regressions for capsule/hull settling on a real triangle mesh,
+  fixed/distance invariants and stale handles. CCD is tested against a control:
+  a discrete 400 m/s sphere tunnels through a 0.1 m wall while the otherwise
+  identical linear-cast sphere stops before it.
+
+### Failures found and fixed
+
+The first final Debug matrix stopped in `easy3d.physics` with Jolt's assertion
+breakpoint while the optimized headless test passed. Stage diagnostics isolated
+the issue to the CCD control's 1000 m/s initial velocity, which exceeds Jolt's
+default 500 m/s maximum and is clamped only in non-assert builds. The test now
+uses 400 m/s—still enough to cross the wall in one 60 Hz tick—and Easy3D
+validates the 500 m/s limit before calling Jolt. The corrected Debug and Release
+matrices pass; temporary stage diagnostics were removed.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3325230
+sha256=b26ef2195ed09cbb8fd98eb3e9a3ee954b399c4f18b5c02e010d254f6b24203a
+Successfully installed easy3d-0.1.0
+
+cmake --build build/windows-headless --config Debug --parallel 4
+ctest --test-dir build/windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 0.67 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 1.55 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 0.77 sec
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_advanced_physics.py -q
+.......                                                                  [100%]
+7 passed in 0.12s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 74%]
+.........................                                                [100%]
+97 passed in 0.24s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests/python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "from easy3d import *; from easy3d import physics; s=Scene(); a=Cube(collider=True,scene=s); b=Cube(position=(0,2,0),collider=True,scene=s); r=b.add_component(Rigidbody,continuous=True); j=physics.distance_constraint(a,b); print(engine_version(),r.continuous,j.type,j.is_alive)"
+0.1.0 True distance True
+```
+
+Phase 2.8: **DONE**. Immediate next task: Phase 2.9 — playable single-player
+obstacle course and Phase 2 exit-gate regression suite.

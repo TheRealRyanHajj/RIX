@@ -655,3 +655,34 @@ movement. Scene pose synchronization occurs only after the native step.
 - Camera pitch/offset/obstruction remain explicit game-side behavior.
 - Runtime resizing/tuning and character parenting require future transactional
   APIs rather than implicit shape mutation.
+
+## ADR-0021: Construction-time advanced shapes, owned joints, and opt-in CCD
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Advanced collision must cover authored static levels, dynamic convex objects,
+fast projectiles and basic connected bodies without leaking Jolt allocation or
+lifetime rules. Concave moving meshes and an unbounded joint catalogue would
+expand the first correctness milestone beyond testable ownership semantics.
+
+### Decision
+
+Add capsules, bounded convex hulls and static OBJ triangle meshes as immutable
+collider construction data. Bake model scale once at body creation. Expose
+linear-cast CCD as a dynamic rigid-body option. Own fixed and distance
+constraints in the physics world behind generation handles and mirror endpoint
+ownership in `Scene`; endpoint replacement/destruction cascades constraint
+removal.
+
+### Consequences
+
+- Headless tests exercise actual mesh/hull/capsule solver contacts, joint
+  invariants and a discrete-versus-linear-cast tunneling control.
+- Static concave levels and ordinary ropes/welds need no user C++.
+- Runtime shape edits rebuild components explicitly rather than mutating solver
+  data beneath active contacts.
+- Compound, moving concave, hinge/slider/motor/breakable APIs remain scoped
+  follow-up work and are not implied by this milestone.

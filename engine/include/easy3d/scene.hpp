@@ -69,6 +69,9 @@ struct ColliderComponent final {
     PhysicsShape shape{PhysicsShape::Box};
     Vec3 half_extents{0.5F, 0.5F, 0.5F};
     float radius{0.5F};
+    float height{1.0F};
+    std::vector<Vec3> vertices;
+    std::vector<std::uint32_t> indices;
     bool trigger{false};
     CollisionLayer layer{CollisionLayer::Dynamic};
     PhysicsMaterial material{};
@@ -80,6 +83,7 @@ struct RigidBodyComponent final {
     PhysicsMotionType motion_type{PhysicsMotionType::Dynamic};
     float mass{1.0F};
     bool use_gravity{true};
+    bool continuous{false};
 
     void validate() const;
 };
@@ -293,6 +297,17 @@ public:
                              bool jump);
     [[nodiscard]] CharacterMotorState character_state(EntityHandle handle) const;
     void teleport_character(EntityHandle handle, Vec3 position, float heading_degrees);
+    [[nodiscard]] PhysicsConstraintHandle add_fixed_constraint(EntityHandle first,
+                                                               EntityHandle second);
+    [[nodiscard]] PhysicsConstraintHandle add_distance_constraint(
+        EntityHandle first,
+        EntityHandle second,
+        Vec3 first_anchor,
+        Vec3 second_anchor,
+        float minimum_distance = -1.0F,
+        float maximum_distance = -1.0F);
+    void remove_constraint(PhysicsConstraintHandle handle);
+    [[nodiscard]] bool has_constraint(PhysicsConstraintHandle handle) const noexcept;
     [[nodiscard]] std::vector<ScenePhysicsQueryHit> raycast_all(
         Vec3 origin,
         Vec3 direction,
@@ -361,6 +376,12 @@ private:
         PhysicsCharacterHandle character;
     };
 
+    struct SceneConstraint final {
+        PhysicsConstraintHandle constraint;
+        EntityHandle first;
+        EntityHandle second;
+    };
+
     [[nodiscard]] PhysicsEntity& require_physics_entity(EntityHandle handle);
     [[nodiscard]] const PhysicsEntity& require_physics_entity(EntityHandle handle) const;
     [[nodiscard]] PhysicsBodyHandle create_physics_body(EntityHandle handle,
@@ -368,6 +389,7 @@ private:
     [[nodiscard]] CharacterEntity& require_character_entity(EntityHandle handle);
     [[nodiscard]] const CharacterEntity& require_character_entity(EntityHandle handle) const;
     void replace_physics_body(EntityHandle handle, PhysicsEntity& component);
+    void remove_constraints_for(EntityHandle handle) noexcept;
     [[nodiscard]] EntityHandle handle_from_id(std::uint64_t id) const noexcept;
     static void validate_name(std::string_view name);
 
@@ -379,6 +401,7 @@ private:
     std::unique_ptr<PhysicsWorld> physics_;
     std::unordered_map<std::uint64_t, PhysicsEntity> physics_entities_;
     std::unordered_map<std::uint64_t, CharacterEntity> character_entities_;
+    std::unordered_map<std::uint64_t, SceneConstraint> constraints_;
 };
 
 } // namespace easy3d

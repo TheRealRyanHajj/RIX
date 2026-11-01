@@ -53,6 +53,13 @@ ordinary collider. The first-/third-person distinction covers native movement
 and facing; camera placement, pitch, spring arms and obstruction avoidance are
 intentionally Python/game configuration rather than hidden motor policy.
 
+Phase 2.8 triangle-mesh colliders are static, one-sided OBJ geometry; moving
+concave meshes are rejected. Convex hulls are capped at 256 source points and
+do not perform authoring-time simplification. Fixed and distance joints are the
+initial constraint set; hinge, slider, motors, break thresholds and compound
+shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
+does not eliminate the documented extreme-angular-motion case.
+
 ## Input hardware validation
 
 Phase 2.1 action mapping, focus reset, mouse accumulation, pointer-lock state,

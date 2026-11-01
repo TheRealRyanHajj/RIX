@@ -36,7 +36,7 @@ from .input import ActionState, Binding, Input, PointerState
 from .lights import Light
 from .math import Quat, Vec2, Vec3
 from .primitives import Cube, Model, Plane, Sphere
-from .physics import CollisionEvent, PhysicsHit
+from .physics import CollisionEvent, Constraint, PhysicsHit
 from .player import Player
 from .scene import Scene
 from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
@@ -61,6 +61,7 @@ __all__ = [
     "CharacterController",
     "Collider",
     "CollisionEvent",
+    "Constraint",
     "ClockDomain",
     "Cooldown",
     "Cube",

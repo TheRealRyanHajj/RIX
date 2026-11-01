@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Iterable
+from os import PathLike
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from .math import Quat, Vec3
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
 ColorValue: TypeAlias = tuple[float, float, float] | tuple[float, float, float, float]
 RenderKind: TypeAlias = Literal["cube", "plane", "sphere", "model"]
 LightKind: TypeAlias = Literal["ambient", "directional"]
-ColliderShape: TypeAlias = Literal["box", "sphere"]
+ColliderShape: TypeAlias = Literal["box", "sphere", "capsule", "convex", "mesh"]
 CollisionLayer: TypeAlias = Literal["static", "dynamic", "sensor", "character"]
 RigidBodyType: TypeAlias = Literal["dynamic", "kinematic"]
 CharacterMode: TypeAlias = Literal["first_person", "third_person"]
@@ -169,7 +171,7 @@ class LightComponent:
 
 
 class Collider:
-    """Live facade for an entity's singleton native box or sphere collider."""
+    """Live facade for an entity's singleton native collider."""
 
     __slots__ = ("_entity",)
 
@@ -180,12 +182,17 @@ class Collider:
         shape: ColliderShape = "box",
         half_extents: Vec3 | tuple[float, float, float] = (0.5, 0.5, 0.5),
         radius: float = 0.5,
+        height: float = 1.0,
+        points: Iterable[Vec3 | tuple[float, float, float]] = (),
+        mesh: str | PathLike[str] | None = None,
         trigger: bool = False,
         layer: CollisionLayer = "dynamic",
         material: PhysicsMaterial | None = None,
     ) -> None:
-        if shape not in ("box", "sphere"):
-            raise ValueError("collider shape must be 'box' or 'sphere'")
+        if shape not in ("box", "sphere", "capsule", "convex", "mesh"):
+            raise ValueError(
+                "collider shape must be box, sphere, capsule, convex, or mesh"
+            )
         if layer not in ("static", "dynamic", "sensor", "character"):
             raise ValueError(
                 "collision layer must be static, dynamic, sensor, or character"
@@ -196,6 +203,17 @@ class Collider:
         if min(extents.x, extents.y, extents.z) <= 0:
             raise ValueError("collider half extents must be positive")
         radius_value = _finite_positive(radius, "collider radius")
+        height_value = _finite_positive(height, "collider height")
+        if shape == "capsule" and height_value <= 2 * radius_value:
+            raise ValueError("capsule height must be greater than its diameter")
+        point_values = tuple(Vec3.from_value(point) for point in points)
+        mesh_path = None if mesh is None else str(Path(mesh))
+        if shape == "convex" and not point_values and mesh_path is None:
+            raise ValueError("convex collider requires points or a mesh asset")
+        if shape == "mesh" and mesh_path is None:
+            raise ValueError("mesh collider requires a mesh asset")
+        if shape not in ("convex", "mesh") and (point_values or mesh_path is not None):
+            raise ValueError("points/mesh are only valid for convex or mesh colliders")
         material_value = PhysicsMaterial() if material is None else material
         if not isinstance(material_value, PhysicsMaterial):
             raise TypeError("material must be an easy3d.PhysicsMaterial")
@@ -205,6 +223,9 @@ class Collider:
             shape,
             tuple(extents),
             radius_value,
+            height_value,
+            [tuple(point) for point in point_values],
+            mesh_path,
             trigger,
             layer,
             material_value.friction,
@@ -220,13 +241,13 @@ class Collider:
 
     def _info(
         self,
-    ) -> tuple[str, tuple[float, float, float], float, bool, str, float, float]:
-        shape, extents, radius, trigger, layer, friction, restitution = (
+    ) -> tuple[str, tuple[float, float, float], float, float, bool, str, float, float]:
+        shape, extents, radius, height, trigger, layer, friction, restitution = (
             self._entity.scene._native.collider_component_info(
                 self._entity._handle
             )
         )
-        return shape, tuple(extents), radius, trigger, layer, friction, restitution
+        return shape, tuple(extents), radius, height, trigger, layer, friction, restitution
 
     @property
     def entity(self) -> Entity:
@@ -245,17 +266,21 @@ class Collider:
         return self._info()[2]
 
     @property
-    def is_trigger(self) -> bool:
+    def height(self) -> float:
         return self._info()[3]
 
     @property
+    def is_trigger(self) -> bool:
+        return self._info()[4]
+
+    @property
     def layer(self) -> CollisionLayer:
-        return self._info()[4]  # type: ignore[return-value]
+        return self._info()[5]  # type: ignore[return-value]
 
     @property
     def material(self) -> PhysicsMaterial:
         info = self._info()
-        return PhysicsMaterial(info[5], info[6])
+        return PhysicsMaterial(info[6], info[7])
 
     def remove(self) -> None:
         self._entity.scene._require_mutable()
@@ -274,15 +299,20 @@ class Rigidbody:
         body_type: RigidBodyType = "dynamic",
         mass: float = 1.0,
         use_gravity: bool = True,
+        continuous: bool = False,
     ) -> None:
         if body_type not in ("dynamic", "kinematic"):
             raise ValueError("body_type must be 'dynamic' or 'kinematic'")
         if not isinstance(use_gravity, bool):
             raise TypeError("use_gravity must be a bool")
+        if not isinstance(continuous, bool):
+            raise TypeError("continuous must be a bool")
+        if continuous and body_type != "dynamic":
+            raise ValueError("continuous collision detection requires a dynamic body")
         mass_value = _finite_positive(mass, "rigid body mass")
         entity.scene._require_mutable()
         entity.scene._native.add_rigid_body_component(
-            entity._handle, body_type, mass_value, use_gravity
+            entity._handle, body_type, mass_value, use_gravity, continuous
         )
         self._entity = entity
 
@@ -292,7 +322,7 @@ class Rigidbody:
         component._entity = entity
         return component
 
-    def _info(self) -> tuple[str, float, bool]:
+    def _info(self) -> tuple[str, float, bool, bool]:
         return self._entity.scene._native.rigid_body_component_info(
             self._entity._handle
         )
@@ -312,6 +342,10 @@ class Rigidbody:
     @property
     def use_gravity(self) -> bool:
         return self._info()[2]
+
+    @property
+    def continuous(self) -> bool:
+        return self._info()[3]
 
     @property
     def linear_velocity(self) -> Vec3:

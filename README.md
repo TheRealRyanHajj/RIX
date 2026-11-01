@@ -289,6 +289,23 @@ jump speed, slope limit, step height, radius, and total capsule height are
 construction-time configuration. Character transforms are solver-owned; use
 `player.controller.teleport(...)` for an explicit discontinuity.
 
+Advanced physics keeps the same component model. Capsules and convex hulls may
+be dynamic; OBJ triangle meshes are static-only. Fast dynamic bodies opt into
+linear-cast CCD, and scene-owned fixed/distance joints live in
+`easy3d.physics`:
+
+```python
+from easy3d import Cube, Model, Rigidbody
+from easy3d import physics
+
+level = Model("assets/level.obj", collider="mesh", scene=scene)
+projectile = Cube(position=(0, 2, 0), collider=True, scene=scene)
+projectile.add_component(Rigidbody, continuous=True)
+rope = physics.distance_constraint(anchor, projectile,
+                                   minimum_distance=2, maximum_distance=4)
+rope.remove()
+```
+
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
 

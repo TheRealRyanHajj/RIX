@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import math
+from typing import TYPE_CHECKING, Literal
 
 from .components import (
     CharacterController,
@@ -39,6 +40,112 @@ class CollisionEvent:
     other: Entity
     point: Vec3
     normal: Vec3
+
+
+ConstraintType = Literal["fixed", "distance"]
+
+
+class Constraint:
+    """Generation-checked scene-owned native joint."""
+
+    __slots__ = ("_scene", "_handle", "_first", "_second", "_type")
+
+    def __init__(
+        self,
+        scene: Scene,
+        handle: object,
+        first: Entity,
+        second: Entity,
+        constraint_type: ConstraintType,
+    ) -> None:
+        self._scene = scene
+        self._handle = handle
+        self._first = first
+        self._second = second
+        self._type = constraint_type
+
+    @property
+    def scene(self) -> Scene:
+        return self._scene
+
+    @property
+    def first(self) -> Entity:
+        return self._first
+
+    @property
+    def second(self) -> Entity:
+        return self._second
+
+    @property
+    def type(self) -> ConstraintType:
+        return self._type
+
+    @property
+    def is_alive(self) -> bool:
+        return not self._scene.closed and self._scene._native.has_constraint(
+            self._handle
+        )
+
+    def remove(self) -> None:
+        self._scene._require_mutable()
+        self._scene._native.remove_constraint(self._handle)
+
+
+def _constraint_entities(first: Entity, second: Entity) -> Scene:
+    from .entity import Entity
+
+    if not isinstance(first, Entity) or not isinstance(second, Entity):
+        raise TypeError("constraint endpoints must be easy3d.Entity instances")
+    if first.scene is not second.scene:
+        raise ValueError("constraint endpoints belong to different scenes")
+    if first == second:
+        raise ValueError("a constraint requires two different entities")
+    first.scene._require_mutable()
+    return first.scene
+
+
+def fixed_constraint(first: Entity, second: Entity) -> Constraint:
+    """Weld two collider bodies at their current relative pose."""
+
+    scene = _constraint_entities(first, second)
+    handle = scene._native.add_fixed_constraint(first._handle, second._handle)
+    return Constraint(scene, handle, first, second, "fixed")
+
+
+def distance_constraint(
+    first: Entity,
+    second: Entity,
+    *,
+    first_anchor: Vec3 | tuple[float, float, float] | None = None,
+    second_anchor: Vec3 | tuple[float, float, float] | None = None,
+    minimum_distance: float | None = None,
+    maximum_distance: float | None = None,
+) -> Constraint:
+    """Keep two world-space anchor points at an automatic or bounded distance."""
+
+    scene = _constraint_entities(first, second)
+    anchor_one = first.world_position if first_anchor is None else Vec3.from_value(first_anchor)
+    anchor_two = second.world_position if second_anchor is None else Vec3.from_value(second_anchor)
+    if (minimum_distance is None) != (maximum_distance is None):
+        raise ValueError("minimum_distance and maximum_distance must be provided together")
+    minimum = -1.0 if minimum_distance is None else float(minimum_distance)
+    maximum = -1.0 if maximum_distance is None else float(maximum_distance)
+    if minimum_distance is not None and (
+        not math.isfinite(minimum)
+        or not math.isfinite(maximum)
+        or minimum < 0
+        or maximum < minimum
+    ):
+        raise ValueError("distance limits must satisfy 0 <= minimum <= maximum")
+    handle = scene._native.add_distance_constraint(
+        first._handle,
+        second._handle,
+        tuple(anchor_one),
+        tuple(anchor_two),
+        minimum,
+        maximum,
+    )
+    return Constraint(scene, handle, first, second, "distance")
 
 
 _LAYER_BITS: dict[str, int] = {
@@ -309,12 +416,16 @@ __all__ = [
     "ColliderShape",
     "CollisionLayer",
     "CollisionEvent",
+    "Constraint",
+    "ConstraintType",
     "PhysicsHit",
     "PhysicsMaterial",
     "Rigidbody",
     "RigidBodyType",
     "capsule_cast",
     "capsule_cast_all",
+    "distance_constraint",
+    "fixed_constraint",
     "overlap_box",
     "overlap_sphere",
     "raycast",

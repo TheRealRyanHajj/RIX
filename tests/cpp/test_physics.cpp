@@ -289,6 +289,114 @@ int main() {
     assert(gentle_state.position.y > 1.0F && gentle_state.position.z < 0.0F);
     assert(steep_state.position.y < 0.5F && steep_state.position.z > 0.0F);
 
+    PhysicsWorld advanced_world(PhysicsWorldConfig{
+        .max_bodies = 32,
+        .max_body_pairs = 128,
+        .max_contact_constraints = 64,
+        .temporary_allocator_bytes = 2U * 1024U * 1024U,
+    });
+    PhysicsBodySettings mesh_floor{};
+    mesh_floor.shape = PhysicsShape::TriangleMesh;
+    mesh_floor.motion_type = PhysicsMotionType::Static;
+    mesh_floor.layer = CollisionLayer::Static;
+    mesh_floor.vertices = {{-5.0F, 0.0F, -5.0F},
+                           {5.0F, 0.0F, -5.0F},
+                           {5.0F, 0.0F, 5.0F},
+                           {-5.0F, 0.0F, 5.0F}};
+    mesh_floor.indices = {0, 2, 1, 0, 3, 2};
+    (void)advanced_world.create_body(mesh_floor);
+    PhysicsBodySettings capsule_settings{};
+    capsule_settings.shape = PhysicsShape::Capsule;
+    capsule_settings.position = {-2.0F, 4.0F, 0.0F};
+    capsule_settings.radius = 0.4F;
+    capsule_settings.height = 2.0F;
+    const PhysicsBodyHandle capsule = advanced_world.create_body(capsule_settings);
+    PhysicsBodySettings convex_settings{};
+    convex_settings.shape = PhysicsShape::ConvexHull;
+    convex_settings.position = {2.0F, 4.0F, 0.0F};
+    convex_settings.vertices = {{-0.5F, -0.5F, -0.5F},
+                                {0.5F, -0.5F, -0.5F},
+                                {0.5F, -0.5F, 0.5F},
+                                {-0.5F, -0.5F, 0.5F},
+                                {-0.5F, 0.5F, -0.5F},
+                                {0.5F, 0.5F, -0.5F},
+                                {0.5F, 0.5F, 0.5F},
+                                {-0.5F, 0.5F, 0.5F}};
+    const PhysicsBodyHandle convex = advanced_world.create_body(convex_settings);
+    for (int step = 0; step < 240; ++step) advanced_world.step(1.0F / 60.0F);
+    assert(advanced_world.body_position(capsule).y > 0.95F &&
+           advanced_world.body_position(capsule).y < 1.05F);
+    assert(advanced_world.body_position(convex).y > 0.45F &&
+           advanced_world.body_position(convex).y < 0.55F);
+
+    PhysicsBodySettings anchor_settings{};
+    anchor_settings.motion_type = PhysicsMotionType::Static;
+    anchor_settings.layer = CollisionLayer::Static;
+    anchor_settings.position = {0.0F, 6.0F, 0.0F};
+    const PhysicsBodyHandle anchor = advanced_world.create_body(anchor_settings);
+    PhysicsBodySettings hanging_settings{};
+    hanging_settings.position = {0.0F, 3.0F, 0.0F};
+    const PhysicsBodyHandle hanging = advanced_world.create_body(hanging_settings);
+    const PhysicsConstraintHandle distance = advanced_world.create_constraint(
+        {.type = PhysicsConstraintType::Distance,
+         .first = anchor,
+         .second = hanging,
+         .first_anchor = {0.0F, 6.0F, 0.0F},
+         .second_anchor = {0.0F, 3.0F, 0.0F}});
+    for (int step = 0; step < 120; ++step) advanced_world.step(1.0F / 60.0F);
+    assert(std::abs((advanced_world.body_position(anchor) -
+                     advanced_world.body_position(hanging)).length() - 3.0F) < 0.05F);
+    assert(advanced_world.is_alive(distance));
+    advanced_world.destroy_constraint(distance);
+    assert(!advanced_world.is_alive(distance));
+
+    PhysicsBodySettings welded_settings{};
+    welded_settings.position = {3.0F, 6.0F, 0.0F};
+    const PhysicsBodyHandle welded = advanced_world.create_body(welded_settings);
+    const PhysicsConstraintHandle fixed = advanced_world.create_constraint(
+        {.type = PhysicsConstraintType::Fixed, .first = anchor, .second = welded});
+    for (int step = 0; step < 60; ++step) advanced_world.step(1.0F / 60.0F);
+    assert(almost_equal(advanced_world.body_position(welded),
+                        Vec3{3.0F, 6.0F, 0.0F},
+                        0.05F));
+    assert(advanced_world.constraint_count() == 1);
+    advanced_world.destroy_body(welded);
+    assert(!advanced_world.is_alive(fixed) && advanced_world.constraint_count() == 0);
+
+    PhysicsWorld ccd_world(PhysicsWorldConfig{
+        .max_bodies = 8,
+        .max_body_pairs = 16,
+        .max_contact_constraints = 16,
+        .temporary_allocator_bytes = 1024U * 1024U,
+    });
+    ccd_world.set_gravity({0.0F, 0.0F, 0.0F});
+    PhysicsBodySettings thin_wall{};
+    thin_wall.motion_type = PhysicsMotionType::Static;
+    thin_wall.layer = CollisionLayer::Static;
+    thin_wall.half_extents = {0.05F, 5.0F, 5.0F};
+    (void)ccd_world.create_body(thin_wall);
+    PhysicsBodySettings fast_sphere{};
+    fast_sphere.shape = PhysicsShape::Sphere;
+    fast_sphere.position = {-5.0F, -2.0F, 0.0F};
+    fast_sphere.radius = 0.2F;
+    fast_sphere.linear_velocity = {501.0F, 0.0F, 0.0F};
+    bool rejected_unsafe_velocity = false;
+    try {
+        (void)ccd_world.create_body(fast_sphere);
+    } catch (const std::invalid_argument&) {
+        rejected_unsafe_velocity = true;
+    }
+    assert(rejected_unsafe_velocity);
+    fast_sphere.linear_velocity = {400.0F, 0.0F, 0.0F};
+    fast_sphere.continuous = true;
+    const PhysicsBodyHandle continuous = ccd_world.create_body(fast_sphere);
+    fast_sphere.position = {-5.0F, 2.0F, 0.0F};
+    fast_sphere.continuous = false;
+    const PhysicsBodyHandle discrete = ccd_world.create_body(fast_sphere);
+    ccd_world.step(1.0F / 60.0F);
+    assert(ccd_world.body_position(continuous).x < 0.0F);
+    assert(ccd_world.body_position(discrete).x > 1.0F);
+
     std::cout << "easy3d_physics_tests: PASS\n";
     return 0;
 }

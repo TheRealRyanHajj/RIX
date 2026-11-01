@@ -231,12 +231,19 @@ PYBIND11_MODULE(_easy3d, module) {
     const auto physics_shape = [](const std::string& value) {
         if (value == "box") return easy3d::PhysicsShape::Box;
         if (value == "sphere") return easy3d::PhysicsShape::Sphere;
-        throw std::invalid_argument("collider shape must be box or sphere");
+        if (value == "capsule") return easy3d::PhysicsShape::Capsule;
+        if (value == "convex") return easy3d::PhysicsShape::ConvexHull;
+        if (value == "mesh") return easy3d::PhysicsShape::TriangleMesh;
+        throw std::invalid_argument(
+            "collider shape must be box, sphere, capsule, convex, or mesh");
     };
     const auto physics_shape_name = [](const easy3d::PhysicsShape value) {
         switch (value) {
         case easy3d::PhysicsShape::Box: return "box";
         case easy3d::PhysicsShape::Sphere: return "sphere";
+        case easy3d::PhysicsShape::Capsule: return "capsule";
+        case easy3d::PhysicsShape::ConvexHull: return "convex";
+        case easy3d::PhysicsShape::TriangleMesh: return "mesh";
         }
         return "unknown";
     };
@@ -407,6 +414,11 @@ PYBIND11_MODULE(_easy3d, module) {
                    ", index=" + std::to_string(handle.index) +
                    ", generation=" + std::to_string(handle.generation) + ")";
         })
+        .def(py::self == py::self);
+
+    py::class_<easy3d::PhysicsConstraintHandle>(module, "_PhysicsConstraintHandle")
+        .def_property_readonly("id", &easy3d::PhysicsConstraintHandle::id)
+        .def_property_readonly("valid", &easy3d::PhysicsConstraintHandle::valid)
         .def(py::self == py::self);
 
     py::class_<easy3d::Scene>(module, "_NativeScene")
@@ -623,23 +635,51 @@ PYBIND11_MODULE(_easy3d, module) {
                  const std::string& shape,
                  const std::array<float, 3>& half_extents,
                  const float radius,
+                 const float height,
+                 const std::vector<std::array<float, 3>>& points,
+                 const std::optional<std::string>& mesh_path,
                  const bool trigger,
                  const std::string& layer,
                  const float friction,
                  const float restitution) {
-                 scene.add_collider_component(
-                     handle,
-                     {physics_shape(shape),
-                      {half_extents[0], half_extents[1], half_extents[2]},
-                      radius,
-                      trigger,
-                      collision_layer(layer),
-                      {friction, restitution}});
+                 easy3d::ColliderComponent component;
+                 component.shape = physics_shape(shape);
+                 component.half_extents =
+                     {half_extents[0], half_extents[1], half_extents[2]};
+                 component.radius = radius;
+                 component.height = height;
+                 component.trigger = trigger;
+                 component.layer = collision_layer(layer);
+                 component.material = {friction, restitution};
+                 component.vertices.reserve(points.size());
+                 for (const auto& point : points) {
+                     component.vertices.push_back({point[0], point[1], point[2]});
+                 }
+                 if (mesh_path.has_value()) {
+                     const std::shared_ptr<const easy3d::ModelData> model =
+                         easy3d::load_obj(*mesh_path);
+                     component.vertices.clear();
+                     component.indices.clear();
+                     for (const easy3d::ModelPart& part : model->parts) {
+                         const std::uint32_t offset =
+                             static_cast<std::uint32_t>(component.vertices.size());
+                         for (const easy3d::Vertex& vertex : part.mesh.vertices) {
+                             component.vertices.push_back(vertex.position);
+                         }
+                         for (const std::uint32_t index : part.mesh.indices) {
+                             component.indices.push_back(offset + index);
+                         }
+                     }
+                 }
+                 scene.add_collider_component(handle, std::move(component));
              },
              py::arg("handle"),
              py::arg("shape"),
              py::arg("half_extents"),
              py::arg("radius"),
+             py::arg("height"),
+             py::arg("points"),
+             py::arg("mesh_path"),
              py::arg("trigger"),
              py::arg("layer"),
              py::arg("friction"),
@@ -656,6 +696,7 @@ PYBIND11_MODULE(_easy3d, module) {
                                     component.half_extents.y,
                                     component.half_extents.z),
                      component.radius,
+                     component.height,
                      component.trigger,
                      collision_layer_name(component.layer),
                      component.material.friction,
@@ -668,14 +709,19 @@ PYBIND11_MODULE(_easy3d, module) {
                            const easy3d::EntityHandle handle,
                            const std::string& type,
                            const float mass,
-                           const bool use_gravity) {
-                 scene.add_rigid_body_component(
-                     handle, {motion_type(type), mass, use_gravity});
+                           const bool use_gravity,
+                           const bool continuous) {
+                 scene.add_rigid_body_component(handle,
+                                                {motion_type(type),
+                                                 mass,
+                                                 use_gravity,
+                                                 continuous});
              },
              py::arg("handle"),
              py::arg("type"),
              py::arg("mass"),
-             py::arg("use_gravity"))
+             py::arg("use_gravity"),
+             py::arg("continuous"))
         .def("has_rigid_body_component", &easy3d::Scene::has_rigid_body_component)
         .def("rigid_body_component_info",
              [motion_type_name](const easy3d::Scene& scene,
@@ -684,7 +730,8 @@ PYBIND11_MODULE(_easy3d, module) {
                      scene.rigid_body_component(handle);
                  return py::make_tuple(motion_type_name(component.motion_type),
                                        component.mass,
-                                       component.use_gravity);
+                                       component.use_gravity,
+                                       component.continuous);
              },
              py::arg("handle"))
         .def("remove_rigid_body_component", &easy3d::Scene::remove_rigid_body_component)
@@ -845,6 +892,34 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("handle"),
              py::arg("position"),
              py::arg("heading_degrees") = 0.0F)
+        .def("add_fixed_constraint",
+             &easy3d::Scene::add_fixed_constraint,
+             py::arg("first"),
+             py::arg("second"))
+        .def("add_distance_constraint",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle first,
+                const easy3d::EntityHandle second,
+                const std::array<float, 3>& first_anchor,
+                const std::array<float, 3>& second_anchor,
+                const float minimum_distance,
+                const float maximum_distance) {
+                 return scene.add_distance_constraint(
+                     first,
+                     second,
+                     {first_anchor[0], first_anchor[1], first_anchor[2]},
+                     {second_anchor[0], second_anchor[1], second_anchor[2]},
+                     minimum_distance,
+                     maximum_distance);
+             },
+             py::arg("first"),
+             py::arg("second"),
+             py::arg("first_anchor"),
+             py::arg("second_anchor"),
+             py::arg("minimum_distance") = -1.0F,
+             py::arg("maximum_distance") = -1.0F)
+        .def("remove_constraint", &easy3d::Scene::remove_constraint)
+        .def("has_constraint", &easy3d::Scene::has_constraint)
         .def("physics_raycast_all",
              [](const easy3d::Scene& scene,
                 const std::array<float, 3>& origin,

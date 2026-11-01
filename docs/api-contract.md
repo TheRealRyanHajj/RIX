@@ -418,6 +418,31 @@ events. `scene.physics_step_count` is a diagnostic. Scene clear
 destroys all native bodies and characters and invalidates their handles. A scene with no
 physics use pays no Jolt-world/temp-buffer allocation.
 
+### Advanced shapes, constraints, and CCD
+
+`Collider` supports `box`, `sphere`, `capsule`, `convex`, and `mesh`. Capsule
+height is total tip-to-tip height and must exceed its diameter. Convex hulls
+accept 4–256 finite `points` or the vertices of an OBJ `mesh` asset. Triangle
+meshes are built from triangulated OBJ parts, use counter-clockwise one-sided
+triangles, and are static-only; attaching a `Rigidbody` is rejected. `Model`
+accepts `collider="mesh"` or `collider="convex"`. Model scale is baked into an
+advanced collider when it is created and later scale changes do not rebuild it.
+
+`Rigidbody(continuous=True)` selects Jolt linear-cast motion quality for dynamic
+bodies. It addresses high-speed linear tunneling but does not promise perfect
+collision for long, thin bodies with extreme angular velocity. Static and
+kinematic bodies reject the option.
+
+`easy3d.physics.fixed_constraint(first, second)` welds two collider bodies at
+their current relative pose. `distance_constraint` accepts optional world-space
+anchors and either automatic initial length or a validated
+`minimum_distance`/`maximum_distance` range. The returned `Constraint` is
+generation checked, exposes `is_alive`, and has explicit `remove()`. Endpoints
+must be distinct entities in one scene and at least one body must move.
+Destroying/replacing either endpoint body removes its constraints before the
+body. Phase 2.8 intentionally provides fixed and distance joints first; hinge,
+slider, motorized and compound-shape APIs remain future extensions.
+
 ## Texture assets
 
 ```python

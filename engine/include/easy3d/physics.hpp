@@ -32,6 +32,9 @@ enum class PhysicsMotionType : std::uint8_t {
 enum class PhysicsShape : std::uint8_t {
     Box,
     Sphere,
+    Capsule,
+    ConvexHull,
+    TriangleMesh,
 };
 
 struct PhysicsBodyHandle final {
@@ -61,6 +64,20 @@ struct PhysicsCharacterHandle final {
                            const PhysicsCharacterHandle&) = default;
 };
 
+struct PhysicsConstraintHandle final {
+    static constexpr std::uint32_t invalid_index = std::numeric_limits<std::uint32_t>::max();
+
+    std::uint64_t world_id{0};
+    std::uint32_t index{invalid_index};
+    std::uint32_t generation{0};
+
+    [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] std::uint64_t id() const noexcept;
+
+    friend bool operator==(const PhysicsConstraintHandle&,
+                           const PhysicsConstraintHandle&) = default;
+};
+
 struct PhysicsWorldConfig final {
     std::uint32_t max_bodies{16'384};
     std::uint32_t max_body_pairs{65'536};
@@ -83,11 +100,31 @@ struct PhysicsBodySettings final {
     Quat rotation{};
     Vec3 half_extents{0.5F, 0.5F, 0.5F};
     float radius{0.5F};
+    float height{1.0F};
+    std::vector<Vec3> vertices;
+    std::vector<std::uint32_t> indices;
     PhysicsMaterial material{};
     float mass{1.0F};
     float gravity_factor{1.0F};
     Vec3 linear_velocity{};
+    bool continuous{false};
     std::uint64_t user_data{0};
+};
+
+enum class PhysicsConstraintType : std::uint8_t {
+    Fixed,
+    Distance,
+};
+
+struct PhysicsConstraintSettings final {
+    PhysicsConstraintType type{PhysicsConstraintType::Fixed};
+    PhysicsBodyHandle first;
+    PhysicsBodyHandle second;
+    Vec3 first_anchor{};
+    Vec3 second_anchor{};
+    float minimum_distance{-1.0F};
+    float maximum_distance{-1.0F};
+    bool auto_detect_fixed_point{true};
 };
 
 enum class CharacterMotorMode : std::uint8_t {
@@ -181,6 +218,12 @@ public:
     void set_character_input(PhysicsCharacterHandle handle, CharacterMotorInput input);
     [[nodiscard]] CharacterMotorState character_state(PhysicsCharacterHandle handle) const;
     void teleport_character(PhysicsCharacterHandle handle, Vec3 position, float heading_degrees);
+
+    [[nodiscard]] PhysicsConstraintHandle create_constraint(
+        const PhysicsConstraintSettings& settings);
+    void destroy_constraint(PhysicsConstraintHandle handle);
+    [[nodiscard]] bool is_alive(PhysicsConstraintHandle handle) const noexcept;
+    [[nodiscard]] std::size_t constraint_count() const noexcept;
 
     [[nodiscard]] Vec3 body_position(PhysicsBodyHandle handle) const;
     [[nodiscard]] Quat body_rotation(PhysicsBodyHandle handle) const;

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from os import PathLike
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from .components import Collider, ColorValue, normalize_color
 from .entity import Entity
@@ -177,11 +177,14 @@ class Model(Entity):
         scale: Vec3 | tuple[float, float, float] = (1, 1, 1),
         color: ColorValue = (1, 1, 1, 1),
         lit: bool = True,
+        collider: Literal["mesh", "convex"] | bool = False,
         name: str = "Model",
         scene: Scene | None = None,
     ) -> None:
         native_color = normalize_color(color)
         native_lit = _lit(lit)
+        if collider not in (False, "mesh", "convex"):
+            raise ValueError("model collider must be False, 'mesh', or 'convex'")
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_model_renderer(
@@ -189,6 +192,8 @@ class Model(Entity):
             )
             self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, scale)
+            if collider:
+                self.add_component(Collider, shape=collider, mesh=path)
         except Exception:
             self.scene._rollback_entity_construction(self)
             raise
