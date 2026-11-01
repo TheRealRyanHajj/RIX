@@ -204,6 +204,22 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "unknown";
     };
+    const auto light_kind = [](const std::string& value) {
+        if (value == "ambient") {
+            return easy3d::LightKind::Ambient;
+        }
+        if (value == "directional") {
+            return easy3d::LightKind::Directional;
+        }
+        throw std::invalid_argument("light kind must be ambient or directional");
+    };
+    const auto light_kind_name = [](const easy3d::LightKind value) {
+        switch (value) {
+        case easy3d::LightKind::Ambient: return "ambient";
+        case easy3d::LightKind::Directional: return "directional";
+        }
+        return "unknown";
+    };
 
     py::class_<easy3d::Engine>(module, "Engine")
         .def(py::init([](std::string title,
@@ -394,7 +410,8 @@ PYBIND11_MODULE(_easy3d, module) {
                                     component.material.color.g,
                                     component.material.color.b,
                                     component.material.color.a),
-                     asset);
+                     asset,
+                     component.material.lit);
              },
              py::arg("handle"))
         .def("set_render_color",
@@ -406,6 +423,106 @@ PYBIND11_MODULE(_easy3d, module) {
              },
              py::arg("handle"),
              py::arg("color"))
-        .def("remove_render_component", &easy3d::Scene::remove_render_component);
+        .def("set_render_lit",
+             &easy3d::Scene::set_render_lit,
+             py::arg("handle"),
+             py::arg("lit"))
+        .def("remove_render_component", &easy3d::Scene::remove_render_component)
+        .def("add_light_component",
+             [light_kind](easy3d::Scene& scene,
+                          const easy3d::EntityHandle handle,
+                          const std::string& kind,
+                          const std::array<float, 4>& color,
+                          const float intensity) {
+                 scene.add_light_component(
+                     handle,
+                     light_kind(kind),
+                     {color[0], color[1], color[2], color[3]},
+                     intensity);
+             },
+             py::arg("handle"),
+             py::arg("kind"),
+             py::arg("color"),
+             py::arg("intensity"))
+        .def("has_light_component", &easy3d::Scene::has_light_component)
+        .def("light_component_info",
+             [light_kind_name](const easy3d::Scene& scene,
+                               const easy3d::EntityHandle handle) {
+                 const easy3d::LightComponent& component =
+                     scene.light_component(handle);
+                 return py::make_tuple(
+                     light_kind_name(component.kind),
+                     py::make_tuple(component.color.r,
+                                    component.color.g,
+                                    component.color.b,
+                                    component.color.a),
+                     component.intensity);
+             },
+             py::arg("handle"))
+        .def("set_light_color",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 4>& color) {
+                 scene.set_light_color(
+                     handle, {color[0], color[1], color[2], color[3]});
+             },
+             py::arg("handle"),
+             py::arg("color"))
+        .def("set_light_intensity",
+             &easy3d::Scene::set_light_intensity,
+             py::arg("handle"),
+             py::arg("intensity"))
+        .def("remove_light_component", &easy3d::Scene::remove_light_component)
+        .def("camera_info", [](const easy3d::Scene& scene) {
+            const easy3d::Camera& camera = scene.camera();
+            return py::make_tuple(
+                py::make_tuple(camera.position.x,
+                               camera.position.y,
+                               camera.position.z),
+                py::make_tuple(camera.rotation.w,
+                               camera.rotation.x,
+                               camera.rotation.y,
+                               camera.rotation.z),
+                camera.vertical_fov_degrees,
+                camera.near_plane,
+                camera.far_plane);
+        })
+        .def("set_camera",
+             [](easy3d::Scene& scene,
+                const std::array<float, 3>& position,
+                const std::array<float, 4>& rotation,
+                const float vertical_fov_degrees,
+                const float near_plane,
+                const float far_plane) {
+                 scene.set_camera({{position[0], position[1], position[2]},
+                                   {rotation[0], rotation[1], rotation[2], rotation[3]},
+                                   vertical_fov_degrees,
+                                   near_plane,
+                                   far_plane});
+             },
+             py::arg("position"),
+             py::arg("rotation"),
+             py::arg("vertical_fov_degrees"),
+             py::arg("near_plane"),
+             py::arg("far_plane"))
+        .def("add_debug_line",
+             [](easy3d::Scene& scene,
+                const std::array<float, 3>& start,
+                const std::array<float, 3>& end,
+                const std::array<float, 4>& color,
+                const bool depth_test) {
+                 scene.add_debug_line({{start[0], start[1], start[2]},
+                                       {end[0], end[1], end[2]},
+                                       {color[0], color[1], color[2], color[3]},
+                                       depth_test});
+             },
+             py::arg("start"),
+             py::arg("end"),
+             py::arg("color"),
+             py::arg("depth_test") = true)
+        .def("clear_debug_lines", &easy3d::Scene::clear_debug_lines)
+        .def_property_readonly("debug_line_count", [](const easy3d::Scene& scene) {
+            return scene.debug_lines().size();
+        });
 }
 

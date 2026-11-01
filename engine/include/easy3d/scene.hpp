@@ -49,6 +49,19 @@ struct RenderComponent final {
     TextureSampler sampler{};
 };
 
+enum class LightKind {
+    Ambient,
+    Directional,
+};
+
+struct LightComponent final {
+    LightKind kind{LightKind::Directional};
+    Color color{};
+    float intensity{1.0F};
+
+    void validate() const;
+};
+
 class World final {
 public:
     World();
@@ -93,7 +106,17 @@ public:
     [[nodiscard]] bool has_render_component(EntityHandle handle) const;
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
     void set_render_color(EntityHandle handle, Color color);
+    void set_render_lit(EntityHandle handle, bool lit);
     void remove_render_component(EntityHandle handle);
+    void add_light_component(EntityHandle handle,
+                             LightKind kind,
+                             Color color = {},
+                             float intensity = 1.0F);
+    [[nodiscard]] bool has_light_component(EntityHandle handle) const;
+    [[nodiscard]] const LightComponent& light_component(EntityHandle handle) const;
+    void set_light_color(EntityHandle handle, Color color);
+    void set_light_intensity(EntityHandle handle, float intensity);
+    void remove_light_component(EntityHandle handle);
 
 private:
     struct Slot final {
@@ -112,6 +135,7 @@ private:
             0.0F, 0.0F, 0.0F, 1.0F};
         mutable bool transform_dirty{true};
         std::optional<RenderComponent> render_component;
+        std::optional<LightComponent> light_component;
     };
 
     [[nodiscard]] Slot& require_slot(EntityHandle handle);
@@ -179,7 +203,23 @@ public:
     [[nodiscard]] bool has_render_component(EntityHandle handle) const;
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
     void set_render_color(EntityHandle handle, Color color);
+    void set_render_lit(EntityHandle handle, bool lit);
     void remove_render_component(EntityHandle handle);
+    void add_light_component(EntityHandle handle,
+                             LightKind kind,
+                             Color color = {},
+                             float intensity = 1.0F);
+    [[nodiscard]] bool has_light_component(EntityHandle handle) const;
+    [[nodiscard]] const LightComponent& light_component(EntityHandle handle) const;
+    void set_light_color(EntityHandle handle, Color color);
+    void set_light_intensity(EntityHandle handle, float intensity);
+    void remove_light_component(EntityHandle handle);
+
+    [[nodiscard]] const Camera& camera() const noexcept;
+    void set_camera(Camera camera);
+    void add_debug_line(DebugLine line);
+    void clear_debug_lines() noexcept;
+    [[nodiscard]] const std::vector<DebugLine>& debug_lines() const noexcept;
 
     [[nodiscard]] World& world() noexcept;
     [[nodiscard]] const World& world() const noexcept;
@@ -190,6 +230,8 @@ private:
     std::string name_;
     bool active_{false};
     World world_;
+    Camera camera_;
+    std::vector<DebugLine> debug_lines_;
 };
 
 } // namespace easy3d

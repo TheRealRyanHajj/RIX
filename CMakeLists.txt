@@ -232,6 +232,11 @@ if(BUILD_TESTING)
     target_link_libraries(easy3d_render_component_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.render_components COMMAND easy3d_render_component_tests)
 
+    add_executable(easy3d_lighting_debug_tests tests/cpp/test_lighting_debug.cpp)
+    target_compile_features(easy3d_lighting_debug_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_lighting_debug_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.lighting_debug COMMAND easy3d_lighting_debug_tests)
+
     if(EASY3D_ENABLE_GRAPHICS)
         add_executable(easy3d_texture_tests tests/cpp/test_texture.cpp)
         target_compile_features(easy3d_texture_tests PRIVATE cxx_std_20)

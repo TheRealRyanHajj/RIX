@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 ColorValue: TypeAlias = tuple[float, float, float] | tuple[float, float, float, float]
 RenderKind: TypeAlias = Literal["cube", "plane", "sphere", "model"]
+LightKind: TypeAlias = Literal["ambient", "directional"]
 
 
 def normalize_color(value: ColorValue) -> tuple[float, float, float, float]:
@@ -36,11 +37,13 @@ class MeshRenderer:
     def entity(self) -> Entity:
         return self._entity
 
-    def _info(self) -> tuple[str, tuple[float, float, float, float], str | None]:
-        kind, color, asset = self._entity.scene._native.render_component_info(
+    def _info(
+        self,
+    ) -> tuple[str, tuple[float, float, float, float], str | None, bool]:
+        kind, color, asset, lit = self._entity.scene._native.render_component_info(
             self._entity._handle
         )
-        return kind, tuple(color), asset
+        return kind, tuple(color), asset, lit
 
     @property
     def kind(self) -> RenderKind:
@@ -62,6 +65,67 @@ class MeshRenderer:
         value = self._info()[2]
         return None if value is None else Path(value)
 
+    @property
+    def lit(self) -> bool:
+        return self._info()[3]
+
+    @lit.setter
+    def lit(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("lit must be a bool")
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_render_lit(self._entity._handle, value)
+
     def remove(self) -> None:
         self._entity.scene._require_mutable()
         self._entity.scene._native.remove_render_component(self._entity._handle)
+
+
+class LightComponent:
+    """Live facade for an entity's singleton native light component."""
+
+    __slots__ = ("_entity",)
+
+    def __init__(self, entity: Entity) -> None:
+        self._entity = entity
+
+    @property
+    def entity(self) -> Entity:
+        return self._entity
+
+    def _info(self) -> tuple[str, tuple[float, float, float, float], float]:
+        kind, color, intensity = self._entity.scene._native.light_component_info(
+            self._entity._handle
+        )
+        return kind, tuple(color), intensity
+
+    @property
+    def kind(self) -> LightKind:
+        return self._info()[0]  # type: ignore[return-value]
+
+    @property
+    def color(self) -> tuple[float, float, float, float]:
+        return self._info()[1]
+
+    @color.setter
+    def color(self, value: ColorValue) -> None:
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_light_color(
+            self._entity._handle, normalize_color(value)
+        )
+
+    @property
+    def intensity(self) -> float:
+        return self._info()[2]
+
+    @intensity.setter
+    def intensity(self, value: float) -> None:
+        result = float(value)
+        if not math.isfinite(result) or result < 0:
+            raise ValueError("light intensity must be finite and non-negative")
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_light_intensity(self._entity._handle, result)
+
+    def remove(self) -> None:
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.remove_light_component(self._entity._handle)

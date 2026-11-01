@@ -112,6 +112,16 @@ void Material::validate() const {
     (void)color.rgba8();
 }
 
+void DebugLine::validate() const {
+    if (!finite(start) || !finite(end)) {
+        throw std::invalid_argument("debug line endpoints must be finite");
+    }
+    if ((end - start).length_squared() <= 1.0e-12F) {
+        throw std::invalid_argument("debug line endpoints must be distinct");
+    }
+    (void)color.rgba8();
+}
+
 MeshData make_triangle_mesh() {
     MeshData mesh{
         {

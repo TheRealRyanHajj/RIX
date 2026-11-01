@@ -110,6 +110,13 @@ std::uint64_t EntityHandle::id() const noexcept {
     return (static_cast<std::uint64_t>(generation) << 32U) | index;
 }
 
+void LightComponent::validate() const {
+    (void)color.rgba8();
+    if (!std::isfinite(intensity) || intensity < 0.0F) {
+        throw std::invalid_argument("light intensity must be finite and non-negative");
+    }
+}
+
 World::World() : id_(next_world_id.fetch_add(1, std::memory_order_relaxed)) {
     if (id_ == 0) {
         throw EngineError("Easy3D exhausted native world identifiers");
@@ -141,6 +148,7 @@ EntityHandle World::create_entity(std::string name) {
     slot.child_indices.clear();
     slot.transform_dirty = true;
     slot.render_component.reset();
+    slot.light_component.reset();
     ++entity_count_;
     return handle_for(index);
 }
@@ -162,6 +170,7 @@ void World::destroy_entity(const EntityHandle handle) {
     slot.visible = false;
     slot.name.clear();
     slot.render_component.reset();
+    slot.light_component.reset();
     advance_generation(slot);
     free_indices_.push_back(handle.index);
     --entity_count_;
@@ -184,6 +193,7 @@ void World::clear() noexcept {
         slot.child_indices.clear();
         slot.transform_dirty = true;
         slot.render_component.reset();
+        slot.light_component.reset();
         free_indices_.push_back(static_cast<std::uint32_t>(index));
     }
     entity_count_ = 0;
@@ -381,12 +391,75 @@ void World::set_render_color(const EntityHandle handle, const Color color) {
     component.material = material;
 }
 
+void World::set_render_lit(const EntityHandle handle, const bool lit) {
+    Slot& slot = require_slot(handle);
+    if (!slot.render_component.has_value()) {
+        throw EngineError("entity does not have a render component");
+    }
+    slot.render_component->material.lit = lit;
+}
+
 void World::remove_render_component(const EntityHandle handle) {
     Slot& slot = require_slot(handle);
     if (!slot.render_component.has_value()) {
         throw EngineError("entity does not have a render component");
     }
     slot.render_component.reset();
+}
+
+void World::add_light_component(const EntityHandle handle,
+                                const LightKind kind,
+                                const Color color,
+                                const float intensity) {
+    Slot& slot = require_slot(handle);
+    if (slot.light_component.has_value()) {
+        throw EngineError("entity already has its singleton light component");
+    }
+    LightComponent component{kind, color, intensity};
+    component.validate();
+    slot.light_component = component;
+}
+
+bool World::has_light_component(const EntityHandle handle) const {
+    return require_slot(handle).light_component.has_value();
+}
+
+const LightComponent& World::light_component(const EntityHandle handle) const {
+    const Slot& slot = require_slot(handle);
+    if (!slot.light_component.has_value()) {
+        throw EngineError("entity does not have a light component");
+    }
+    return *slot.light_component;
+}
+
+void World::set_light_color(const EntityHandle handle, const Color color) {
+    Slot& slot = require_slot(handle);
+    if (!slot.light_component.has_value()) {
+        throw EngineError("entity does not have a light component");
+    }
+    LightComponent replacement = *slot.light_component;
+    replacement.color = color;
+    replacement.validate();
+    slot.light_component = replacement;
+}
+
+void World::set_light_intensity(const EntityHandle handle, const float intensity) {
+    Slot& slot = require_slot(handle);
+    if (!slot.light_component.has_value()) {
+        throw EngineError("entity does not have a light component");
+    }
+    LightComponent replacement = *slot.light_component;
+    replacement.intensity = intensity;
+    replacement.validate();
+    slot.light_component = replacement;
+}
+
+void World::remove_light_component(const EntityHandle handle) {
+    Slot& slot = require_slot(handle);
+    if (!slot.light_component.has_value()) {
+        throw EngineError("entity does not have a light component");
+    }
+    slot.light_component.reset();
 }
 
 World::Slot& World::require_slot(const EntityHandle handle) {
@@ -476,7 +549,9 @@ void World::advance_generation(Slot& slot) noexcept {
     }
 }
 
-Scene::Scene(std::string name) : name_(std::move(name)) {
+Scene::Scene(std::string name)
+    : name_(std::move(name)),
+      camera_(Camera::look_at({0.0F, 3.0F, 8.0F}, {0.0F, 0.0F, 0.0F})) {
     validate_name(name_);
 }
 
@@ -507,6 +582,7 @@ void Scene::destroy_entity(const EntityHandle handle) {
 
 void Scene::clear() noexcept {
     world_.clear();
+    debug_lines_.clear();
 }
 
 bool Scene::is_alive(const EntityHandle handle) const noexcept {
@@ -597,8 +673,61 @@ void Scene::set_render_color(const EntityHandle handle, const Color color) {
     world_.set_render_color(handle, color);
 }
 
+void Scene::set_render_lit(const EntityHandle handle, const bool lit) {
+    world_.set_render_lit(handle, lit);
+}
+
 void Scene::remove_render_component(const EntityHandle handle) {
     world_.remove_render_component(handle);
+}
+
+void Scene::add_light_component(const EntityHandle handle,
+                                const LightKind kind,
+                                const Color color,
+                                const float intensity) {
+    world_.add_light_component(handle, kind, color, intensity);
+}
+
+bool Scene::has_light_component(const EntityHandle handle) const {
+    return world_.has_light_component(handle);
+}
+
+const LightComponent& Scene::light_component(const EntityHandle handle) const {
+    return world_.light_component(handle);
+}
+
+void Scene::set_light_color(const EntityHandle handle, const Color color) {
+    world_.set_light_color(handle, color);
+}
+
+void Scene::set_light_intensity(const EntityHandle handle, const float intensity) {
+    world_.set_light_intensity(handle, intensity);
+}
+
+void Scene::remove_light_component(const EntityHandle handle) {
+    world_.remove_light_component(handle);
+}
+
+const Camera& Scene::camera() const noexcept {
+    return camera_;
+}
+
+void Scene::set_camera(Camera camera) {
+    camera.validate();
+    camera_ = camera;
+}
+
+void Scene::add_debug_line(DebugLine line) {
+    line.validate();
+    debug_lines_.push_back(line);
+}
+
+void Scene::clear_debug_lines() noexcept {
+    debug_lines_.clear();
+}
+
+const std::vector<DebugLine>& Scene::debug_lines() const noexcept {
+    return debug_lines_;
 }
 
 World& Scene::world() noexcept {

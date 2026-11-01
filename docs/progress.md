@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.7 PASSED; Phase 1.8 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.8 PASSED; Phase 1.9 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -1104,3 +1104,113 @@ the NVIDIA GeForce RTX 3070 Ti and does not claim another adapter or backend.
 Phase 1.7: **DONE**. Immediate next task: Phase 1.8 — directional and ambient
 lighting, a scene camera/light component boundary, basic lit materials, and a
 debug-rendering baseline.
+
+## 2026-11-01 — Phase 1.8 lighting and debug rendering
+
+### Bounded approach
+
+Add a scene-owned camera value, native ambient/directional light components,
+lit/unlit material selection, normal-aware solid and textured D3D11 shaders,
+and persistent scene debug lines submitted from transient GPU buffers. Expose a
+typed Python `Light` entity, `LightComponent`, `Scene.camera`, and
+`easy3d.debug` helpers without introducing per-frame Python rendering calls.
+Validate light/component lifetime, camera assignment, material mutation, and
+debug-line storage in C++/pytest; regenerate reviewed DXBC with the pinned bgfx
+shader compiler; then run the full build matrix and a visible hardware
+diagnostic. Primary risks are non-uniform-scale normal transforms, shader/uniform
+ABI mismatch, and preserving current scene defaults when no explicit light is
+created.
+
+### Implemented
+
+- Native singleton ambient/directional `LightComponent` storage with validated
+  color/intensity, generation-safe teardown, enabled filtering, ambient
+  accumulation, and first-directional selection.
+- Scene-owned perspective `Camera`; projection still derives its aspect and
+  depth convention from the live bgfx viewport/capabilities after resize.
+- Lit/unlit material selection for primitive/model entities. Both solid and
+  textured shaders use inverse-transpose world normal transforms and Lambert
+  directional plus ambient illumination; scenes without explicit lights retain
+  a usable default rig.
+- Persistent scene debug lines with depth-tested and overlay groups, uploaded
+  through frame-local bgfx transient vertex buffers and rendered unlit.
+- Typed Python `Light`, live `LightComponent`, `Scene.camera`, `MeshRenderer.lit`,
+  primitive `lit=`, and `easy3d.debug.line`/`axes` APIs with runtime mutation
+  guards consistent with native scene traversal.
+- A public-API-only manual diagnostic contrasting lit and unlit materials while
+  exercising a custom camera and four debug lines.
+
+### Exact verification evidence
+
+Pinned Shader Model 5 compiler (all four vertex/fragment sources, `--Werror`):
+
+```text
+build\windows-debug\_deps\bgfx_cmake-build\cmake\bgfx\Debug\shaderc.exe ...
+vs_solid_color.sc.bin.h   7411 bytes
+vs_textured.sc.bin.h      8111 bytes
+fs_solid_color.sc.bin.h   8122 bytes
+fs_textured.sc.bin.h      9396 bytes
+# exit code 0 for all four invocations
+```
+
+MSVC Debug, Release, and graphics-disabled suites:
+
+```text
+cmake --build --preset windows-debug -j 8
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 9
+Total Test time (real) = 1.12 sec
+
+cmake --build --preset windows-release -j 8
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 9
+Total Test time (real) = 0.58 sec
+
+cmake --build build\windows-headless -j 8
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 8
+Total Test time (real) = 0.61 sec
+```
+
+Python 3.11 editable packaging and tests:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=2740343
+sha256=eb3e7bd917b9dd1cae6d5c78e12b8a41fae4fd337bb06dea9f5665948e97096d
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+..............................................                           [100%]
+46 passed in 0.24s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+0.1.0
+```
+
+Visible Windows D3D11 diagnostic:
+
+```text
+build\venv311\Scripts\python.exe tests\manual\lighting_debug.py --seconds 2
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+lighting_debug: PASS frames=10537 debug_lines=4
+# exit code 0
+
+python tests\manual\lighting_debug.py --seconds 60
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+lighting_debug: PASS frames=105470 debug_lines=4
+# exit code 0
+```
+
+Computer-use capture on the GUI-capable Windows 11 desktop visibly confirmed
+directional shading across a rotated red cube and cyan sphere, a uniformly unlit
+green comparison cube, the custom scene-camera framing, a shaded plane, RGB
+axes, and a yellow overlay line. The native Close control ended the process
+cleanly. This is hardware evidence on the NVIDIA GeForce RTX 3070 Ti/D3D11 only.
+
+Phase 1.8: **DONE**. Immediate next task: Phase 1.9 — frustum culling,
+instancing/batching, renderer counters, and benchmark scenes.

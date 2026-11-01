@@ -5,11 +5,13 @@ machine.
 
 ## Phase 1 is incomplete
 
-Phase 1.1–1.7 are implemented, including native scene traversal and public
-primitive/model render entities. Scene camera ownership, directional/ambient
-lighting, debug rendering, culling, batching/instancing, renderer counters, and
-the first-world/stress acceptance scene remain unimplemented checklist work.
-The current scene renderer uses a fixed look-at camera and unlit material color.
+Phase 1.1–1.8 are implemented, including native scene traversal, public
+primitive/model render entities, scene camera ownership, directional/ambient
+lighting, and debug lines. Orthographic cameras, culling, batching/instancing,
+renderer counters, and the first-world/stress acceptance scene remain
+unimplemented checklist work. The baseline lighting intentionally supports
+ambient accumulation and one directional light; shadows, PBR, multiple
+directional-light blending, and transparent sorting remain later work.
 
 Public scene mutation is intentionally rejected while `Game.run()` is active.
 Phase 2 must add a documented scheduler and safe mutation boundaries before

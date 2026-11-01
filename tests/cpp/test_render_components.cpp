@@ -32,8 +32,10 @@ int main() {
         }
 
         scene.set_render_color(first, {0.8F, 0.2F, 0.1F, 0.5F});
+        scene.set_render_lit(first, false);
         if (scene.render_component(first).material.color !=
-            easy3d::Color{0.8F, 0.2F, 0.1F, 0.5F}) {
+                easy3d::Color{0.8F, 0.2F, 0.1F, 0.5F} ||
+            scene.render_component(first).material.lit) {
             std::cerr << "render component color mutation did not persist\n";
             return 3;
         }

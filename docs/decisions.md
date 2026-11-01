@@ -335,3 +335,44 @@ will introduce ordered mutation/update phases.
   reference is strong and replacement/unload are rejected during a run.
 - Runtime animation and gameplay mutation are deferred until the scheduler can
   serialize them against native traversal.
+
+## ADR-0012: Scene-value camera, native baseline lights, and transient debug lines
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Phase 1.8 needs a beginner-facing camera and lighting surface without coupling
+view state to an entity-component design that later gameplay/editor work may
+need to refine. Lighting must remain entirely native per frame, behave correctly
+under transform hierarchy and non-uniform scale, and preserve useful output for
+existing scenes. Debug visualization should not retain avoidable GPU resources.
+
+### Decision
+
+Store one validated `Camera` value and persistent `DebugLine` array on `Scene`.
+Store singleton ambient/directional `LightComponent` values on world entity
+slots. Ambient lights accumulate; the first enabled directional light uses the
+entity's world-space local -Z direction. A default contribution remains for a
+light kind until an explicit component of that kind exists.
+
+Add `Material::lit` and pass inverse-transpose normal rows plus material and
+lighting uniforms into reviewed Shader Model 5 solid/textured shaders. Render
+debug lines unlit in depth-tested and overlay batches using bgfx transient
+vertex buffers. Python camera assignment is copy-in/copy-out, and all public
+mutation retains the Phase 1 running-game guard.
+
+### Consequences
+
+- Existing no-light scenes remain visible while explicit lights have simple,
+  deterministic semantics.
+- Non-uniform scaling does not corrupt Lambert normals, and unlit materials
+  provide a basic emissive/debug presentation without claiming a full material
+  model.
+- Only one directional light contributes; shadows, PBR/specular response,
+  transparent sorting, and multi-light selection are later rendering work.
+- Debug lines consume no persistent GPU handles but remain CPU-persistent until
+  cleared. A later diagnostics system can add per-frame lifetimes and shapes.
+- Cameras are scene values rather than entities for now; future multi-camera or
+  editor requirements require a separate reviewed ownership decision.

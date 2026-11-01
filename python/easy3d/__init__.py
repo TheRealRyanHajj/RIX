@@ -19,10 +19,12 @@ from .assets import (
     load_obj,
 )
 from .camera import Camera
-from .components import MeshRenderer
+from .components import LightComponent, MeshRenderer
+from . import debug
 from .entity import Entity
 from ._version import __version__
 from .game import Game
+from .lights import Light
 from .math import Quat, Vec2, Vec3
 from .primitives import Cube, Model, Plane, Sphere
 from .scene import Scene
@@ -36,6 +38,8 @@ __all__ = [
     "Game",
     "InvalidEntityError",
     "ImageInfo",
+    "Light",
+    "LightComponent",
     "MissingAssetError",
     "MeshRenderer",
     "Model",
@@ -52,6 +56,7 @@ __all__ = [
     "TextureCache",
     "__version__",
     "engine_version",
+    "debug",
     "load_image",
     "load_obj",
     "native_add",

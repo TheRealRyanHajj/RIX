@@ -21,6 +21,12 @@ def _positive(value: float, name: str) -> float:
     return result
 
 
+def _lit(value: bool) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError("lit must be a bool")
+    return value
+
+
 def _finish_transform(
     entity: Entity,
     position: Vec3 | tuple[float, float, float],
@@ -41,6 +47,7 @@ class Cube(Entity):
         size: float | tuple[float, float, float] = 1.0,
         color: ColorValue = (1, 1, 1, 1),
         texture: str | PathLike[str] | None = None,
+        lit: bool = True,
         name: str = "Cube",
         scene: Scene | None = None,
     ) -> None:
@@ -52,6 +59,7 @@ class Cube(Entity):
             extent = _positive(size, "cube size")
             scale = Vec3(extent, extent, extent)
         native_color = normalize_color(color)
+        native_lit = _lit(lit)
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_primitive_renderer(
@@ -60,6 +68,7 @@ class Cube(Entity):
                 native_color,
                 None if texture is None else str(texture),
             )
+            self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, scale)
         except Exception:
             self.destroy()
@@ -75,6 +84,7 @@ class Plane(Entity):
         size: float | tuple[float, float] = 1.0,
         color: ColorValue = (1, 1, 1, 1),
         texture: str | PathLike[str] | None = None,
+        lit: bool = True,
         name: str = "Plane",
         scene: Scene | None = None,
     ) -> None:
@@ -86,6 +96,7 @@ class Plane(Entity):
         else:
             width = depth = _positive(size, "plane size")
         native_color = normalize_color(color)
+        native_lit = _lit(lit)
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_primitive_renderer(
@@ -94,6 +105,7 @@ class Plane(Entity):
                 native_color,
                 None if texture is None else str(texture),
             )
+            self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, (width, 1.0, depth))
         except Exception:
             self.destroy()
@@ -109,11 +121,13 @@ class Sphere(Entity):
         radius: float = 0.5,
         color: ColorValue = (1, 1, 1, 1),
         texture: str | PathLike[str] | None = None,
+        lit: bool = True,
         name: str = "Sphere",
         scene: Scene | None = None,
     ) -> None:
         diameter = _positive(radius, "sphere radius") * 2.0
         native_color = normalize_color(color)
+        native_lit = _lit(lit)
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_primitive_renderer(
@@ -122,6 +136,7 @@ class Sphere(Entity):
                 native_color,
                 None if texture is None else str(texture),
             )
+            self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, (diameter, diameter, diameter))
         except Exception:
             self.destroy()
@@ -137,15 +152,18 @@ class Model(Entity):
         rotation: Vec3 | tuple[float, float, float] = (0, 0, 0),
         scale: Vec3 | tuple[float, float, float] = (1, 1, 1),
         color: ColorValue = (1, 1, 1, 1),
+        lit: bool = True,
         name: str = "Model",
         scene: Scene | None = None,
     ) -> None:
         native_color = normalize_color(color)
+        native_lit = _lit(lit)
         super().__init__(name, scene=scene)
         try:
             self.scene._native.add_model_renderer(
                 self._handle, str(path), native_color
             )
+            self.scene._native.set_render_lit(self._handle, native_lit)
             _finish_transform(self, position, rotation, scale)
         except Exception:
             self.destroy()

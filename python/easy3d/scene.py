@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING
 import weakref
 
 from ._easy3d import EntityHandle, _NativeScene
+from .camera import Camera
+from .components import ColorValue, normalize_color
+from .math import Quat, Vec3
 
 if TYPE_CHECKING:
     from .entity import Entity
@@ -70,6 +73,34 @@ class Scene:
         return self._native.entity_count
 
     @property
+    def camera(self) -> Camera:
+        position, rotation, fov, near, far = self._native.camera_info()
+        return Camera(
+            position=position,
+            rotation=Quat(rotation).to_euler(),
+            vertical_fov_degrees=fov,
+            near_plane=near,
+            far_plane=far,
+        )
+
+    @camera.setter
+    def camera(self, value: Camera) -> None:
+        if not isinstance(value, Camera):
+            raise TypeError("camera must be an easy3d.Camera")
+        self._require_mutable()
+        self._native.set_camera(
+            tuple(value.position),
+            tuple(value.quaternion),
+            value.vertical_fov_degrees,
+            value.near_plane,
+            value.far_plane,
+        )
+
+    @property
+    def debug_line_count(self) -> int:
+        return self._native.debug_line_count
+
+    @property
     def entities(self) -> tuple[Entity, ...]:
         from .entity import Entity
 
@@ -94,6 +125,30 @@ class Scene:
 
         self._require_mutable()
         self._native.clear()
+
+    def add_debug_line(
+        self,
+        start: Vec3 | tuple[float, float, float],
+        end: Vec3 | tuple[float, float, float],
+        *,
+        color: ColorValue = (1, 1, 1, 1),
+        depth_test: bool = True,
+    ) -> None:
+        if not isinstance(depth_test, bool):
+            raise TypeError("depth_test must be a bool")
+        start_value = Vec3.from_value(start)
+        end_value = Vec3.from_value(end)
+        self._require_mutable()
+        self._native.add_debug_line(
+            tuple(start_value),
+            tuple(end_value),
+            normalize_color(color),
+            depth_test,
+        )
+
+    def clear_debug_lines(self) -> None:
+        self._require_mutable()
+        self._native.clear_debug_lines()
 
     def close(self) -> None:
         """Destroy all entities and permanently close this scene."""

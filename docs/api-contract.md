@@ -63,6 +63,7 @@ with world:
 renderer = cube.get_component(MeshRenderer)
 assert renderer is not None
 renderer.color = (0.8, 0.9, 1.0)
+renderer.lit = False
 ```
 
 `Cube`, `Plane`, `Sphere`, and `Model` are normal subclassable `Entity` values
@@ -76,11 +77,12 @@ Primitive dimensions are expressed through entity scale: cube `size` accepts a
 positive scalar or XYZ tuple, plane `size` a scalar or width/depth tuple, and
 sphere `radius` a positive scalar. `MeshRenderer.color` is multiplicative RGBA
 with finite components in `[0,1]`; `kind` and `asset` are read-only, and
-`remove()` detaches the component.
+`lit` selects baseline ambient/directional lighting versus unlit vertex/material
+color, and `remove()` detaches the component.
 
 The loaded scene is traversed natively for every rendered frame. No per-entity
-Python draw calls occur. Until Phase 1.8 adds a scene camera/light component, the
-renderer uses a fixed look-at camera and unlit solid/textured materials. Public
+Python draw calls occur. The renderer reads the scene-owned camera, native light
+components, and render components during that traversal. Public
 scene/entity/component mutation raises `RuntimeError` while `Game.run()` is
 active because the Phase 2 safe-boundary scheduler is not implemented yet.
 
@@ -117,6 +119,7 @@ camera = Camera(
     far_plane=500.0,
 )
 camera.look_at((0, 0, 0))
+scene.camera = camera
 view = camera.view_matrix()
 projection = camera.projection_matrix((1280, 720))
 ```
@@ -129,8 +132,46 @@ are column-major. D3D-style projection maps depth to `[0,1]`; the explicit
 
 `Camera.aspect_ratio((width, height))` and `projection_matrix` reject zero or
 non-integer dimensions. The renderer uses current SDL pixel dimensions after
-every resize. This standalone camera is not yet attached to an entity or loaded
-scene; that is intentionally deferred to the render-component milestone.
+every resize. Assigning `scene.camera` copies the current camera value into the
+native scene. Reading `scene.camera` returns a detached typed copy; change it and
+assign it back when updating several fields. Cameras are scene values rather
+than entity components in this baseline.
+
+## Lighting, materials, and debug lines
+
+```python
+from easy3d import Cube, Light, Scene, debug
+
+scene = Scene("lit world")
+with scene:
+    Light("ambient", color=(0.5, 0.6, 1.0), intensity=0.2)
+    sun = Light("directional", intensity=0.9, rotation=(-35, -30, 0))
+    lit_cube = Cube(position=(-1, 0, 0), color=(0.9, 0.2, 0.1))
+    unlit_cube = Cube(position=(1, 0, 0), color=(0.2, 0.9, 0.3), lit=False)
+    debug.axes(size=2.0)
+    debug.line((-2, 0, 0), (2, 0, 0), depth_test=False)
+```
+
+`Light` owns one native `LightComponent`. Ambient light colors are multiplied by
+intensity and accumulated. The first enabled directional light supplies its
+world-space local -Z direction and color/intensity; additional directional
+lights are retained as components but not blended by this baseline. If a scene
+has no explicit light of a kind, the renderer keeps its corresponding usable
+default ambient or directional contribution. Disabled light entities are
+ignored. Light color components are finite in `[0,1]`; intensity is finite and
+non-negative.
+
+Baseline lit materials apply diffuse Lambert lighting to both solid and
+textured RGB while retaining material alpha. Normals use the inverse-transpose
+world transform, so non-uniformly scaled objects remain correct. There are no
+shadows, specular/PBR channels, transparent sorting, or gamma-adjustable light
+units yet. Pass `lit=False` during primitive/model construction or set
+`MeshRenderer.lit` before running the game for unlit color.
+
+`debug.line` and `debug.axes` append persistent native scene lines. Depth-tested
+and overlay lines are batched separately into frame-local transient GPU buffers.
+They persist until `scene.clear_debug_lines()` or `scene.clear()`; debug drawing
+does not create entities and does not cross into Python once per rendered frame.
 
 ## Texture assets
 

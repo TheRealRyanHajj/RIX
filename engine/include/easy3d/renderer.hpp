@@ -42,9 +42,19 @@ struct MeshData final {
 
 struct Material final {
     Color color{};
+    bool lit{true};
     bool depth_test{true};
     bool depth_write{true};
     bool cull_back_faces{true};
+
+    void validate() const;
+};
+
+struct DebugLine final {
+    Vec3 start{};
+    Vec3 end{};
+    Color color{};
+    bool depth_test{true};
 
     void validate() const;
 };

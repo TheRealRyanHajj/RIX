@@ -207,19 +207,27 @@ class Entity:
         self._scene._native.destroy_entity(self._handle)
 
     def has_component(self, component_type: type[_ComponentT]) -> bool:
-        from .components import MeshRenderer
+        from .components import LightComponent, MeshRenderer
 
         if component_type is MeshRenderer:
             return self._scene._native.has_render_component(self._handle)
+        if component_type is LightComponent:
+            return self._scene._native.has_light_component(self._handle)
         raise TypeError("unsupported component type")
 
     def get_component(self, component_type: type[_ComponentT]) -> _ComponentT | None:
-        from .components import MeshRenderer
+        from .components import LightComponent, MeshRenderer
 
         if component_type is MeshRenderer:
             return (
                 cast(_ComponentT, MeshRenderer(self))
                 if self.has_component(MeshRenderer)
+                else None
+            )
+        if component_type is LightComponent:
+            return (
+                cast(_ComponentT, LightComponent(self))
+                if self.has_component(LightComponent)
                 else None
             )
         raise TypeError("unsupported component type")

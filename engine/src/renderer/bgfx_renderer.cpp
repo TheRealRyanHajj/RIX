@@ -7,6 +7,7 @@
 
 #include <bgfx/bgfx.h>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -25,8 +26,8 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace easy3d::renderer {
@@ -314,6 +315,12 @@ struct DrawItem final {
     std::optional<TextureLifetimeManager::Handle> texture;
 };
 
+struct LightingState final {
+    std::array<float, 4> ambient{0.25F, 0.25F, 0.25F, 1.0F};
+    std::array<float, 4> directional_direction{0.45F, -1.0F, 0.25F, 0.0F};
+    std::array<float, 4> directional_color{0.75F, 0.75F, 0.75F, 1.0F};
+};
+
 [[nodiscard]] std::uint16_t view_extent(const std::uint32_t value) noexcept {
     return static_cast<std::uint16_t>(
         std::min(value, static_cast<std::uint32_t>(std::numeric_limits<std::uint16_t>::max())));
@@ -390,8 +397,6 @@ public:
             create_programs();
             if (geometry_diagnostic) {
                 create_geometry_diagnostic();
-            } else if (scene_ != nullptr) {
-                camera_ = Camera::look_at({0.0F, 3.0F, 8.0F}, {0.0F, 0.0F, 0.0F});
             }
 
             const bgfx::Caps* caps = bgfx::getCaps();
@@ -437,6 +442,26 @@ public:
         if (bgfx::isValid(material_color_)) {
             bgfx::destroy(material_color_);
             material_color_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(material_params_)) {
+            bgfx::destroy(material_params_);
+            material_params_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(normal_matrix_)) {
+            bgfx::destroy(normal_matrix_);
+            normal_matrix_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(ambient_light_)) {
+            bgfx::destroy(ambient_light_);
+            ambient_light_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(directional_light_)) {
+            bgfx::destroy(directional_light_);
+            directional_light_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(directional_color_)) {
+            bgfx::destroy(directional_color_);
+            directional_color_ = BGFX_INVALID_HANDLE;
         }
         if (bgfx::isValid(texture_sampler_)) {
             bgfx::destroy(texture_sampler_);
@@ -505,8 +530,18 @@ private:
                                          static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
                                          "textured");
         material_color_ = bgfx::createUniform("u_materialColor", bgfx::UniformType::Vec4);
+        material_params_ = bgfx::createUniform("u_materialParams", bgfx::UniformType::Vec4);
+        normal_matrix_ = bgfx::createUniform("u_normalMatrix", bgfx::UniformType::Vec4, 3);
+        ambient_light_ = bgfx::createUniform("u_ambientLight", bgfx::UniformType::Vec4);
+        directional_light_ =
+            bgfx::createUniform("u_directionalLight", bgfx::UniformType::Vec4);
+        directional_color_ =
+            bgfx::createUniform("u_directionalColor", bgfx::UniformType::Vec4);
         texture_sampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
-        if (!bgfx::isValid(material_color_) || !bgfx::isValid(texture_sampler_)) {
+        if (!bgfx::isValid(material_color_) || !bgfx::isValid(material_params_) ||
+            !bgfx::isValid(normal_matrix_) || !bgfx::isValid(ambient_light_) ||
+            !bgfx::isValid(directional_light_) || !bgfx::isValid(directional_color_) ||
+            !bgfx::isValid(texture_sampler_)) {
             throw EngineError("bgfx failed to create Easy3D material uniforms");
         }
     }
@@ -590,15 +625,70 @@ private:
                           {transform.scale.x, transform.scale.y, transform.scale.z});
     }
 
+    void update_scene_lighting() {
+        lighting_ = {};
+        if (scene_ == nullptr || !scene_->active()) {
+            return;
+        }
+
+        bool has_ambient = false;
+        bool has_directional = false;
+        for (const EntityHandle handle : scene_->entity_handles()) {
+            if (!scene_->entity_enabled(handle) || !scene_->has_light_component(handle)) {
+                continue;
+            }
+            const LightComponent& light = scene_->light_component(handle);
+            if (light.kind == LightKind::Ambient) {
+                if (!has_ambient) {
+                    lighting_.ambient = {0.0F, 0.0F, 0.0F, 1.0F};
+                    has_ambient = true;
+                }
+                lighting_.ambient[0] += light.color.r * light.intensity;
+                lighting_.ambient[1] += light.color.g * light.intensity;
+                lighting_.ambient[2] += light.color.b * light.intensity;
+            } else if (!has_directional) {
+                const Vec3 direction = scene_->world_transform(handle)
+                                           .rotation.rotate({0.0F, 0.0F, -1.0F})
+                                           .normalized();
+                lighting_.directional_direction = {
+                    direction.x, direction.y, direction.z, 0.0F};
+                lighting_.directional_color = {
+                    light.color.r * light.intensity,
+                    light.color.g * light.intensity,
+                    light.color.b * light.intensity,
+                    1.0F,
+                };
+                has_directional = true;
+            }
+        }
+    }
+
+    void apply_draw_uniforms(const Material& material, const glm::mat4& transform) {
+        const std::array<float, 4> color = {
+            material.color.r, material.color.g, material.color.b, material.color.a};
+        const std::array<float, 4> material_params = {
+            material.lit ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F};
+        const glm::mat3 normal = glm::inverseTranspose(glm::mat3(transform));
+        const std::array<float, 12> normal_rows = {
+            normal[0][0], normal[1][0], normal[2][0], 0.0F,
+            normal[0][1], normal[1][1], normal[2][1], 0.0F,
+            normal[0][2], normal[1][2], normal[2][2], 0.0F,
+        };
+        bgfx::setTransform(glm::value_ptr(transform));
+        bgfx::setUniform(material_color_, color.data());
+        bgfx::setUniform(material_params_, material_params.data());
+        bgfx::setUniform(normal_matrix_, normal_rows.data(), 3);
+        bgfx::setUniform(ambient_light_, lighting_.ambient.data());
+        bgfx::setUniform(directional_light_, lighting_.directional_direction.data());
+        bgfx::setUniform(directional_color_, lighting_.directional_color.data());
+    }
+
     void submit_draw(const MeshLifetimeManager::Handle mesh,
                      const Material& material,
                      const glm::mat4& transform,
                      const std::optional<TextureLifetimeManager::Handle> texture) {
-        const std::array<float, 4> color = {
-            material.color.r, material.color.g, material.color.b, material.color.a};
-        bgfx::setTransform(glm::value_ptr(transform));
+        apply_draw_uniforms(material, transform);
         mesh_resources_->bind(mesh);
-        bgfx::setUniform(material_color_, color.data());
         if (texture.has_value()) {
             texture_resources_->bind(*texture, texture_sampler_);
         }
@@ -652,9 +742,62 @@ private:
         }
     }
 
+    void submit_debug_batch(const std::vector<GpuVertex>& vertices,
+                            const bool depth_test) {
+        if (vertices.empty() || vertices.size() > std::numeric_limits<std::uint32_t>::max()) {
+            return;
+        }
+        const auto vertex_count = static_cast<std::uint32_t>(vertices.size());
+        if (bgfx::getAvailTransientVertexBuffer(vertex_count, layout_) < vertex_count) {
+            return;
+        }
+        bgfx::TransientVertexBuffer buffer;
+        bgfx::allocTransientVertexBuffer(&buffer, vertex_count, layout_);
+        std::copy(vertices.begin(), vertices.end(),
+                  reinterpret_cast<GpuVertex*>(buffer.data));
+
+        Material material;
+        material.lit = false;
+        material.depth_test = depth_test;
+        material.depth_write = false;
+        material.cull_back_faces = false;
+        const glm::mat4 identity{1.0F};
+        apply_draw_uniforms(material, identity);
+        bgfx::setVertexBuffer(0, &buffer, 0, vertex_count);
+        bgfx::setState(render_state(material) | BGFX_STATE_PT_LINES);
+        bgfx::submit(main_view, solid_program_);
+    }
+
+    void submit_debug_lines() {
+        if (scene_ == nullptr || !scene_->active() || scene_->debug_lines().empty()) {
+            return;
+        }
+        std::vector<GpuVertex> depth_lines;
+        std::vector<GpuVertex> overlay_lines;
+        depth_lines.reserve(scene_->debug_lines().size() * 2);
+        overlay_lines.reserve(scene_->debug_lines().size() * 2);
+        for (const DebugLine& line : scene_->debug_lines()) {
+            std::vector<GpuVertex>& destination =
+                line.depth_test ? depth_lines : overlay_lines;
+            const std::uint32_t color = line.color.rgba8();
+            destination.push_back({{line.start.x, line.start.y, line.start.z},
+                                   {0.0F, 1.0F, 0.0F},
+                                   {0.0F, 0.0F},
+                                   color});
+            destination.push_back({{line.end.x, line.end.y, line.end.z},
+                                   {0.0F, 1.0F, 0.0F},
+                                   {0.0F, 0.0F},
+                                   color});
+        }
+        submit_debug_batch(depth_lines, true);
+        submit_debug_batch(overlay_lines, false);
+    }
+
     void submit_geometry() {
-        const Matrix4 view = camera_.view_matrix();
-        const Matrix4 projection = camera_.projection_matrix(
+        update_scene_lighting();
+        const Camera& active_camera = scene_ == nullptr ? camera_ : scene_->camera();
+        const Matrix4 view = active_camera.view_matrix();
+        const Matrix4 projection = active_camera.projection_matrix(
             Camera::aspect_ratio(width_, height_), bgfx::getCaps()->homogeneousDepth);
         bgfx::setViewTransform(main_view, view.data(), projection.data());
 
@@ -662,6 +805,7 @@ private:
             submit_draw(item.mesh, item.material, item.transform, item.texture);
         }
         submit_scene();
+        submit_debug_lines();
     }
 
     bool initialized_{false};
@@ -673,11 +817,17 @@ private:
     bgfx::ProgramHandle solid_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_program_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle material_params_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle normal_matrix_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle ambient_light_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle directional_light_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle directional_color_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle texture_sampler_{BGFX_INVALID_HANDLE};
     std::unique_ptr<MeshLifetimeManager> mesh_resources_;
     std::unique_ptr<TextureLifetimeManager> texture_resources_;
     std::vector<DrawItem> draw_items_;
     Camera camera_{};
+    LightingState lighting_{};
     const Scene* scene_{nullptr};
     TextureCache scene_textures_;
 };

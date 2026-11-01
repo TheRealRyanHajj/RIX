@@ -24,8 +24,11 @@ def test_primitive_entities_and_component_lookup() -> None:
     assert renderer.kind == "cube"
     assert renderer.color == pytest.approx((0.2, 0.4, 0.6, 1.0))
     assert renderer.asset is None
+    assert renderer.lit
     renderer.color = (1, 0.5, 0, 0.75)
+    renderer.lit = False
     assert renderer.color == pytest.approx((1, 0.5, 0, 0.75))
+    assert not renderer.lit
 
     cube.remove_component(MeshRenderer)
     assert not cube.has_component(MeshRenderer)
@@ -63,6 +66,8 @@ def test_primitive_validation() -> None:
         Cube(scene=scene, color=(2, 0, 0))
     with pytest.raises(TypeError, match="plane size"):
         Plane(scene=scene, size=(1, 2, 3))  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="lit"):
+        Sphere(scene=scene, lit=1)  # type: ignore[arg-type]
     assert scene.entity_count == 0
 
 

@@ -3,10 +3,11 @@
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. The current implementation includes the validated Phase 0 native
 foundation, generation-safe scene/entity lifetimes, native transform
-hierarchies, a typed camera API, and indexed solid/textured D3D11 materials with
-shared PNG/JPEG and OBJ/MTL loading. Native scene render components now power
-beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities without
-per-frame Python draw submission.
+hierarchies, scene-owned cameras, and indexed solid/textured D3D11 materials
+with shared PNG/JPEG and OBJ/MTL loading. Native scene render components now
+power beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities with
+ambient/directional lighting and debug lines, without per-frame Python draw
+submission.
 
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
@@ -122,15 +123,19 @@ game.run()
 ```
 
 Run `python tests/manual/render_components.py` for the visible Phase 1.7
-primitive/OBJ diagnostic. The current loaded scene uses an engine default camera;
-scene-owned cameras and lighting are subsequent Phase 1 milestones. Public scene
+primitive/OBJ diagnostic or `python tests/manual/lighting_debug.py` for the
+Phase 1.8 lighting, scene-camera, and native debug-line diagnostic. Public scene
 mutation is rejected while `Game.run()` is traversing it; the Phase 2 scheduler
 will introduce safe runtime update boundaries.
 
 `Camera` is available as a typed perspective-camera configuration with
 position/Euler rotation, `look_at`, basis vectors, configurable vertical FOV and
-near/far planes, and view/projection matrix queries. It is intentionally not yet
-an entity component; scene camera ownership arrives with Phase 1.8 lighting.
+near/far planes, and view/projection matrix queries. Assign it with
+`scene.camera = camera`. `Light("ambient", ...)` and
+`Light("directional", ...)` create native light components; render entities are
+lit by default and accept `lit=False` for emissive-style unlit color. Persistent
+native debug lines are available through `easy3d.debug.line` and
+`easy3d.debug.axes`.
 
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
@@ -174,8 +179,8 @@ performance claim.
 
 ## Scope and license
 
-Lighting, culling/instancing, physics, broader asset pipelines, and multiplayer
-systems remain incomplete. The repository is private and
+Advanced lighting, culling/instancing, physics, broader asset pipelines, and
+multiplayer systems remain incomplete. The repository is private and
 proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 
