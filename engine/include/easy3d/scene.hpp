@@ -1,6 +1,7 @@
 #pragma once
 
 #include "easy3d/core.hpp"
+#include "easy3d/assets.hpp"
 #include "easy3d/math.hpp"
 
 #include <array>
@@ -30,6 +31,22 @@ struct EntityHandle final {
 class InvalidEntityError : public EngineError {
 public:
     using EngineError::EngineError;
+};
+
+enum class RenderKind {
+    Cube,
+    Plane,
+    Sphere,
+    Model,
+};
+
+struct RenderComponent final {
+    RenderKind kind{RenderKind::Cube};
+    std::shared_ptr<const MeshData> mesh;
+    std::shared_ptr<const ModelData> model;
+    std::shared_ptr<const ImageData> texture;
+    Material material{};
+    TextureSampler sampler{};
 };
 
 class World final {
@@ -66,6 +83,17 @@ public:
     void set_entity_parent(EntityHandle child,
                            std::optional<EntityHandle> parent,
                            bool keep_world = false);
+    void add_primitive_renderer(EntityHandle handle,
+                                RenderKind kind,
+                                Color color = {},
+                                const std::optional<std::filesystem::path>& texture = std::nullopt);
+    void add_model_renderer(EntityHandle handle,
+                            const std::filesystem::path& path,
+                            Color color = {});
+    [[nodiscard]] bool has_render_component(EntityHandle handle) const;
+    [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
+    void set_render_color(EntityHandle handle, Color color);
+    void remove_render_component(EntityHandle handle);
 
 private:
     struct Slot final {
@@ -83,6 +111,7 @@ private:
             0.0F, 0.0F, 1.0F, 0.0F,
             0.0F, 0.0F, 0.0F, 1.0F};
         mutable bool transform_dirty{true};
+        std::optional<RenderComponent> render_component;
     };
 
     [[nodiscard]] Slot& require_slot(EntityHandle handle);
@@ -100,6 +129,8 @@ private:
     std::size_t entity_count_{0};
     std::vector<Slot> slots_;
     std::vector<std::uint32_t> free_indices_;
+    TextureCache texture_cache_;
+    ModelCache model_cache_;
 };
 
 class Scene final {
@@ -138,6 +169,17 @@ public:
     void set_entity_parent(EntityHandle child,
                            std::optional<EntityHandle> parent,
                            bool keep_world = false);
+    void add_primitive_renderer(EntityHandle handle,
+                                RenderKind kind,
+                                Color color = {},
+                                const std::optional<std::filesystem::path>& texture = std::nullopt);
+    void add_model_renderer(EntityHandle handle,
+                            const std::filesystem::path& path,
+                            Color color = {});
+    [[nodiscard]] bool has_render_component(EntityHandle handle) const;
+    [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
+    void set_render_color(EntityHandle handle, Color color);
+    void remove_render_component(EntityHandle handle);
 
     [[nodiscard]] World& world() noexcept;
     [[nodiscard]] const World& world() const noexcept;

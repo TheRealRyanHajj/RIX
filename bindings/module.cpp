@@ -183,6 +183,28 @@ PYBIND11_MODULE(_easy3d, module) {
                });
     module.def("_camera_aspect_ratio", &easy3d::Camera::aspect_ratio);
 
+    const auto render_kind = [](const std::string& value) {
+        if (value == "cube") {
+            return easy3d::RenderKind::Cube;
+        }
+        if (value == "plane") {
+            return easy3d::RenderKind::Plane;
+        }
+        if (value == "sphere") {
+            return easy3d::RenderKind::Sphere;
+        }
+        throw std::invalid_argument("render kind must be cube, plane, or sphere");
+    };
+    const auto render_kind_name = [](const easy3d::RenderKind value) {
+        switch (value) {
+        case easy3d::RenderKind::Cube: return "cube";
+        case easy3d::RenderKind::Plane: return "plane";
+        case easy3d::RenderKind::Sphere: return "sphere";
+        case easy3d::RenderKind::Model: return "model";
+        }
+        return "unknown";
+    };
+
     py::class_<easy3d::Engine>(module, "Engine")
         .def(py::init([](std::string title,
                          const std::uint32_t width,
@@ -199,6 +221,11 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("fps_limit") = 0.0)
         .def("run", &easy3d::Engine::run, py::call_guard<py::gil_scoped_release>())
         .def("stop", &easy3d::Engine::stop)
+        .def("set_scene",
+             [](easy3d::Engine& engine, easy3d::Scene* scene) {
+                 engine.set_scene(scene);
+             },
+             py::arg("scene") = nullptr)
         .def_property_readonly("is_running", &easy3d::Engine::is_running)
         .def_property_readonly("frame_count", &easy3d::Engine::frame_count)
         .def_property_readonly("last_frame_seconds", &easy3d::Engine::last_frame_seconds);
@@ -319,6 +346,66 @@ PYBIND11_MODULE(_easy3d, module) {
              &easy3d::Scene::set_entity_parent,
              py::arg("child"),
              py::arg("parent") = std::nullopt,
-             py::arg("keep_world") = false);
+             py::arg("keep_world") = false)
+        .def("add_primitive_renderer",
+             [render_kind](easy3d::Scene& scene,
+                           const easy3d::EntityHandle handle,
+                           const std::string& kind,
+                           const std::array<float, 4>& color,
+                           const std::optional<std::string>& texture) {
+                 scene.add_primitive_renderer(
+                     handle,
+                     render_kind(kind),
+                     {color[0], color[1], color[2], color[3]},
+                     texture.has_value()
+                         ? std::optional<std::filesystem::path>(*texture)
+                         : std::nullopt);
+             },
+             py::arg("handle"),
+             py::arg("kind"),
+             py::arg("color"),
+             py::arg("texture") = std::nullopt)
+        .def("add_model_renderer",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::string& path,
+                const std::array<float, 4>& color) {
+                 scene.add_model_renderer(
+                     handle, path, {color[0], color[1], color[2], color[3]});
+             },
+             py::arg("handle"),
+             py::arg("path"),
+             py::arg("color"))
+        .def("has_render_component", &easy3d::Scene::has_render_component)
+        .def("render_component_info",
+             [render_kind_name](const easy3d::Scene& scene,
+                                const easy3d::EntityHandle handle) {
+                 const easy3d::RenderComponent& component =
+                     scene.render_component(handle);
+                 py::object asset = py::none();
+                 if (component.model) {
+                     asset = py::cast(component.model->source_path.string());
+                 } else if (component.texture) {
+                     asset = py::cast(component.texture->source_path.string());
+                 }
+                 return py::make_tuple(
+                     render_kind_name(component.kind),
+                     py::make_tuple(component.material.color.r,
+                                    component.material.color.g,
+                                    component.material.color.b,
+                                    component.material.color.a),
+                     asset);
+             },
+             py::arg("handle"))
+        .def("set_render_color",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 4>& color) {
+                 scene.set_render_color(
+                     handle, {color[0], color[1], color[2], color[3]});
+             },
+             py::arg("handle"),
+             py::arg("color"))
+        .def("remove_render_component", &easy3d::Scene::remove_render_component);
 }
 

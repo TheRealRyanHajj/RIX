@@ -82,9 +82,12 @@ class Game:
 
         if not isinstance(scene, Scene):
             raise TypeError("scene must be an easy3d.Scene")
+        if self.is_running:
+            raise RuntimeError("cannot replace the active scene while Game is running")
         if self._scene is scene:
             return
         scene._attach(self)
+        self._engine.set_scene(scene._native)
         previous = self._scene
         self._scene = scene
         if previous is not None:
@@ -96,7 +99,10 @@ class Game:
         scene = self._scene
         if scene is None:
             return None
+        if self.is_running:
+            raise RuntimeError("cannot unload the active scene while Game is running")
         scene._detach(self)
+        self._engine.set_scene(None)
         self._scene = None
         if clear:
             scene.clear()

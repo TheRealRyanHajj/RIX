@@ -3,10 +3,12 @@
 #include "easy3d/assets.hpp"
 #include "easy3d/core.hpp"
 #include "easy3d/renderer.hpp"
+#include "easy3d/scene.hpp"
 
 #include <bgfx/bgfx.h>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "fs_solid_color.sc.bin.h"
 #include "fs_textured.sc.bin.h"
@@ -24,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 namespace easy3d::renderer {
@@ -141,6 +144,16 @@ public:
         return meshes_.size() - 1;
     }
 
+    [[nodiscard]] Handle upload_cached(const MeshData& mesh) {
+        const auto found = shared_.find(&mesh);
+        if (found != shared_.end()) {
+            return found->second;
+        }
+        const Handle handle = upload(mesh);
+        shared_.emplace(&mesh, handle);
+        return handle;
+    }
+
     void bind(const Handle handle) const {
         if (handle >= meshes_.size()) {
             throw EngineError("invalid GPU mesh handle");
@@ -151,6 +164,7 @@ public:
     void reset() noexcept {
         meshes_.clear();
         triangle_count_ = 0;
+        shared_.clear();
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return meshes_.size(); }
@@ -160,6 +174,7 @@ private:
     bgfx::VertexLayout layout_;
     std::vector<GpuMesh> meshes_;
     std::size_t triangle_count_{0};
+    std::unordered_map<const MeshData*, Handle> shared_;
 };
 
 [[nodiscard]] std::uint64_t texture_flags(const TextureColorSpace color_space,
@@ -254,6 +269,21 @@ public:
         return textures_.size() - 1;
     }
 
+    [[nodiscard]] Handle upload_cached(const ImageData& image,
+                                       const TextureSampler& sampler = {}) {
+        const auto found = shared_.find(&image);
+        if (found != shared_.end()) {
+            for (const auto& [cached_sampler, handle] : found->second) {
+                if (cached_sampler == sampler) {
+                    return handle;
+                }
+            }
+        }
+        const Handle handle = upload(image, sampler);
+        shared_[&image].emplace_back(sampler, handle);
+        return handle;
+    }
+
     void bind(const Handle handle, const bgfx::UniformHandle sampler) const {
         if (handle >= textures_.size()) {
             throw EngineError("invalid GPU texture handle");
@@ -264,6 +294,7 @@ public:
     void reset() noexcept {
         textures_.clear();
         byte_size_ = 0;
+        shared_.clear();
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return textures_.size(); }
@@ -272,6 +303,8 @@ public:
 private:
     std::vector<GpuTexture> textures_;
     std::size_t byte_size_{0};
+    std::unordered_map<const ImageData*,
+                       std::vector<std::pair<TextureSampler, Handle>>> shared_;
 };
 
 struct DrawItem final {
@@ -314,7 +347,8 @@ public:
                     const std::uint32_t width,
                     const std::uint32_t height,
                     const bool vsync,
-                    const bool geometry_diagnostic) {
+                    const bool geometry_diagnostic,
+                    const Scene* const scene) {
         // Keep device and swap-chain work on the SDL/window thread. Calling
         // renderFrame before init selects bgfx's supported single-threaded mode.
         bgfx::renderFrame();
@@ -352,9 +386,12 @@ public:
                 .end();
             mesh_resources_ = std::make_unique<MeshLifetimeManager>(layout_);
             texture_resources_ = std::make_unique<TextureLifetimeManager>();
+            scene_ = scene;
             create_programs();
             if (geometry_diagnostic) {
                 create_geometry_diagnostic();
+            } else if (scene_ != nullptr) {
+                camera_ = Camera::look_at({0.0F, 3.0F, 8.0F}, {0.0F, 0.0F, 0.0F});
             }
 
             const bgfx::Caps* caps = bgfx::getCaps();
@@ -423,7 +460,7 @@ public:
 
     void present() {
         bgfx::touch(main_view);
-        if (!draw_items_.empty()) {
+        if (!draw_items_.empty() || scene_ != nullptr) {
             submit_geometry();
         }
         bgfx::frame();
@@ -539,29 +576,92 @@ private:
         bgfx::setViewRect(main_view, 0, 0, view_extent(width_), view_extent(height_));
     }
 
-    void submit_geometry() const {
+    [[nodiscard]] static glm::mat4 model_matrix(const Transform& transform) {
+        const glm::quat rotation{transform.rotation.w,
+                                 transform.rotation.x,
+                                 transform.rotation.y,
+                                 transform.rotation.z};
+        return glm::translate(glm::mat4(1.0F),
+                              {transform.position.x,
+                               transform.position.y,
+                               transform.position.z}) *
+               glm::mat4_cast(rotation) *
+               glm::scale(glm::mat4(1.0F),
+                          {transform.scale.x, transform.scale.y, transform.scale.z});
+    }
+
+    void submit_draw(const MeshLifetimeManager::Handle mesh,
+                     const Material& material,
+                     const glm::mat4& transform,
+                     const std::optional<TextureLifetimeManager::Handle> texture) {
+        const std::array<float, 4> color = {
+            material.color.r, material.color.g, material.color.b, material.color.a};
+        bgfx::setTransform(glm::value_ptr(transform));
+        mesh_resources_->bind(mesh);
+        bgfx::setUniform(material_color_, color.data());
+        if (texture.has_value()) {
+            texture_resources_->bind(*texture, texture_sampler_);
+        }
+        bgfx::setState(render_state(material));
+        bgfx::submit(main_view, texture.has_value() ? textured_program_ : solid_program_);
+    }
+
+    void submit_scene() {
+        if (scene_ == nullptr || !scene_->active()) {
+            return;
+        }
+        for (const EntityHandle handle : scene_->entity_handles()) {
+            if (!scene_->entity_enabled(handle) || !scene_->entity_visible(handle) ||
+                !scene_->has_render_component(handle)) {
+                continue;
+            }
+            const RenderComponent& component = scene_->render_component(handle);
+            const glm::mat4 transform = model_matrix(scene_->world_transform(handle));
+            if (component.mesh) {
+                const auto mesh = mesh_resources_->upload_cached(*component.mesh);
+                std::optional<TextureLifetimeManager::Handle> texture;
+                if (component.texture) {
+                    texture = texture_resources_->upload_cached(
+                        *component.texture, component.sampler);
+                }
+                submit_draw(mesh, component.material, transform, texture);
+                continue;
+            }
+            if (!component.model) {
+                throw EngineError("render component has no mesh or model resource");
+            }
+            for (const ModelPart& part : component.model->parts) {
+                Material material = component.material;
+                const ModelMaterial& source = component.model->materials[part.material_index];
+                material.color = {
+                    material.color.r * source.diffuse_color.r,
+                    material.color.g * source.diffuse_color.g,
+                    material.color.b * source.diffuse_color.b,
+                    material.color.a * source.diffuse_color.a,
+                };
+                std::optional<TextureLifetimeManager::Handle> texture;
+                if (source.diffuse_texture.has_value()) {
+                    const auto image = scene_textures_.load(*source.diffuse_texture);
+                    texture = texture_resources_->upload_cached(*image);
+                }
+                submit_draw(mesh_resources_->upload_cached(part.mesh),
+                            material,
+                            transform,
+                            texture);
+            }
+        }
+    }
+
+    void submit_geometry() {
         const Matrix4 view = camera_.view_matrix();
         const Matrix4 projection = camera_.projection_matrix(
             Camera::aspect_ratio(width_, height_), bgfx::getCaps()->homogeneousDepth);
         bgfx::setViewTransform(main_view, view.data(), projection.data());
 
         for (const DrawItem& item : draw_items_) {
-            const std::array<float, 4> color = {
-                item.material.color.r,
-                item.material.color.g,
-                item.material.color.b,
-                item.material.color.a,
-            };
-            bgfx::setTransform(glm::value_ptr(item.transform));
-            mesh_resources_->bind(item.mesh);
-            bgfx::setUniform(material_color_, color.data());
-            if (item.texture.has_value()) {
-                texture_resources_->bind(*item.texture, texture_sampler_);
-            }
-            bgfx::setState(render_state(item.material));
-            bgfx::submit(main_view,
-                         item.texture.has_value() ? textured_program_ : solid_program_);
+            submit_draw(item.mesh, item.material, item.transform, item.texture);
         }
+        submit_scene();
     }
 
     bool initialized_{false};
@@ -578,15 +678,18 @@ private:
     std::unique_ptr<TextureLifetimeManager> texture_resources_;
     std::vector<DrawItem> draw_items_;
     Camera camera_{};
+    const Scene* scene_{nullptr};
+    TextureCache scene_textures_;
 };
 
 BgfxRenderer::BgfxRenderer(void* native_window,
                            const std::uint32_t width,
                            const std::uint32_t height,
                            const bool vsync,
-                           const bool geometry_diagnostic)
+                           const bool geometry_diagnostic,
+                           const Scene* const scene)
     : impl_(std::make_unique<Impl>()) {
-    impl_->initialize(native_window, width, height, vsync, geometry_diagnostic);
+    impl_->initialize(native_window, width, height, vsync, geometry_diagnostic, scene);
 }
 
 BgfxRenderer::~BgfxRenderer() {

@@ -3,6 +3,7 @@
 namespace easy3d::platform {
 
 void run_window_loop(const EngineConfig&,
+                     const Scene*,
                      const std::atomic_bool&,
                      std::atomic_uint64_t&,
                      std::atomic<double>&) {

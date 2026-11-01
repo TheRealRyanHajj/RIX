@@ -4,9 +4,9 @@ Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. The current implementation includes the validated Phase 0 native
 foundation, generation-safe scene/entity lifetimes, native transform
 hierarchies, a typed camera API, and indexed solid/textured D3D11 materials with
-shared PNG/JPEG loading.
-Scene render components remain a later Phase 1 milestone, so the ordinary
-`Game` window stays blank until a renderable scene is attached.
+shared PNG/JPEG and OBJ/MTL loading. Native scene render components now power
+beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities without
+per-frame Python draw submission.
 
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
@@ -106,11 +106,31 @@ Run `python examples/01_entity_lifecycle/main.py` for creation, destruction,
 stale-handle rejection, unload, and cleanup. See
 [docs/api-contract.md](docs/api-contract.md) for the implemented contract.
 
+Renderable entities use the same explicit scene ownership:
+
+```python
+from easy3d import Cube, Game, Plane, Scene
+
+world = Scene("world")
+with world:
+    Plane(size=(20, 20), color=(0.25, 0.3, 0.35))
+    Cube(position=(0, 0.5, 0), color=(0.2, 0.75, 0.95))
+
+game = Game("My World")
+game.load_scene(world)
+game.run()
+```
+
+Run `python tests/manual/render_components.py` for the visible Phase 1.7
+primitive/OBJ diagnostic. The current loaded scene uses an engine default camera;
+scene-owned cameras and lighting are subsequent Phase 1 milestones. Public scene
+mutation is rejected while `Game.run()` is traversing it; the Phase 2 scheduler
+will introduce safe runtime update boundaries.
+
 `Camera` is available as a typed perspective-camera configuration with
 position/Euler rotation, `look_at`, basis vectors, configurable vertical FOV and
 near/far planes, and view/projection matrix queries. It is intentionally not yet
-an entity component; scene attachment arrives with the later render-component
-API.
+an entity component; scene camera ownership arrives with Phase 1.8 lighting.
 
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:
@@ -154,8 +174,8 @@ performance claim.
 
 ## Scope and license
 
-Renderable scene components, model import, physics, broader asset pipelines,
-and multiplayer systems remain incomplete. The repository is private and
+Lighting, culling/instancing, physics, broader asset pipelines, and multiplayer
+systems remain incomplete. The repository is private and
 proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 

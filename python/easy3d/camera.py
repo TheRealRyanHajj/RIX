@@ -24,7 +24,7 @@ class Camera:
     """Perspective camera value using right-handed, -Z-forward coordinates.
 
     This Phase 1 camera owns configuration and matrix math. Attaching cameras to
-    scene entities is part of the later render-component milestone.
+    scene entities is part of the later lighting/camera milestone.
     """
 
     __slots__ = (

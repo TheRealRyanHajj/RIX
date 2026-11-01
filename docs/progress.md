@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.6 PASSED; Phase 1.7 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.7 PASSED; Phase 1.8 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -999,3 +999,108 @@ Total Test time (real) =   0.41 sec
 Phase 1.6: **DONE**. Immediate next task: Phase 1.7 — render components and
 beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities that reference
 the shared mesh/model/texture assets without per-frame Python submission.
+
+## 2026-11-01 — Phase 1.7 render-component continuation
+
+### Bounded approach
+
+The prior session left the Phase 1.7 implementation uncommitted after its live
+visual-inspection step was interrupted. Before accepting the milestone, this
+continuation will audit the native/Python ownership boundary and GPU cache keys,
+rerun MSVC Debug and Release plus graphics-disabled native suites, rebuild the
+Python 3.11 editable install, run pytest and syntax checks, and repeat the
+visible D3D11 scene inspection on the Windows desktop. It will then update the
+public API/architecture documentation, checklist, known limitations, and commit
+only if all evidence is green. Primary risks are a dangling native scene
+pointer, cross-thread mutation while `Game.run()` has released the GIL, and
+incorrect GPU resource sharing across sampler variants.
+
+### Implemented
+
+- Native singleton `RenderComponent` storage in generation-checked world slots,
+  including deterministic teardown on remove, destroy, clear, and slot reuse.
+- Process-shared immutable cube/plane/sphere meshes and per-world canonical
+  texture/model caches; model parts retain parsed OBJ/MTL resources.
+- Native renderer traversal of the loaded active scene, visibility/enabled
+  filtering, world-transform submission, primitive and model-part drawing, MTL
+  diffuse color/texture application, and GPU mesh/texture sharing.
+- GPU texture cache identity includes image plus sampler settings; an audit
+  corrected the initial image-only key before acceptance.
+- Typed Python `Cube`, `Plane`, `Sphere`, `Model`, and live `MeshRenderer` APIs,
+  generic component lookup/removal, transactional constructor rollback, and
+  `Game` scene-to-native-renderer wiring.
+- Public scene/entity/component mutation is rejected while `Game.run()` is
+  traversing the native registry. Runtime updates remain a Phase 2 scheduler
+  responsibility rather than an unsafe cross-thread mutation path.
+
+### Exact verification evidence
+
+Final MSVC Debug suite:
+
+```text
+cmake --build --preset windows-debug -j 8
+ctest --preset windows-debug --output-on-failure
+1/8 easy3d.core                Passed
+2/8 easy3d.scene               Passed
+3/8 easy3d.math_transform      Passed
+4/8 easy3d.mesh                Passed
+5/8 easy3d.camera              Passed
+6/8 easy3d.model               Passed
+7/8 easy3d.render_components   Passed
+8/8 easy3d.texture             Passed
+100% tests passed, 0 tests failed out of 8
+Total Test time (real) = 0.91 sec
+```
+
+Final MSVC Release and graphics-disabled suites:
+
+```text
+cmake --build --preset windows-release -j 8
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 8
+Total Test time (real) = 0.52 sec
+
+cmake --build build\windows-headless -j 8
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 7
+Total Test time (real) = 0.48 sec
+```
+
+Python 3.11 editable packaging and tests:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4443597
+sha256=87f2223f40a41177705cf5878b0c80cd061d270fb914b81b1583fd0a9cf42c98
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+............................................                             [100%]
+44 passed in 0.52s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+0.1.0
+```
+
+Visible Windows D3D11 diagnostic:
+
+```text
+build\venv311\Scripts\python.exe tests\manual\render_components.py --seconds 30
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+render_components: PASS frames=48504
+# exit code 0; stderr empty
+```
+
+Computer-use capture on the GUI-capable Windows 11 desktop visibly confirmed a
+gray plane, two independently transformed/colorized shared cube instances, a
+yellow sphere, and a green generated OBJ pyramid in the same depth-tested scene.
+The native Close control ended the process cleanly. This is hardware evidence on
+the NVIDIA GeForce RTX 3070 Ti and does not claim another adapter or backend.
+
+Phase 1.7: **DONE**. Immediate next task: Phase 1.8 — directional and ambient
+lighting, a scene camera/light component boundary, basic lit materials, and a
+debug-rendering baseline.

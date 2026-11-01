@@ -50,6 +50,7 @@ class Scene:
     def name(self, value: str) -> None:
         if not isinstance(value, str):
             raise TypeError("scene name must be a string")
+        self._require_mutable()
         self._native.name = value
 
     @property
@@ -91,7 +92,7 @@ class Scene:
     def clear(self) -> None:
         """Destroy all entities while keeping the scene reusable."""
 
-        self._require_open()
+        self._require_mutable()
         self._native.clear()
 
     def close(self) -> None:
@@ -106,7 +107,7 @@ class Scene:
         self._closed = True
 
     def _create_handle(self, name: str) -> EntityHandle:
-        self._require_open()
+        self._require_mutable()
         if not isinstance(name, str):
             raise TypeError("entity name must be a string")
         return self._native.create_entity(name)
@@ -132,6 +133,15 @@ class Scene:
     def _require_open(self) -> None:
         if self._closed:
             raise RuntimeError("scene is closed")
+
+    def _require_mutable(self) -> None:
+        self._require_open()
+        owner = self._live_owner()
+        if owner is not None and bool(getattr(owner, "is_running", False)):
+            raise RuntimeError(
+                "cannot mutate a scene while its Game is running; "
+                "runtime scheduling arrives in Phase 2"
+            )
 
     def __enter__(self) -> Scene:
         self._require_open()

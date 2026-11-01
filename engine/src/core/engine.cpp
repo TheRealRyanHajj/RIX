@@ -47,11 +47,19 @@ void Engine::run() {
     stop_requested_.store(false);
     frame_count_.store(0);
     last_frame_seconds_.store(0.0);
-    platform::run_window_loop(config_, stop_requested_, frame_count_, last_frame_seconds_);
+    platform::run_window_loop(
+        config_, scene_, stop_requested_, frame_count_, last_frame_seconds_);
 }
 
 void Engine::stop() noexcept {
     stop_requested_.store(true);
+}
+
+void Engine::set_scene(Scene* const scene) {
+    if (is_running()) {
+        throw EngineError("cannot replace the active scene while the Engine is running");
+    }
+    scene_ = scene;
 }
 
 bool Engine::is_running() const noexcept {

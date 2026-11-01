@@ -299,3 +299,39 @@ default. Retain non-fatal parser warnings on `ModelData`.
 - Smooth shading requires source normals; absent normals are visibly flat.
 - Advanced MTL fields, relative-to-nested-MTL texture roots, glTF, animation,
   and PBR are explicitly outside this milestone.
+
+## ADR-0011: Native scene traversal with guarded Phase 1 mutation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Phase 1.7 must render Python-created entities without a per-entity Python call on
+every frame. `Engine.run()` releases the GIL while the native window loop is
+active, so uncontrolled mutation from another Python thread would race native
+renderer traversal before the Phase 2 gameplay scheduler exists.
+
+### Decision
+
+Store a singleton optional `RenderComponent` in each native world slot. Built-in
+primitive components share process-lifetime immutable meshes; model and image
+components retain shared cache allocations. A loaded `Game` keeps the Python
+`Scene` alive and gives `Engine` a non-owning native pointer. The renderer walks
+the active scene, reads native world transforms, and caches GPU meshes by
+immutable resource identity and textures by image identity plus sampler.
+
+Reject public Python scene/entity/component mutation while the owning game is
+running. Scene changes remain legal before and after a run. This is an explicit
+temporary boundary, not a claim that gameplay must be static forever; Phase 2
+will introduce ordered mutation/update phases.
+
+### Consequences
+
+- Rendering does not cross the Python/native boundary per entity or per frame.
+- CPU and GPU geometry are shared across primitive/model instances and released
+  under existing renderer/world ownership rules.
+- The non-owning native pointer is safe under `Game` because its `_scene`
+  reference is strong and replacement/unload are rejected during a run.
+- Runtime animation and gameplay mutation are deferred until the scheduler can
+  serialize them against native traversal.

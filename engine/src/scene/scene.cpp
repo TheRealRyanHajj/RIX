@@ -20,6 +20,23 @@ namespace {
 std::atomic_uint64_t next_world_id{1};
 constexpr float minimum_scale = 1.0e-6F;
 
+[[nodiscard]] const std::shared_ptr<const MeshData>& primitive_mesh(const RenderKind kind) {
+    static const auto cube = std::make_shared<const MeshData>(make_cube_mesh());
+    static const auto plane = std::make_shared<const MeshData>(make_plane_mesh());
+    static const auto sphere = std::make_shared<const MeshData>(make_uv_sphere_mesh());
+    switch (kind) {
+    case RenderKind::Cube:
+        return cube;
+    case RenderKind::Plane:
+        return plane;
+    case RenderKind::Sphere:
+        return sphere;
+    case RenderKind::Model:
+        throw std::invalid_argument("Model renderers require an OBJ asset path");
+    }
+    throw std::invalid_argument("unknown primitive render kind");
+}
+
 [[nodiscard]] glm::vec3 to_glm(const Vec3 value) noexcept {
     return {value.x, value.y, value.z};
 }
@@ -123,6 +140,7 @@ EntityHandle World::create_entity(std::string name) {
     slot.parent_index.reset();
     slot.child_indices.clear();
     slot.transform_dirty = true;
+    slot.render_component.reset();
     ++entity_count_;
     return handle_for(index);
 }
@@ -143,6 +161,7 @@ void World::destroy_entity(const EntityHandle handle) {
     slot.enabled = false;
     slot.visible = false;
     slot.name.clear();
+    slot.render_component.reset();
     advance_generation(slot);
     free_indices_.push_back(handle.index);
     --entity_count_;
@@ -164,6 +183,7 @@ void World::clear() noexcept {
         slot.parent_index.reset();
         slot.child_indices.clear();
         slot.transform_dirty = true;
+        slot.render_component.reset();
         free_indices_.push_back(static_cast<std::uint32_t>(index));
     }
     entity_count_ = 0;
@@ -298,6 +318,75 @@ void World::set_entity_parent(const EntityHandle child_handle,
     }
     child.local_transform = replacement_local;
     mark_transform_dirty(child_handle.index);
+}
+
+void World::add_primitive_renderer(
+    const EntityHandle handle,
+    const RenderKind kind,
+    const Color color,
+    const std::optional<std::filesystem::path>& texture) {
+    Slot& slot = require_slot(handle);
+    if (slot.render_component.has_value()) {
+        throw EngineError("entity already has its singleton render component");
+    }
+    Material material{color};
+    material.validate();
+    RenderComponent component;
+    component.kind = kind;
+    component.mesh = primitive_mesh(kind);
+    component.material = material;
+    if (texture.has_value()) {
+        component.texture = texture_cache_.load(*texture);
+    }
+    slot.render_component = std::move(component);
+}
+
+void World::add_model_renderer(const EntityHandle handle,
+                               const std::filesystem::path& path,
+                               const Color color) {
+    Slot& slot = require_slot(handle);
+    if (slot.render_component.has_value()) {
+        throw EngineError("entity already has its singleton render component");
+    }
+    Material material{color};
+    material.validate();
+    RenderComponent component;
+    component.kind = RenderKind::Model;
+    component.model = model_cache_.load(path);
+    component.material = material;
+    slot.render_component = std::move(component);
+}
+
+bool World::has_render_component(const EntityHandle handle) const {
+    return require_slot(handle).render_component.has_value();
+}
+
+const RenderComponent& World::render_component(const EntityHandle handle) const {
+    const Slot& slot = require_slot(handle);
+    if (!slot.render_component.has_value()) {
+        throw EngineError("entity does not have a render component");
+    }
+    return *slot.render_component;
+}
+
+void World::set_render_color(const EntityHandle handle, const Color color) {
+    Slot& slot = require_slot(handle);
+    if (!slot.render_component.has_value()) {
+        throw EngineError("entity does not have a render component");
+    }
+    RenderComponent& component = *slot.render_component;
+    Material material = component.material;
+    material.color = color;
+    material.validate();
+    component.material = material;
+}
+
+void World::remove_render_component(const EntityHandle handle) {
+    Slot& slot = require_slot(handle);
+    if (!slot.render_component.has_value()) {
+        throw EngineError("entity does not have a render component");
+    }
+    slot.render_component.reset();
 }
 
 World::Slot& World::require_slot(const EntityHandle handle) {
@@ -480,6 +569,36 @@ void Scene::set_entity_parent(const EntityHandle child,
                               const std::optional<EntityHandle> parent,
                               const bool keep_world) {
     world_.set_entity_parent(child, parent, keep_world);
+}
+
+void Scene::add_primitive_renderer(
+    const EntityHandle handle,
+    const RenderKind kind,
+    const Color color,
+    const std::optional<std::filesystem::path>& texture) {
+    world_.add_primitive_renderer(handle, kind, color, texture);
+}
+
+void Scene::add_model_renderer(const EntityHandle handle,
+                               const std::filesystem::path& path,
+                               const Color color) {
+    world_.add_model_renderer(handle, path, color);
+}
+
+bool Scene::has_render_component(const EntityHandle handle) const {
+    return world_.has_render_component(handle);
+}
+
+const RenderComponent& Scene::render_component(const EntityHandle handle) const {
+    return world_.render_component(handle);
+}
+
+void Scene::set_render_color(const EntityHandle handle, const Color color) {
+    world_.set_render_color(handle, color);
+}
+
+void Scene::remove_render_component(const EntityHandle handle) {
+    world_.remove_render_component(handle);
 }
 
 World& Scene::world() noexcept {

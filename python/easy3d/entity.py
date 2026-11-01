@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from ._easy3d import EntityHandle
 from .math import Quat, Vec3
 
 if TYPE_CHECKING:
     from .scene import Scene
+
+_ComponentT = TypeVar("_ComponentT")
 
 
 class Entity:
@@ -57,6 +59,7 @@ class Entity:
     def name(self, value: str) -> None:
         if not isinstance(value, str):
             raise TypeError("entity name must be a string")
+        self._scene._require_mutable()
         self._scene._native.set_entity_name(self._handle, value)
 
     @property
@@ -67,6 +70,7 @@ class Entity:
     def enabled(self, value: bool) -> None:
         if not isinstance(value, bool):
             raise TypeError("enabled must be a bool")
+        self._scene._require_mutable()
         self._scene._native.set_entity_enabled(self._handle, value)
 
     @property
@@ -77,6 +81,7 @@ class Entity:
     def visible(self, value: bool) -> None:
         if not isinstance(value, bool):
             raise TypeError("visible must be a bool")
+        self._scene._require_mutable()
         self._scene._native.set_entity_visible(self._handle, value)
 
     @property
@@ -85,15 +90,18 @@ class Entity:
 
         return Vec3._live(
             lambda: tuple(self._scene._native.entity_local_position(self._handle)),
-            lambda value: self._scene._native.set_entity_local_position(
-                self._handle, *value
-            ),
+            self._set_position,
         )
 
     @position.setter
     def position(self, value: Vec3 | tuple[float, float, float]) -> None:
         vector = Vec3.from_value(value)
+        self._scene._require_mutable()
         self._scene._native.set_entity_local_position(self._handle, *vector)
+
+    def _set_position(self, value: tuple[float, float, float]) -> None:
+        self._scene._require_mutable()
+        self._scene._native.set_entity_local_position(self._handle, *value)
 
     @property
     def rotation(self) -> Vec3:
@@ -103,6 +111,7 @@ class Entity:
             return tuple(Quat(self._scene._native.entity_local_rotation(self._handle)).to_euler())
 
         def set_euler(value: tuple[float, float, float]) -> None:
+            self._scene._require_mutable()
             self._scene._native.set_entity_local_rotation(
                 self._handle, *Quat.from_euler(value)
             )
@@ -121,6 +130,7 @@ class Entity:
     def quaternion(self, value: Quat) -> None:
         if not isinstance(value, Quat):
             raise TypeError("quaternion must be an easy3d.Quat")
+        self._scene._require_mutable()
         self._scene._native.set_entity_local_rotation(self._handle, *value)
 
     @property
@@ -129,13 +139,18 @@ class Entity:
 
         return Vec3._live(
             lambda: tuple(self._scene._native.entity_local_scale(self._handle)),
-            lambda value: self._scene._native.set_entity_local_scale(self._handle, *value),
+            self._set_scale,
         )
 
     @scale.setter
     def scale(self, value: Vec3 | tuple[float, float, float]) -> None:
         vector = Vec3.from_value(value)
+        self._scene._require_mutable()
         self._scene._native.set_entity_local_scale(self._handle, *vector)
+
+    def _set_scale(self, value: tuple[float, float, float]) -> None:
+        self._scene._require_mutable()
+        self._scene._native.set_entity_local_scale(self._handle, *value)
 
     def _world_components(self) -> tuple[tuple[float, float, float], tuple[float, float, float, float], tuple[float, float, float]]:
         position, rotation, scale = self._scene._native.entity_world_transform(self._handle)
@@ -178,6 +193,7 @@ class Entity:
             raise TypeError("parent must be an easy3d.Entity or None")
         if parent is not None and parent.scene is not self._scene:
             raise ValueError("parent belongs to a different scene")
+        self._scene._require_mutable()
         self._scene._native.set_entity_parent(
             self._handle,
             None if parent is None else parent._handle,
@@ -187,7 +203,32 @@ class Entity:
     def destroy(self) -> None:
         """Destroy this entity and invalidate all wrappers to its handle."""
 
+        self._scene._require_mutable()
         self._scene._native.destroy_entity(self._handle)
+
+    def has_component(self, component_type: type[_ComponentT]) -> bool:
+        from .components import MeshRenderer
+
+        if component_type is MeshRenderer:
+            return self._scene._native.has_render_component(self._handle)
+        raise TypeError("unsupported component type")
+
+    def get_component(self, component_type: type[_ComponentT]) -> _ComponentT | None:
+        from .components import MeshRenderer
+
+        if component_type is MeshRenderer:
+            return (
+                cast(_ComponentT, MeshRenderer(self))
+                if self.has_component(MeshRenderer)
+                else None
+            )
+        raise TypeError("unsupported component type")
+
+    def remove_component(self, component_type: type[_ComponentT]) -> None:
+        component = self.get_component(component_type)
+        if component is None:
+            raise ValueError("entity does not have the requested component")
+        cast(Any, component).remove()
 
     def __repr__(self) -> str:
         if not self.is_alive:

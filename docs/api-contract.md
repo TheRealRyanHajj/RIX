@@ -43,11 +43,46 @@ except InvalidEntityError:
 ```
 
 Implemented entity properties include `id`, `name`, `enabled`, `visible`,
-`scene`, `is_alive`, local/world transforms, `parent`, and `children`. Component
-attachment, scene-to-renderer submission, physics, and network identity are
-later checklist items and are not available yet. The native renderer does have
-validated mesh/material data and indexed D3D11 submission, but Phase 1.3 does
-not expose premature Python primitive APIs.
+`scene`, `is_alive`, local/world transforms, `parent`, and `children`.
+`MeshRenderer` is the first singleton native component and is available through
+typed `has_component`, `get_component`, and `remove_component`. Physics and
+network identity remain later checklist items.
+
+## Renderable entities and components
+
+```python
+from easy3d import Cube, MeshRenderer, Model, Plane, Scene, Sphere
+
+world = Scene("world")
+with world:
+    floor = Plane(size=(20, 20), color=(0.3, 0.35, 0.4))
+    cube = Cube(position=(0, 0.5, 0), texture="assets/crate.png")
+    ball = Sphere(position=(2, 0.5, 0), radius=0.5)
+    prop = Model("assets/prop.obj", position=(-2, 0, 0))
+
+renderer = cube.get_component(MeshRenderer)
+assert renderer is not None
+renderer.color = (0.8, 0.9, 1.0)
+```
+
+`Cube`, `Plane`, `Sphere`, and `Model` are normal subclassable `Entity` values
+that transactionally attach one native `MeshRenderer`. Construction failures
+destroy the partially created entity. Primitive mesh allocations and parsed OBJ
+assets are shared across instances; the private renderer also shares GPU buffers
+by immutable resource identity. A primitive texture is decoded/cached at
+construction. OBJ parts apply their MTL diffuse color and optional diffuse map.
+
+Primitive dimensions are expressed through entity scale: cube `size` accepts a
+positive scalar or XYZ tuple, plane `size` a scalar or width/depth tuple, and
+sphere `radius` a positive scalar. `MeshRenderer.color` is multiplicative RGBA
+with finite components in `[0,1]`; `kind` and `asset` are read-only, and
+`remove()` detaches the component.
+
+The loaded scene is traversed natively for every rendered frame. No per-entity
+Python draw calls occur. Until Phase 1.8 adds a scene camera/light component, the
+renderer uses a fixed look-at camera and unlit solid/textured materials. Public
+scene/entity/component mutation raises `RuntimeError` while `Game.run()` is
+active because the Phase 2 safe-boundary scheduler is not implemented yet.
 
 ## Math and transform conventions
 
@@ -119,8 +154,8 @@ Color textures default to `srgb`; data textures can request `linear`. Public
 mesh UV `(0, 0)` refers to the first/top-left decoded texel, `u` increases right,
 and `v` increases down. Native `TextureSampler` supports linear/nearest min,
 mag, and mip choices plus repeat/clamp U/V modes. The current D3D11 diagnostic
-visibly validates nearest sampling and repeat defaults; scene material exposure
-arrives with render components.
+visibly validates nearest sampling and repeat defaults. GPU cache identity
+includes both the immutable decoded image and sampler settings.
 
 A missing/non-file path raises `MissingAssetError`, an `AssetError` subclass.
 Malformed files and unsupported extensions raise `AssetError` with the path and
@@ -151,8 +186,8 @@ unchanged. Shapes are split again by material so every `ModelPartInfo` has one
 material index.
 
 `ModelCache` is thread-safe, holds immutable native model/mesh data, and uses a
-canonical path key. Instances created in the next render-component milestone
-will reference that shared data rather than parse or copy the model again.
+canonical path key. `Model` entities reference that shared data rather than
+parsing or copying the model again.
 Clearing the cache does not invalidate outstanding native shared references.
 OBJ loading and caching work in graphics-disabled/headless builds.
 

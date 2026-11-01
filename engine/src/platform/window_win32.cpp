@@ -40,6 +40,7 @@ struct WindowDeleter {
 } // namespace
 
 void run_window_loop(const EngineConfig& config,
+                     const Scene* const scene,
                      const std::atomic_bool& stop_requested,
                      std::atomic_uint64_t& frame_count,
                      std::atomic<double>& last_frame_seconds) {
@@ -81,7 +82,8 @@ void run_window_loop(const EngineConfig& config,
                                     static_cast<std::uint32_t>(std::max(pixel_width, 1)),
                                     static_cast<std::uint32_t>(std::max(pixel_height, 1)),
                                     config.vsync,
-                                    config.geometry_diagnostic);
+                                    config.geometry_diagnostic,
+                                    scene);
 
     using Clock = std::chrono::steady_clock;
     const auto minimum_frame = config.fps_limit > 0.0

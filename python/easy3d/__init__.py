@@ -19,27 +19,34 @@ from .assets import (
     load_obj,
 )
 from .camera import Camera
+from .components import MeshRenderer
 from .entity import Entity
 from ._version import __version__
 from .game import Game
 from .math import Quat, Vec2, Vec3
+from .primitives import Cube, Model, Plane, Sphere
 from .scene import Scene
 
 __all__ = [
     "EngineError",
     "AssetError",
     "Camera",
+    "Cube",
     "Entity",
     "Game",
     "InvalidEntityError",
     "ImageInfo",
     "MissingAssetError",
+    "MeshRenderer",
+    "Model",
     "ModelCache",
     "ModelInfo",
     "ModelMaterialInfo",
     "ModelPartInfo",
     "Quat",
+    "Plane",
     "Scene",
+    "Sphere",
     "Vec2",
     "Vec3",
     "TextureCache",

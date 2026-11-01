@@ -283,7 +283,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **1.4** Build camera/view/projection, configurable near/far planes, aspect ratio and resize handling.
 - [x] **1.5** Build shared texture loading/caching (PNG/JPEG, UVs, sampler settings, sRGB); missing asset errors.
 - [x] **1.6** Build `.obj` loader with normals/UV/material support where practical and explicit documented limitations; share mesh resources across instances.
-- [ ] **1.7** Implement primitive entities (`Cube`, `Plane`, `Sphere`, `Model`), `Entity` property API and component lookup.
+- [x] **1.7** Implement primitive entities (`Cube`, `Plane`, `Sphere`, `Model`), `Entity` property API and component lookup.
 - [ ] **1.8** Implement directional/ambient lighting baseline, basic materials and debug rendering.
 - [ ] **1.9** Add frustum culling, simple instancing or batching, renderer counters, and benchmark scenes.
 - [ ] **1.10** Run `examples/02_first_world`, test 10k static cubes with shared resources, record FPS distributions and memory with actual device specs.

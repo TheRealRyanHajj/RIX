@@ -3,6 +3,10 @@
 #include <cstdint>
 #include <memory>
 
+namespace easy3d {
+class Scene;
+}
+
 namespace easy3d::renderer {
 
 class BgfxRenderer final {
@@ -11,7 +15,8 @@ public:
                  std::uint32_t width,
                  std::uint32_t height,
                  bool vsync,
-                 bool geometry_diagnostic);
+                 bool geometry_diagnostic,
+                 const Scene* scene);
     ~BgfxRenderer();
 
     BgfxRenderer(const BgfxRenderer&) = delete;

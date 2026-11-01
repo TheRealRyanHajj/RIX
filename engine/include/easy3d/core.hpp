@@ -7,6 +7,8 @@
 
 namespace easy3d {
 
+class Scene;
+
 [[nodiscard]] const char* engine_version() noexcept;
 [[nodiscard]] int native_add(int left, int right) noexcept;
 
@@ -21,8 +23,7 @@ struct EngineConfig {
     std::uint32_t height{720};
     bool vsync{true};
     double fps_limit{0.0};
-    // Native validation scene used by renderer diagnostics. Ordinary Game
-    // instances leave this disabled and retain the blank-window behavior.
+    // Native validation scene used only by the opt-in geometry diagnostic.
     bool geometry_diagnostic{false};
 };
 
@@ -38,6 +39,7 @@ public:
 
     void run();
     void stop() noexcept;
+    void set_scene(Scene* scene);
 
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] std::uint64_t frame_count() const noexcept;
@@ -50,6 +52,7 @@ private:
     std::atomic_bool stop_requested_{false};
     std::atomic_uint64_t frame_count_{0};
     std::atomic<double> last_frame_seconds_{0.0};
+    Scene* scene_{nullptr};
 };
 
 } // namespace easy3d

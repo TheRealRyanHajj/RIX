@@ -5,14 +5,16 @@ machine.
 
 ## Phase 1 is incomplete
 
-Phase 1.1 scene/entity lifetime semantics, Phase 1.2 math/transform hierarchy,
-Phase 1.3 native mesh/material/indexed rendering, Phase 1.4 standalone
-camera/projection, Phase 1.5 cached PNG/JPEG textures, and Phase 1.6 cached
-OBJ/MTL model loading are implemented. Component attachment, camera-to-scene
-ownership, lighting, culling, and instancing remain unimplemented checklist
-work. The loaded Python scene
-therefore owns entity and transform state but is not yet submitted to the
-renderer; Phase 1.3 rendering is exercised by a native diagnostic scene only.
+Phase 1.1–1.7 are implemented, including native scene traversal and public
+primitive/model render entities. Scene camera ownership, directional/ambient
+lighting, debug rendering, culling, batching/instancing, renderer counters, and
+the first-world/stress acceptance scene remain unimplemented checklist work.
+The current scene renderer uses a fixed look-at camera and unlit material color.
+
+Public scene mutation is intentionally rejected while `Game.run()` is active.
+Phase 2 must add a documented scheduler and safe mutation boundaries before
+runtime Python gameplay updates are allowed; bypassing the public API through
+the private extension is outside the supported contract.
 
 ## Visual Studio 2022 minimum is not independently exercised here
 
