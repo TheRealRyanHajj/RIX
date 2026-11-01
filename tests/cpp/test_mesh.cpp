@@ -47,6 +47,10 @@ int main() {
     if (plane.vertices.size() != 4 || plane.triangle_count() != 2 ||
         !easy3d::almost_equal(plane_bounds.minimum, {-2.0F, 0.0F, -3.0F}) ||
         !easy3d::almost_equal(plane_bounds.maximum, {2.0F, 0.0F, 3.0F}) ||
+        plane.vertices[0].uv != easy3d::Vec2{0.0F, 0.0F} ||
+        plane.vertices[1].uv != easy3d::Vec2{1.0F, 0.0F} ||
+        plane.vertices[2].uv != easy3d::Vec2{1.0F, 1.0F} ||
+        plane.vertices[3].uv != easy3d::Vec2{0.0F, 1.0F} ||
         !winding_matches_normals(plane)) {
         return fail(3, "plane primitive is invalid");
     }

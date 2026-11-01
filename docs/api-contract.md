@@ -96,3 +96,38 @@ are column-major. D3D-style projection maps depth to `[0,1]`; the explicit
 non-integer dimensions. The renderer uses current SDL pixel dimensions after
 every resize. This standalone camera is not yet attached to an entity or loaded
 scene; that is intentionally deferred to the render-component milestone.
+
+## Texture assets
+
+```python
+from easy3d.assets import TextureCache, load_image
+
+info = load_image("assets/albedo.jpg", color_space="srgb")
+cache = TextureCache()
+shared = cache.load("assets/albedo.jpg")
+assert len(cache) == 1
+```
+
+`load_image` accepts `.png`, `.jpg`, and `.jpeg`, decodes to four-channel
+RGBA8 storage, and returns immutable metadata. `TextureCache` owns shared native
+image resources and uses a deterministic canonical-path plus color-space key;
+`clear()` drops cache ownership without invalidating already referenced native
+resources. Cache access is thread-safe. It is intentionally synchronous until
+the later asynchronous asset milestone.
+
+Color textures default to `srgb`; data textures can request `linear`. Public
+mesh UV `(0, 0)` refers to the first/top-left decoded texel, `u` increases right,
+and `v` increases down. Native `TextureSampler` supports linear/nearest min,
+mag, and mip choices plus repeat/clamp U/V modes. The current D3D11 diagnostic
+visibly validates nearest sampling and repeat defaults; scene material exposure
+arrives with render components.
+
+A missing/non-file path raises `MissingAssetError`, an `AssetError` subclass.
+Malformed files and unsupported extensions raise `AssetError` with the path and
+decoder context. The public API never exposes bgfx handles.
+
+Graphics-disabled/headless builds retain the asset types and deterministic error
+surface but deliberately do not link image decoders; attempting image decode in
+that configuration raises `AssetError`. Dedicated servers do not need texture
+pixels. A future headless content-validation tool may split decoding into a
+separate optional build feature if that becomes a concrete requirement.

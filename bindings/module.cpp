@@ -1,4 +1,5 @@
 #include "easy3d/core.hpp"
+#include "easy3d/assets.hpp"
 #include "easy3d/renderer.hpp"
 #include "easy3d/scene.hpp"
 
@@ -16,12 +17,46 @@ namespace py = pybind11;
 PYBIND11_MODULE(_easy3d, module) {
     module.doc() = "Easy3D native engine core";
 
-    py::register_exception<easy3d::EngineError>(module, "EngineError");
+    const py::exception<easy3d::EngineError> engine_error =
+        py::register_exception<easy3d::EngineError>(module, "EngineError");
+    const py::exception<easy3d::AssetError> asset_error =
+        py::register_exception<easy3d::AssetError>(module, "AssetError", engine_error.ptr());
+    py::register_exception<easy3d::MissingAssetError>(
+        module, "MissingAssetError", asset_error.ptr());
     py::register_exception<easy3d::InvalidEntityError>(
         module, "InvalidEntityError", PyExc_ReferenceError);
 
     module.def("engine_version", &easy3d::engine_version);
     module.def("native_add", &easy3d::native_add, py::arg("a"), py::arg("b"));
+    py::enum_<easy3d::TextureColorSpace>(module, "_TextureColorSpace")
+        .value("LINEAR", easy3d::TextureColorSpace::Linear)
+        .value("SRGB", easy3d::TextureColorSpace::Srgb);
+    const auto image_info = [](const std::shared_ptr<const easy3d::ImageData>& image) {
+        return py::make_tuple(image->source_path.string(),
+                              image->width,
+                              image->height,
+                              image->byte_size(),
+                              image->color_space == easy3d::TextureColorSpace::Srgb);
+    };
+    module.def("_load_image_info",
+               [image_info](const std::string& path,
+                            const easy3d::TextureColorSpace color_space) {
+                   return image_info(easy3d::load_image(path, color_space));
+               },
+               py::arg("path"),
+               py::arg("color_space"));
+    py::class_<easy3d::TextureCache>(module, "_TextureCache")
+        .def(py::init<>())
+        .def("load",
+             [image_info](easy3d::TextureCache& cache,
+                          const std::string& path,
+                          const easy3d::TextureColorSpace color_space) {
+                 return image_info(cache.load(path, color_space));
+             },
+             py::arg("path"),
+             py::arg("color_space"))
+        .def("clear", &easy3d::TextureCache::clear)
+        .def_property_readonly("size", &easy3d::TextureCache::size);
     module.def("_quat_from_euler", [](const double x, const double y, const double z) {
         const easy3d::Quat value = easy3d::Quat::from_euler_degrees(
             {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});

@@ -1,5 +1,6 @@
 #include "renderer/bgfx_renderer.hpp"
 
+#include "easy3d/assets.hpp"
 #include "easy3d/core.hpp"
 #include "easy3d/renderer.hpp"
 
@@ -8,7 +9,9 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "fs_solid_color.sc.bin.h"
+#include "fs_textured.sc.bin.h"
 #include "vs_solid_color.sc.bin.h"
+#include "vs_textured.sc.bin.h"
 
 #include <algorithm>
 #include <array>
@@ -17,6 +20,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -158,10 +162,123 @@ private:
     std::size_t triangle_count_{0};
 };
 
+[[nodiscard]] std::uint64_t texture_flags(const TextureColorSpace color_space,
+                                          const TextureSampler& sampler) noexcept {
+    std::uint64_t flags = color_space == TextureColorSpace::Srgb ? BGFX_TEXTURE_SRGB : 0;
+    if (sampler.min_filter == TextureFilter::Nearest) {
+        flags |= BGFX_SAMPLER_MIN_POINT;
+    }
+    if (sampler.mag_filter == TextureFilter::Nearest) {
+        flags |= BGFX_SAMPLER_MAG_POINT;
+    }
+    if (sampler.mip_filter == TextureFilter::Nearest) {
+        flags |= BGFX_SAMPLER_MIP_POINT;
+    }
+    if (sampler.wrap_u == TextureWrap::Clamp) {
+        flags |= BGFX_SAMPLER_U_CLAMP;
+    }
+    if (sampler.wrap_v == TextureWrap::Clamp) {
+        flags |= BGFX_SAMPLER_V_CLAMP;
+    }
+    return flags;
+}
+
+class GpuTexture final {
+public:
+    GpuTexture() = default;
+    explicit GpuTexture(const bgfx::TextureHandle texture) : texture_(texture) {}
+    ~GpuTexture() { release(); }
+
+    GpuTexture(const GpuTexture&) = delete;
+    GpuTexture& operator=(const GpuTexture&) = delete;
+    GpuTexture(GpuTexture&& other) noexcept
+        : texture_(std::exchange(other.texture_, BGFX_INVALID_HANDLE)) {}
+    GpuTexture& operator=(GpuTexture&& other) noexcept {
+        if (this != &other) {
+            release();
+            texture_ = std::exchange(other.texture_, BGFX_INVALID_HANDLE);
+        }
+        return *this;
+    }
+
+    void bind(const bgfx::UniformHandle sampler) const {
+        if (!bgfx::isValid(texture_)) {
+            throw EngineError("attempted to bind a released GPU texture");
+        }
+        bgfx::setTexture(0, sampler, texture_);
+    }
+
+private:
+    void release() noexcept {
+        if (bgfx::isValid(texture_)) {
+            bgfx::destroy(texture_);
+            texture_ = BGFX_INVALID_HANDLE;
+        }
+    }
+
+    bgfx::TextureHandle texture_{BGFX_INVALID_HANDLE};
+};
+
+class TextureLifetimeManager final {
+public:
+    using Handle = std::size_t;
+
+    [[nodiscard]] Handle upload(const ImageData& image,
+                                const TextureSampler& sampler = {}) {
+        image.validate();
+        if (image.width > std::numeric_limits<std::uint16_t>::max() ||
+            image.height > std::numeric_limits<std::uint16_t>::max() ||
+            image.byte_size() > std::numeric_limits<std::uint32_t>::max()) {
+            throw EngineError("texture exceeds bgfx's 2D RGBA8 resource limits");
+        }
+
+        const std::uint64_t flags = texture_flags(image.color_space, sampler);
+        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, flags)) {
+            throw EngineError("active renderer does not support the requested RGBA8 texture flags");
+        }
+        const bgfx::Memory* memory = bgfx::copy(
+            image.rgba8.data(), static_cast<std::uint32_t>(image.byte_size()));
+        const bgfx::TextureHandle texture = bgfx::createTexture2D(
+            static_cast<std::uint16_t>(image.width),
+            static_cast<std::uint16_t>(image.height),
+            false,
+            1,
+            bgfx::TextureFormat::RGBA8,
+            flags,
+            memory);
+        if (!bgfx::isValid(texture)) {
+            throw EngineError("bgfx failed to allocate an RGBA8 GPU texture");
+        }
+        textures_.emplace_back(texture);
+        byte_size_ += image.byte_size();
+        return textures_.size() - 1;
+    }
+
+    void bind(const Handle handle, const bgfx::UniformHandle sampler) const {
+        if (handle >= textures_.size()) {
+            throw EngineError("invalid GPU texture handle");
+        }
+        textures_[handle].bind(sampler);
+    }
+
+    void reset() noexcept {
+        textures_.clear();
+        byte_size_ = 0;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return textures_.size(); }
+    [[nodiscard]] std::size_t byte_size() const noexcept { return byte_size_; }
+
+private:
+    std::vector<GpuTexture> textures_;
+    std::size_t byte_size_{0};
+};
+
 struct DrawItem final {
     MeshLifetimeManager::Handle mesh;
     Material material;
     glm::mat4 transform{1.0F};
+    std::optional<TextureLifetimeManager::Handle> texture;
 };
 
 [[nodiscard]] std::uint16_t view_extent(const std::uint32_t value) noexcept {
@@ -234,7 +351,8 @@ public:
                 .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
                 .end();
             mesh_resources_ = std::make_unique<MeshLifetimeManager>(layout_);
-            create_program();
+            texture_resources_ = std::make_unique<TextureLifetimeManager>();
+            create_programs();
             if (geometry_diagnostic) {
                 create_geometry_diagnostic();
             }
@@ -248,7 +366,9 @@ public:
             if (geometry_diagnostic) {
                 std::cout << "Easy3D geometry: GPU meshes=" << mesh_resources_->size()
                           << ", indexed triangles=" << mesh_resources_->triangle_count()
-                          << ", depth-test=less" << std::endl;
+                          << ", GPU textures=" << texture_resources_->size()
+                          << ", texture bytes=" << texture_resources_->byte_size()
+                          << ", depth-test=less, sRGB=enabled" << std::endl;
             }
         } catch (...) {
             shutdown();
@@ -261,17 +381,29 @@ public:
             return;
         }
         draw_items_.clear();
+        if (texture_resources_) {
+            texture_resources_->reset();
+            texture_resources_.reset();
+        }
         if (mesh_resources_) {
             mesh_resources_->reset();
             mesh_resources_.reset();
         }
-        if (bgfx::isValid(program_)) {
-            bgfx::destroy(program_);
-            program_ = BGFX_INVALID_HANDLE;
+        if (bgfx::isValid(textured_program_)) {
+            bgfx::destroy(textured_program_);
+            textured_program_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(solid_program_)) {
+            bgfx::destroy(solid_program_);
+            solid_program_ = BGFX_INVALID_HANDLE;
         }
         if (bgfx::isValid(material_color_)) {
             bgfx::destroy(material_color_);
             material_color_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(texture_sampler_)) {
+            bgfx::destroy(texture_sampler_);
+            texture_sampler_ = BGFX_INVALID_HANDLE;
         }
         // Submit one final frame so queued resource releases are observed
         // before the renderer and its D3D11 device are destroyed.
@@ -298,11 +430,15 @@ public:
     }
 
 private:
-    void create_program() {
+    [[nodiscard]] static bgfx::ProgramHandle make_program(const std::uint8_t* vertex_bytes,
+                                                          const std::uint32_t vertex_size,
+                                                          const std::uint8_t* fragment_bytes,
+                                                          const std::uint32_t fragment_size,
+                                                          const char* label) {
         const bgfx::ShaderHandle vertex_shader = bgfx::createShader(
-            bgfx::makeRef(vs_solid_color_dxbc, static_cast<std::uint32_t>(sizeof(vs_solid_color_dxbc))));
+            bgfx::makeRef(vertex_bytes, vertex_size));
         const bgfx::ShaderHandle fragment_shader = bgfx::createShader(
-            bgfx::makeRef(fs_solid_color_dxbc, static_cast<std::uint32_t>(sizeof(fs_solid_color_dxbc))));
+            bgfx::makeRef(fragment_bytes, fragment_size));
         if (!bgfx::isValid(vertex_shader) || !bgfx::isValid(fragment_shader)) {
             if (bgfx::isValid(vertex_shader)) {
                 bgfx::destroy(vertex_shader);
@@ -310,16 +446,71 @@ private:
             if (bgfx::isValid(fragment_shader)) {
                 bgfx::destroy(fragment_shader);
             }
-            throw EngineError("bgfx failed to create Easy3D solid-color shaders");
+            throw EngineError(std::string("bgfx failed to create Easy3D ") + label + " shaders");
         }
-        program_ = bgfx::createProgram(vertex_shader, fragment_shader, true);
-        if (!bgfx::isValid(program_)) {
-            throw EngineError("bgfx failed to link the Easy3D solid-color shader program");
+        const bgfx::ProgramHandle program = bgfx::createProgram(vertex_shader, fragment_shader, true);
+        if (!bgfx::isValid(program)) {
+            throw EngineError(std::string("bgfx failed to link the Easy3D ") + label +
+                              " shader program");
         }
+        return program;
+    }
+
+    void create_programs() {
+        solid_program_ = make_program(vs_solid_color_dxbc,
+                                      static_cast<std::uint32_t>(sizeof(vs_solid_color_dxbc)),
+                                      fs_solid_color_dxbc,
+                                      static_cast<std::uint32_t>(sizeof(fs_solid_color_dxbc)),
+                                      "solid-color");
+        textured_program_ = make_program(vs_textured_dxbc,
+                                         static_cast<std::uint32_t>(sizeof(vs_textured_dxbc)),
+                                         fs_textured_dxbc,
+                                         static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
+                                         "textured");
         material_color_ = bgfx::createUniform("u_materialColor", bgfx::UniformType::Vec4);
-        if (!bgfx::isValid(material_color_)) {
-            throw EngineError("bgfx failed to create the material color uniform");
+        texture_sampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(material_color_) || !bgfx::isValid(texture_sampler_)) {
+            throw EngineError("bgfx failed to create Easy3D material uniforms");
         }
+    }
+
+    [[nodiscard]] static ImageData checker_image() {
+        ImageData image;
+        image.source_path = "<Easy3D procedural checker>";
+        image.width = 8;
+        image.height = 8;
+        image.color_space = TextureColorSpace::Srgb;
+        image.rgba8.reserve(image.width * image.height * 4);
+        for (std::uint32_t y = 0; y < image.height; ++y) {
+            for (std::uint32_t x = 0; x < image.width; ++x) {
+                const bool bright = (x + y) % 2 == 0;
+                std::uint8_t red = bright ? 235 : 35;
+                std::uint8_t green = bright ? 235 : 90;
+                std::uint8_t blue = bright ? 235 : 170;
+                // Asymmetric 2x2 corner markers make UV origin/orientation
+                // visually testable: red, green, yellow, then magenta.
+                if (x < 2 && y < 2) {
+                    red = 255;
+                    green = 35;
+                    blue = 35;
+                } else if (x >= 6 && y < 2) {
+                    red = 35;
+                    green = 220;
+                    blue = 75;
+                } else if (x < 2 && y >= 6) {
+                    red = 255;
+                    green = 210;
+                    blue = 35;
+                } else if (x >= 6 && y >= 6) {
+                    red = 220;
+                    green = 35;
+                    blue = 220;
+                }
+                image.rgba8.insert(image.rgba8.end(), {red, green, blue, 255});
+            }
+        }
+        image.validate();
+        return image;
     }
 
     void create_geometry_diagnostic() {
@@ -327,12 +518,16 @@ private:
         const auto cube = mesh_resources_->upload(make_cube_mesh());
         const auto plane = mesh_resources_->upload(make_plane_mesh(8.0F, 8.0F));
         const auto sphere = mesh_resources_->upload(make_uv_sphere_mesh());
+        TextureSampler checker_sampler;
+        checker_sampler.min_filter = TextureFilter::Nearest;
+        checker_sampler.mag_filter = TextureFilter::Nearest;
+        const auto checker = texture_resources_->upload(checker_image(), checker_sampler);
 
         draw_items_ = {
-            {triangle, {{0.95F, 0.35F, 0.25F, 1.0F}}, translated(-2.0F, 0.2F, 0.0F)},
-            {cube, {{0.25F, 0.75F, 0.95F, 1.0F}}, translated(0.0F, 0.0F, 0.0F)},
-            {plane, {{0.30F, 0.34F, 0.40F, 1.0F}}, translated(0.0F, -0.75F, 0.0F)},
-            {sphere, {{0.95F, 0.75F, 0.20F, 1.0F}}, translated(2.0F, 0.0F, 0.0F)},
+            {triangle, {{0.95F, 0.35F, 0.25F, 1.0F}}, translated(-2.0F, 0.2F, 0.0F), std::nullopt},
+            {cube, {{0.25F, 0.75F, 0.95F, 1.0F}}, translated(0.0F, 0.0F, 0.0F), std::nullopt},
+            {plane, {{1.0F, 1.0F, 1.0F, 1.0F}}, translated(0.0F, -0.75F, 0.0F), checker},
+            {sphere, {{0.95F, 0.75F, 0.20F, 1.0F}}, translated(2.0F, 0.0F, 0.0F), std::nullopt},
         };
         camera_ = Camera::look_at({0.0F, 2.7F, 7.0F}, {0.0F, 0.0F, 0.0F});
         camera_.vertical_fov_degrees = 55.0F;
@@ -360,8 +555,12 @@ private:
             bgfx::setTransform(glm::value_ptr(item.transform));
             mesh_resources_->bind(item.mesh);
             bgfx::setUniform(material_color_, color.data());
+            if (item.texture.has_value()) {
+                texture_resources_->bind(*item.texture, texture_sampler_);
+            }
             bgfx::setState(render_state(item.material));
-            bgfx::submit(main_view, program_);
+            bgfx::submit(main_view,
+                         item.texture.has_value() ? textured_program_ : solid_program_);
         }
     }
 
@@ -371,9 +570,12 @@ private:
     std::uint32_t height_{1};
     bgfx::SwapChain swap_chain_{};
     bgfx::VertexLayout layout_{};
-    bgfx::ProgramHandle program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle solid_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle textured_program_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle texture_sampler_{BGFX_INVALID_HANDLE};
     std::unique_ptr<MeshLifetimeManager> mesh_resources_;
+    std::unique_ptr<TextureLifetimeManager> texture_resources_;
     std::vector<DrawItem> draw_items_;
     Camera camera_{};
 };

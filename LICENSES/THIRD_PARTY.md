@@ -12,6 +12,8 @@ applicable notices.
 | bgfx | `b2513038f4b753ebeced40821c193978daa0492f` | BSD-2-Clause | Renderer |
 | bx | `da13683750ff8df8f44a5a15f637b6ae9460a04b` | BSD-2-Clause | bgfx support library |
 | bimg | `64a34f7441af8f06e40ccab08d76bbf5e59e55b1` | BSD-2-Clause | bgfx image support |
+| LodePNG (bundled by bimg) | bimg pin above | zlib | PNG decoding |
+| stb_image (bundled by bimg) | bimg pin above | MIT (selected alternative) | JPEG decoding |
 | GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Private native math implementation |
 | pybind11 | `3.1.0` | BSD-3-Clause | Python native binding |
 | scikit-build-core | `1.1.1` | Apache-2.0 | Python build backend |

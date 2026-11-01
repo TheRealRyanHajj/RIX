@@ -3,7 +3,8 @@
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. The current implementation includes the validated Phase 0 native
 foundation, generation-safe scene/entity lifetimes, native transform
-hierarchies, a typed camera API, and an indexed D3D11 geometry/material path.
+hierarchies, a typed camera API, and indexed solid/textured D3D11 materials with
+shared PNG/JPEG loading.
 Scene render components remain a later Phase 1 milestone, so the ordinary
 `Game` window stays blank until a renderable scene is attached.
 
@@ -75,8 +76,10 @@ cmake --build --preset windows-release --target easy3d_geometry_lifecycle
 .\build\windows-release\Release\easy3d_geometry_lifecycle.exe
 ```
 
-The ten-second diagnostic renders a vertex-colored triangle, solid-color cube,
-plane, and UV sphere with indexed GPU buffers and depth testing. It is manual
+The ten-second diagnostic renders a vertex-colored triangle, solid-color cube
+and UV sphere above a nearest-filtered sRGB checker-textured plane with
+asymmetric UV corner markers, using
+indexed GPU buffers and depth testing. It is manual
 and deliberately excluded from CTest. The D3D11 shader headers are reviewed
 build inputs generated from the adjacent `.sc` sources. Maintainers can rebuild
 them using the pinned bgfx compiler with
@@ -109,6 +112,20 @@ near/far planes, and view/projection matrix queries. It is intentionally not yet
 an entity component; scene attachment arrives with the later render-component
 API.
 
+PNG and JPEG assets can be validated and shared without exposing renderer
+handles:
+
+```python
+from easy3d.assets import TextureCache
+
+textures = TextureCache()
+grass = textures.load("assets/grass.png", color_space="srgb")
+print(grass.width, grass.height, grass.byte_size)
+```
+
+Cache keys use the canonical path and color space. Missing files raise
+`MissingAssetError`; unsupported or malformed files raise `AssetError`.
+
 ## Benchmarks
 
 After installation, run the small native-call harness with:
@@ -122,7 +139,8 @@ performance claim.
 
 ## Scope and license
 
-Renderable scene components, physics, assets, and multiplayer systems remain
-incomplete. The repository is private and proprietary; dependencies retain the
+Renderable scene components, model import, physics, broader asset pipelines,
+and multiplayer systems remain incomplete. The repository is private and
+proprietary; dependencies retain the
 licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
 

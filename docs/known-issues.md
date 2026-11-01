@@ -6,9 +6,10 @@ machine.
 ## Phase 1 is incomplete
 
 Phase 1.1 scene/entity lifetime semantics, Phase 1.2 math/transform hierarchy,
-Phase 1.3 native mesh/material/indexed rendering, and Phase 1.4 standalone
-camera/projection are implemented. Component attachment, camera-to-scene
-ownership, textures, model loading, lighting, culling, and instancing remain
+Phase 1.3 native mesh/material/indexed rendering, Phase 1.4 standalone
+camera/projection, and Phase 1.5 cached PNG/JPEG textures are implemented.
+Component attachment, camera-to-scene ownership, model loading, lighting,
+culling, and instancing remain
 unimplemented checklist work. The loaded Python scene
 therefore owns entity and transform state but is not yet submitted to the
 renderer; Phase 1.3 rendering is exercised by a native diagnostic scene only.
@@ -33,6 +34,15 @@ remain deliberately excluded from default pytest and CTest runs.
 Pinned dependencies are fetched from their upstream Git repositories during a
 clean first configure/editable install. Subsequent builds can reuse the local
 FetchContent checkout, but fully offline clean setup is not yet provided.
+
+## Graphics-disabled builds do not decode texture pixels
+
+The standard Windows client build supports the validated PNG/JPEG path.
+`EASY3D_ENABLE_GRAPHICS=OFF` retains asset types and compiles/tests the headless
+core without bimg, but `load_image` raises `AssetError` in that configuration.
+This keeps future dedicated servers free of image/GPU dependencies. It is not a
+client-build limitation; a future headless content validator would require a
+separate optional decoder feature.
 
 ## Debug bgfx output is verbose
 

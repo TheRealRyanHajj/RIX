@@ -1,6 +1,6 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.4 PASSED; Phase 1.5 is
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.5 PASSED; Phase 1.6 is
 next.** Earlier blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
@@ -838,3 +838,97 @@ and view-rect update, and per-frame camera projection recomputation.
 Phase 1.4: **DONE**. Immediate next task: Phase 1.5 — shared PNG/JPEG texture
 decode/upload/cache, sampler and sRGB semantics, UV shader path, and missing
 asset errors.
+
+## 2026-11-01 — Phase 1.5 texture assets and sampling
+
+### Implemented
+
+- Engine-owned RGBA8 `ImageData`, explicit linear/sRGB intent, filter/wrap
+  sampler values, actionable asset exceptions, and pinned bimg PNG/JPEG decode.
+- Thread-safe shared CPU cache keyed by canonical path plus color space, with
+  Windows case folding and reference-safe clearing.
+- Private move-only bgfx texture handles, capability validation, sampler/sRGB
+  flag mapping, deterministic pre-shutdown release, and texture byte counts.
+- D3D11 textured shader variant using mesh UVs and a visible nearest-filtered
+  sRGB checker diagnostic. Reviewed DXBC headers were regenerated with pinned
+  shaderc 1.19.167.
+- Typed `easy3d.assets` Python facade, PNG/JPEG and error tests, API contract,
+  dependency notices, and ADR-0009.
+
+The initial remembered 1×1 PNG fixture was accepted by Windows imaging but
+rejected by strict LodePNG CRC/stream validation. It was replaced with a fresh
+valid 2×2 RGBA PNG; no decoder check was bypassed.
+
+### Exact verification evidence
+
+```text
+cmake --build --preset windows-debug -j 8
+[11/12] Linking CXX executable Debug\easy3d_geometry_lifecycle.exe
+
+ctest --preset windows-debug --output-on-failure
+1/6 Test #1: easy3d.core ......................   Passed    0.05 sec
+2/6 Test #2: easy3d.scene .....................   Passed    0.04 sec
+3/6 Test #3: easy3d.math_transform ............   Passed    0.03 sec
+4/6 Test #4: easy3d.mesh ......................   Passed    0.04 sec
+5/6 Test #5: easy3d.camera ....................   Passed    0.04 sec
+6/6 Test #6: easy3d.texture ...................   Passed    0.05 sec
+100% tests passed, 0 tests failed out of 6
+Total Test time (real) =   0.53 sec
+
+cmake --build --preset windows-release -j 8
+[19/20] Linking CXX executable Release\easy3d_geometry_lifecycle.exe
+
+ctest --preset windows-release --output-on-failure
+1/6 Test #1: easy3d.core ......................   Passed    0.04 sec
+2/6 Test #2: easy3d.scene .....................   Passed    0.04 sec
+3/6 Test #3: easy3d.math_transform ............   Passed    0.03 sec
+4/6 Test #4: easy3d.mesh ......................   Passed    0.03 sec
+5/6 Test #5: easy3d.camera ....................   Passed    0.03 sec
+6/6 Test #6: easy3d.texture ...................   Passed    0.05 sec
+100% tests passed, 0 tests failed out of 6
+Total Test time (real) =   0.39 sec
+
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4259459
+sha256=55e2b364654d5a37550c9e207c58bc049f874b67285232c2a0220ad16312b03b
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+......................................                                   [100%]
+38 passed in 0.50s
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+0.1.0
+
+build\windows-release\Release\easy3d_geometry_lifecycle.exe
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+Easy3D geometry: GPU meshes=4, indexed triangles=783, GPU textures=1, texture bytes=256, depth-test=less, sRGB=enabled
+easy3d_geometry_lifecycle: PASS frames=1032
+EXIT_CODE=0
+```
+
+Interactive computer-use inspection on the Windows 11 desktop raised the
+native SDL window above its console and visibly confirmed the full 8×8
+blue/white checker plus red/green/yellow/magenta `(0,0)`/`(1,0)`/`(0,1)`/`(1,1)`
+corner markers mapped across the plane, three solid meshes correctly
+depth-tested above it, and the expected D3D11 clear. This is genuine visual
+evidence on the NVIDIA GeForce RTX 3070 Ti; no other GPU backend is claimed.
+
+Phase 1.5: **DONE**. Immediate next task: Phase 1.6 — `.obj` loading with
+normals, UVs, material/texture assignment where practical, explicit limits,
+malformed/missing model errors, and shared mesh resources.
+
+Additional graphics-disabled compatibility check:
+
+```text
+cmake -S . -B build/windows-headless -G Ninja -DCMAKE_BUILD_TYPE=Release -DEASY3D_ENABLE_GRAPHICS=OFF -DEASY3D_BUILD_PYTHON=OFF -DEASY3D_BUILD_BENCHMARKS=OFF -DBUILD_TESTING=ON
+cmake --build build/windows-headless -j 8
+ctest --test-dir build/windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 5
+Total Test time (real) =   0.38 sec
+```
+
+The headless build keeps asset types but intentionally excludes image decoding;
+client texture support is unaffected. This is recorded in known issues rather
+than being hidden as an unsupported-server dependency.

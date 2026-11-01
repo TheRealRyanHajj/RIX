@@ -223,3 +223,44 @@ until that ownership API exists.
 - A camera can be configured and validated before scene components are added,
   without inventing implicit global-camera ownership.
 - Orthographic projection and multi-camera render targets are not claimed.
+
+## ADR-0009: Canonical CPU texture cache with private GPU resources
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Texture decoding and sharing must work through stable Easy3D types without
+exposing bgfx handles. Color-space choice changes GPU interpretation, while
+sampler choice changes sampling rather than decoded bytes. A future asset
+scheduler will need deterministic keys and thread-safe access.
+
+### Decision
+
+Decode `.png`, `.jpg`, and `.jpeg` through the immutable-pinned bimg decoder to
+engine-owned RGBA8 `ImageData`. The shared CPU `TextureCache` key is a canonical
+absolute path plus linear/sRGB intent; Windows keys are case-folded. Cache
+access is mutex-protected and synchronous. Missing files use a distinct
+`MissingAssetError`; malformed and unsupported inputs use `AssetError`.
+
+Keep min/mag/mip filtering and U/V wrapping in backend-neutral
+`TextureSampler`. The private bgfx manager maps those values and sRGB intent to
+creation flags, owns move-only handles, and releases all textures before
+programs and renderer shutdown. Runtime builds consume reviewed Shader Model 5
+textured-shader headers generated from committed Easy3D shader sources.
+
+UV `(0,0)` addresses the first/top-left decoded texel, with U rightward and V
+downward. This matches the supported D3D11 path and is now part of the mesh
+contract.
+
+### Consequences
+
+- Repeated canonical path/color-space requests share decoded storage; sampler
+  variants do not duplicate CPU pixels.
+- GPU resources remain private and cannot outlive the renderer.
+- Clearing a cache drops its ownership but not outstanding shared references.
+- Loading is intentionally synchronous; asynchronous scheduling and eviction
+  policy remain later asset-system work.
+- Other renderer backends must explicitly adapt or transform the documented UV
+  convention and receive independent shader/runtime validation.
