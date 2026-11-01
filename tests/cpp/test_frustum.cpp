@@ -54,6 +54,20 @@ int main() {
             return homogeneous_result + 10;
         }
 
+        easy3d::Camera orthographic = easy3d::Camera::look_at(
+            {0.0F, 0.0F, 5.0F}, {0.0F, 0.0F, 0.0F});
+        orthographic.projection = easy3d::CameraProjection::Orthographic;
+        orthographic.orthographic_height = 4.0F;
+        const easy3d::Frustum orthographic_frustum =
+            easy3d::Frustum::from_camera(orthographic, 1.0F, false);
+        const easy3d::Bounds cube{{-0.5F, -0.5F, -0.5F},
+                                  {0.5F, 0.5F, 0.5F}};
+        if (!orthographic_frustum.intersects(cube, {}) ||
+            orthographic_frustum.intersects(cube, {{4.0F, 0.0F, 0.0F}})) {
+            std::cerr << "orthographic frustum bounds are incorrect\n";
+            return 21;
+        }
+
         easy3d::Matrix4 translation;
         translation.values[12] = 2.0F;
         easy3d::Matrix4 scale;
@@ -62,13 +76,13 @@ int main() {
             (translation * scale).transform_point({1.0F, 0.0F, 0.0F});
         if (!easy3d::almost_equal(transformed, {4.0F, 0.0F, 0.0F})) {
             std::cerr << "matrix multiplication order is incorrect\n";
-            return 21;
+            return 22;
         }
 
         std::cout << "easy3d_frustum_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "easy3d_frustum_tests: FAIL: " << error.what() << '\n';
-        return 22;
+        return 23;
     }
 }

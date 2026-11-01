@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Literal, TypeAlias
 
 from ._easy3d import (
     _camera_aspect_ratio,
@@ -18,14 +19,11 @@ Matrix4 = tuple[
     float, float, float, float,
     float, float, float, float,
 ]
+Projection: TypeAlias = Literal["perspective", "orthographic"]
 
 
 class Camera:
-    """Perspective camera value using right-handed, -Z-forward coordinates.
-
-    This Phase 1 camera owns configuration and matrix math. Attaching cameras to
-    scene entities is part of the later lighting/camera milestone.
-    """
+    """Perspective or orthographic right-handed, -Z-forward camera value."""
 
     __slots__ = (
         "_position",
@@ -33,6 +31,8 @@ class Camera:
         "_vertical_fov_degrees",
         "_near_plane",
         "_far_plane",
+        "_projection",
+        "_orthographic_height",
     )
 
     def __init__(
@@ -43,15 +43,21 @@ class Camera:
         vertical_fov_degrees: float = 60.0,
         near_plane: float = 0.1,
         far_plane: float = 1000.0,
+        projection: Projection = "perspective",
+        orthographic_height: float = 10.0,
     ) -> None:
         self._position = Vec3.from_value(position)
         self._rotation = Vec3.from_value(rotation)
         self._vertical_fov_degrees = 60.0
         self._near_plane = 0.1
         self._far_plane = 1000.0
+        self._projection: Projection = "perspective"
+        self._orthographic_height = 10.0
         self.vertical_fov_degrees = vertical_fov_degrees
         self.near_plane = near_plane
         self.far_plane = far_plane
+        self.projection = projection
+        self.orthographic_height = orthographic_height
 
     @property
     def position(self) -> Vec3:
@@ -107,6 +113,27 @@ class Camera:
         self._far_plane = result
 
     @property
+    def projection(self) -> Projection:
+        return self._projection
+
+    @projection.setter
+    def projection(self, value: Projection) -> None:
+        if value not in ("perspective", "orthographic"):
+            raise ValueError("projection must be 'perspective' or 'orthographic'")
+        self._projection = value
+
+    @property
+    def orthographic_height(self) -> float:
+        return self._orthographic_height
+
+    @orthographic_height.setter
+    def orthographic_height(self, value: float) -> None:
+        result = _finite(value, "orthographic_height")
+        if result <= 0.0:
+            raise ValueError("orthographic_height must be positive")
+        self._orthographic_height = result
+
+    @property
     def quaternion(self) -> Quat:
         return Quat.from_euler(self._rotation)
 
@@ -149,6 +176,8 @@ class Camera:
             self.vertical_fov_degrees,
             self.near_plane,
             self.far_plane,
+            self.projection == "orthographic",
+            self.orthographic_height,
             self.aspect_ratio(resolution),
             homogeneous_depth,
         )
@@ -181,7 +210,9 @@ class Camera:
         return (
             f"Camera(position={self.position!r}, rotation={self.rotation!r}, "
             f"vertical_fov_degrees={self.vertical_fov_degrees!r}, "
-            f"near_plane={self.near_plane!r}, far_plane={self.far_plane!r})"
+            f"near_plane={self.near_plane!r}, far_plane={self.far_plane!r}, "
+            f"projection={self.projection!r}, "
+            f"orthographic_height={self.orthographic_height!r})"
         )
 
 

@@ -130,6 +130,11 @@ Euler rotation backed by native quaternion math. FOV must be strictly between
 are column-major. D3D-style projection maps depth to `[0,1]`; the explicit
 `homogeneous_depth=True` query maps it to `[-1,1]` for backend testing.
 
+Set `projection="orthographic"` and a positive `orthographic_height` to select
+an orthographic volume. The height remains fixed while the renderer derives its
+width from the current pixel aspect ratio, so resize behavior matches the
+perspective camera's undistorted vertical framing.
+
 `Camera.aspect_ratio((width, height))` and `projection_matrix` reject zero or
 non-integer dimensions. The renderer uses current SDL pixel dimensions after
 every resize. Assigning `scene.camera` copies the current camera value into the

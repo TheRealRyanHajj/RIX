@@ -147,12 +147,18 @@ PYBIND11_MODULE(_easy3d, module) {
                [matrix_tuple](const double vertical_fov_degrees,
                               const double near_plane,
                               const double far_plane,
+                              const bool orthographic,
+                              const double orthographic_height,
                               const double aspect_ratio,
                               const bool homogeneous_depth) {
                    easy3d::Camera camera;
                    camera.vertical_fov_degrees = static_cast<float>(vertical_fov_degrees);
                    camera.near_plane = static_cast<float>(near_plane);
                    camera.far_plane = static_cast<float>(far_plane);
+                   camera.projection = orthographic
+                                           ? easy3d::CameraProjection::Orthographic
+                                           : easy3d::CameraProjection::Perspective;
+                   camera.orthographic_height = static_cast<float>(orthographic_height);
                    return matrix_tuple(camera.projection_matrix(
                        static_cast<float>(aspect_ratio), homogeneous_depth));
                });
@@ -492,7 +498,11 @@ PYBIND11_MODULE(_easy3d, module) {
                                camera.rotation.z),
                 camera.vertical_fov_degrees,
                 camera.near_plane,
-                camera.far_plane);
+                camera.far_plane,
+                camera.projection == easy3d::CameraProjection::Orthographic
+                    ? "orthographic"
+                    : "perspective",
+                camera.orthographic_height);
         })
         .def("set_camera",
              [](easy3d::Scene& scene,
@@ -500,18 +510,33 @@ PYBIND11_MODULE(_easy3d, module) {
                 const std::array<float, 4>& rotation,
                 const float vertical_fov_degrees,
                 const float near_plane,
-                const float far_plane) {
+                const float far_plane,
+                const std::string& projection,
+                const float orthographic_height) {
+                 easy3d::CameraProjection projection_mode;
+                 if (projection == "orthographic") {
+                     projection_mode = easy3d::CameraProjection::Orthographic;
+                 } else if (projection == "perspective") {
+                     projection_mode = easy3d::CameraProjection::Perspective;
+                 } else {
+                     throw std::invalid_argument(
+                         "camera projection must be 'perspective' or 'orthographic'");
+                 }
                  scene.set_camera({{position[0], position[1], position[2]},
                                    {rotation[0], rotation[1], rotation[2], rotation[3]},
                                    vertical_fov_degrees,
                                    near_plane,
-                                   far_plane});
+                                   far_plane,
+                                   projection_mode,
+                                   orthographic_height});
              },
              py::arg("position"),
              py::arg("rotation"),
              py::arg("vertical_fov_degrees"),
              py::arg("near_plane"),
-             py::arg("far_plane"))
+             py::arg("far_plane"),
+             py::arg("projection"),
+             py::arg("orthographic_height"))
         .def("add_debug_line",
              [](easy3d::Scene& scene,
                 const std::array<float, 3>& start,

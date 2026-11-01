@@ -36,6 +36,29 @@ def test_projection_uses_resolution_and_configurable_clipping() -> None:
     assert all(math.isfinite(value) for value in wide)
 
 
+def test_orthographic_projection_and_scene_round_trip() -> None:
+    from easy3d import Scene
+
+    camera = Camera(
+        position=(2.0, 3.0, 4.0),
+        projection="orthographic",
+        orthographic_height=12.0,
+        near_plane=0.5,
+        far_plane=100.0,
+    )
+    square = camera.projection_matrix((600, 600))
+    wide = camera.projection_matrix((1200, 600))
+    assert wide[0] == pytest.approx(square[0] * 0.5)
+    assert wide[5] == pytest.approx(1.0 / 6.0)
+
+    scene = Scene()
+    scene.camera = camera
+    restored = scene.camera
+    assert restored.projection == "orthographic"
+    assert restored.orthographic_height == pytest.approx(12.0)
+    assert restored.position == camera.position
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -43,6 +66,7 @@ def test_projection_uses_resolution_and_configurable_clipping() -> None:
         {"vertical_fov_degrees": 180.0},
         {"near_plane": 0.0},
         {"near_plane": 2.0, "far_plane": 1.0},
+        {"orthographic_height": 0.0},
     ],
 )
 def test_invalid_camera_configuration_is_rejected(kwargs: dict[str, float]) -> None:
@@ -56,3 +80,5 @@ def test_invalid_resolution_and_look_at_are_rejected() -> None:
         camera.projection_matrix((1280, 0))
     with pytest.raises(ValueError):
         camera.look_at(camera.position)
+    with pytest.raises(ValueError, match="projection"):
+        Camera(projection="panoramic")  # type: ignore[arg-type]

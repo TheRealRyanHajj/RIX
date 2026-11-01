@@ -1,7 +1,8 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0 and Phase 1.1–1.9 PASSED; Phase 1.10 is
-next.** Earlier blocked checkpoints below are retained as diagnostic history.
+**Current status (2026-11-01): Phase 0 and Phase 1.1–1.10 checklist items
+PASSED; Phase 1 exit-gate camera motion awaits the Phase 2 scheduler.** Earlier
+blocked checkpoints below are retained as diagnostic history.
 
 ## 2026-11-01 — Phase 0 kickoff
 
@@ -1317,3 +1318,128 @@ visually verified; this does not block the counter/culling acceptance evidence.
 
 Phase 1.9: **DONE**. Immediate next task: Phase 1.10 — first-world example and
 the recorded 10,000-static-cube acceptance workload.
+
+## 2026-11-01 — Phase 1.10 first-world and 10,000-cube acceptance
+
+### Implemented
+
+- Added native perspective/orthographic projection selection with a fixed
+  positive orthographic height, D3D and homogeneous depth conventions, current
+  pixel-aspect resize behavior, frustum integration, Python typing, scene
+  copy-in/copy-out, and native/Python tests.
+- Added `examples/02_first_world/main.py` and its run guide. The example uses
+  only public API to create transformed primitives, native ambient/directional
+  lights, debug axes, a decoded PNG texture, and a textured OBJ/MTL model. On
+  exit it unloads with `clear=True`, verifies zero entities, and closes the
+  scene.
+- Added a 100-cycle scene load/unload/clear/close Python regression that checks
+  stale-handle invalidation after every cycle.
+- Checked Phase 1.10 after the first-world D3D11 run and full 10,000-instance
+  benchmark. The separate Phase 1 exit-gate requirement for a moving camera is
+  not claimed yet: runtime mutation remains intentionally guarded until Phase
+  2.2 provides safe simulation boundaries.
+
+### Validated machine
+
+```text
+OS: Microsoft Windows 11 Home 10.0.26200 (build 26200)
+CPU: AMD Ryzen 5 5600G with Radeon Graphics (12 logical processors)
+RAM: 34,227,388,416 bytes
+GPU: NVIDIA GeForce RTX 3070 Ti
+GPU driver: 32.0.16.1088
+Renderer: Direct3D 11, vendor=0x10de, device=0x2482
+```
+
+`Win32_VideoController.AdapterRAM` returned a truncated value on this machine,
+so GPU memory capacity is deliberately omitted rather than misreported.
+
+### Exact verification evidence
+
+Native Debug:
+
+```text
+cmake --build --preset windows-debug --parallel
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 1.08 sec
+```
+
+Native Release:
+
+```text
+cmake --build --preset windows-release --parallel
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 10
+Total Test time (real) = 0.68 sec
+```
+
+Graphics-disabled/headless:
+
+```text
+cmake --build build\windows-headless --parallel
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 9
+Total Test time (real) = 0.55 sec
+```
+
+Python 3.11 editable build and tests:
+
+```text
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4463369
+sha256=6047467a49d73d8962749a44ee9c3c1fd3a2c1c2efd209b465d00cd9b08212b9
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+.................................................                        [100%]
+49 passed in 0.17s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+```
+
+Timed first-world D3D11 run:
+
+```text
+build\venv311\Scripts\python.exe examples\02_first_world\main.py --seconds 3
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
+first_world: PASS frames=491 draw_calls=5 visible=4 culled=0 scene_closed=True
+# exit code 0
+```
+
+The native window, D3D11 device, texture/model resource path, rendered frames,
+and teardown all executed on the GUI-capable Windows machine. This timed run
+was not separately image-inspected, so exact visual composition is **UNVERIFIED**
+rather than inferred from counters.
+
+Ten-second 10,000 shared-cube acceptance workload:
+
+```text
+build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 10000 --seconds 10
+requested_instances=10000
+creation_seconds=0.1629028000170365
+run_seconds=10.03159049997339
+frames=3862
+overall_fps=384.9838168743276
+sample_count=926
+frame_ms_median=2.4795
+frame_ms_p95=3.0416000000000003
+frame_ms_p99=3.2948
+renderer: draw_calls=1, visible_instances=9318, culled_instances=682,
+          instanced_draw_calls=1
+memory: working_set_before=22781952,
+        working_set_after_creation=27762688,
+        working_set_after_run=77049856,
+        peak_working_set_after_run=108290048,
+        private_bytes_after_run=83185664
+# exit code 0
+```
+
+Every requested cube was accounted for (`9318 + 682 == 10000`), and all
+visible compatible cubes were submitted as one instanced draw. These figures
+describe this exact machine and workload; they are not a general hardware
+capacity claim.
+
+Phase 1.10: **DONE**. Immediate next task: Phase 2.1 — native input mapping,
+focus/pointer-lock behavior, remappable actions, and headless-testable state.

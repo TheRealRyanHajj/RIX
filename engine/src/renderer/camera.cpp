@@ -96,6 +96,9 @@ void Camera::validate() const {
     if (!std::isfinite(far_plane) || far_plane <= near_plane) {
         throw std::invalid_argument("camera far plane must be finite and greater than near plane");
     }
+    if (!std::isfinite(orthographic_height) || orthographic_height <= 0.0F) {
+        throw std::invalid_argument("camera orthographic height must be finite and positive");
+    }
 }
 
 Vec3 Camera::forward() const {
@@ -124,6 +127,23 @@ Matrix4 Camera::projection_matrix(const float aspect, const bool homogeneous_dep
     validate();
     if (!std::isfinite(aspect) || aspect <= 0.0F) {
         throw std::invalid_argument("camera aspect ratio must be finite and positive");
+    }
+    if (projection == CameraProjection::Orthographic) {
+        const float half_height = orthographic_height * 0.5F;
+        const float half_width = half_height * aspect;
+        return from_glm(homogeneous_depth
+                            ? glm::orthoRH_NO(-half_width,
+                                              half_width,
+                                              -half_height,
+                                              half_height,
+                                              near_plane,
+                                              far_plane)
+                            : glm::orthoRH_ZO(-half_width,
+                                              half_width,
+                                              -half_height,
+                                              half_height,
+                                              near_plane,
+                                              far_plane));
     }
     const float radians = glm::radians(vertical_fov_degrees);
     return from_glm(homogeneous_depth

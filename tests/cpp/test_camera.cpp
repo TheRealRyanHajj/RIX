@@ -60,24 +60,42 @@ int main() {
         return fail(5, "homogeneous projection depth range is incorrect");
     }
 
+    camera.projection = easy3d::CameraProjection::Orthographic;
+    camera.orthographic_height = 10.0F;
+    const easy3d::Matrix4 ortho_4_3 = camera.projection_matrix(aspect_4_3, false);
+    const easy3d::Matrix4 ortho_8_3 = camera.projection_matrix(aspect_8_3, false);
+    if (!easy3d::almost_equal(ortho_4_3.at(0, 0) * 0.5F,
+                              ortho_8_3.at(0, 0)) ||
+        !easy3d::almost_equal(ortho_4_3.at(1, 1), 0.2F)) {
+        return fail(6, "orthographic projection did not respond correctly to aspect resize");
+    }
+    const easy3d::Vec3 ortho_near =
+        ortho_4_3.transform_point({0.0F, 0.0F, -camera.near_plane});
+    const easy3d::Vec3 ortho_far =
+        ortho_4_3.transform_point({0.0F, 0.0F, -camera.far_plane});
+    if (!easy3d::almost_equal(ortho_near.z, 0.0F, 1.0e-5F, 1.0e-5F) ||
+        !easy3d::almost_equal(ortho_far.z, 1.0F, 1.0e-5F, 1.0e-5F)) {
+        return fail(7, "orthographic D3D depth range is incorrect");
+    }
+
     try {
         camera.near_plane = 0.0F;
         camera.validate();
-        return fail(6, "invalid camera clipping planes were accepted");
+        return fail(8, "invalid camera clipping planes were accepted");
     } catch (const std::invalid_argument&) {
         // Expected.
     }
 
     try {
         (void)easy3d::Camera::aspect_ratio(1280, 0);
-        return fail(7, "zero-height camera viewport was accepted");
+        return fail(9, "zero-height camera viewport was accepted");
     } catch (const std::invalid_argument&) {
         // Expected.
     }
 
     try {
         (void)easy3d::Camera::look_at({}, {}, {0.0F, 1.0F, 0.0F});
-        return fail(8, "degenerate camera look-at was accepted");
+        return fail(10, "degenerate camera look-at was accepted");
     } catch (const std::invalid_argument&) {
         // Expected.
     }

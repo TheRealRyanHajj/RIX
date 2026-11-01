@@ -180,6 +180,8 @@ class _NativeScene:
         float,
         float,
         float,
+        str,
+        float,
     ]: ...
     def set_camera(
         self,
@@ -188,6 +190,8 @@ class _NativeScene:
         vertical_fov_degrees: float,
         near_plane: float,
         far_plane: float,
+        projection: str,
+        orthographic_height: float,
     ) -> None: ...
     def add_debug_line(
         self,

@@ -128,9 +128,13 @@ Phase 1.8 lighting, scene-camera, and native debug-line diagnostic. Public scene
 mutation is rejected while `Game.run()` is traversing it; the Phase 2 scheduler
 will introduce safe runtime update boundaries.
 
-`Camera` is available as a typed perspective-camera configuration with
-position/Euler rotation, `look_at`, basis vectors, configurable vertical FOV and
-near/far planes, and view/projection matrix queries. Assign it with
+Run `python examples/02_first_world/main.py` for a complete Phase 1 scene with
+transformed primitives, a decoded texture, loaded OBJ/MTL geometry, lights,
+debug axes, and explicit teardown. Add `--seconds 5` for an automated close.
+
+`Camera` is available as a typed perspective/orthographic configuration with
+position/Euler rotation, `look_at`, basis vectors, configurable vertical FOV or
+orthographic height, near/far planes, and view/projection matrix queries. Assign it with
 `scene.camera = camera`. `Light("ambient", ...)` and
 `Light("directional", ...)` create native light components; render entities are
 lit by default and accept `lit=False` for emissive-style unlit color. Persistent

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from easy3d import Entity, Game, InvalidEntityError, Scene
+from easy3d import Cube, Entity, Game, InvalidEntityError, Scene
 
 
 def test_explicit_scene_context_owns_entities() -> None:
@@ -117,3 +117,22 @@ def test_game_enforces_single_scene_owner_and_scene_switching() -> None:
     assert first_game.unload_scene() is second_scene
     assert first_game.scene is None
     assert not second_scene.active
+
+
+def test_repeated_scene_loading_clears_resources_and_invalidates_handles() -> None:
+    game = Game("repeated scene lifecycle")
+    stale_entities = []
+    for index in range(100):
+        scene = Scene(f"cycle {index}")
+        cube = Cube(scene=scene)
+        game.load_scene(scene)
+        assert game.unload_scene(clear=True) is scene
+        assert scene.entity_count == 0
+        assert not cube.is_alive
+        scene.close()
+        stale_entities.append(cube)
+
+    assert game.scene is None
+    assert all(not entity.is_alive for entity in stale_entities)
+    with pytest.raises(InvalidEntityError):
+        _ = stale_entities[0].name

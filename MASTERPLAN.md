@@ -286,7 +286,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **1.7** Implement primitive entities (`Cube`, `Plane`, `Sphere`, `Model`), `Entity` property API and component lookup.
 - [x] **1.8** Implement directional/ambient lighting baseline, basic materials and debug rendering.
 - [x] **1.9** Add frustum culling, simple instancing or batching, renderer counters, and benchmark scenes.
-- [ ] **1.10** Run `examples/02_first_world`, test 10k static cubes with shared resources, record FPS distributions and memory with actual device specs.
+- [x] **1.10** Run `examples/02_first_world`, test 10k static cubes with shared resources, record FPS distributions and memory with actual device specs.
 
 **Exit gate:** first-world example displays textured assets, moving camera, clean scene teardown; bounds and transforms tested; no unchecked stale handles or resource leaks observed in repeated loading tests.
 

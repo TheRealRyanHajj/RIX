@@ -77,12 +77,19 @@ struct Matrix4 final {
     friend Matrix4 operator*(const Matrix4& left, const Matrix4& right) noexcept;
 };
 
+enum class CameraProjection {
+    Perspective,
+    Orthographic,
+};
+
 struct Camera final {
     Vec3 position{};
     Quat rotation{};
     float vertical_fov_degrees{60.0F};
     float near_plane{0.1F};
     float far_plane{1000.0F};
+    CameraProjection projection{CameraProjection::Perspective};
+    float orthographic_height{10.0F};
 
     void validate() const;
     [[nodiscard]] Vec3 forward() const;

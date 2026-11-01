@@ -87,14 +87,15 @@ from different frames.
 ## Camera and projection
 
 The native `Camera` stores finite position, normalized quaternion orientation,
-vertical FOV in degrees, and positive near/far planes with `far > near`. Its
+projection mode, vertical FOV or orthographic height, and positive near/far
+planes with `far > near`. Its
 right-handed basis uses local forward -Z, right +X, and up +Y. `look_at` rejects
 coincident targets, zero up vectors, and direction/up parallelism.
 
 `Matrix4` is an Easy3D-owned, column-major 4×4 value. Camera view matrices map
-world space into camera space; projection selects `[0,1]` depth for D3D or
-`[-1,1]` homogeneous depth when a future backend reports that capability.
-Projection aspect is calculated from the current pixel viewport, not the
+world space into camera space; perspective and orthographic projection both
+select `[0,1]` depth for D3D or `[-1,1]` homogeneous depth when a future backend
+reports that capability. Projection aspect is calculated from the current pixel viewport, not the
 logical window size. SDL resize/pixel-size events update the bgfx swap chain and
 view rectangle; each submitted frame rebuilds projection from the current pixel
 width and height.

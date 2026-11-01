@@ -74,13 +74,17 @@ class Scene:
 
     @property
     def camera(self) -> Camera:
-        position, rotation, fov, near, far = self._native.camera_info()
+        position, rotation, fov, near, far, projection, orthographic_height = (
+            self._native.camera_info()
+        )
         return Camera(
             position=position,
             rotation=Quat(rotation).to_euler(),
             vertical_fov_degrees=fov,
             near_plane=near,
             far_plane=far,
+            projection=projection,
+            orthographic_height=orthographic_height,
         )
 
     @camera.setter
@@ -94,6 +98,8 @@ class Scene:
             value.vertical_fov_degrees,
             value.near_plane,
             value.far_plane,
+            value.projection,
+            value.orthographic_height,
         )
 
     @property

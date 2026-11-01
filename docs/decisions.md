@@ -207,8 +207,9 @@ high-DPI SDL windows distinguish logical dimensions from drawable pixel size.
 
 Expose Easy3D-owned `Camera` and `Matrix4` native values. Matrices are
 column-major; coordinates are right-handed, +Y up, and camera-forward -Z.
-Perspective projection takes vertical FOV, explicit near/far planes, aspect,
-and a renderer-capability `homogeneous_depth` choice. The D3D path maps depth to
+Perspective projection takes vertical FOV; orthographic projection takes a
+fixed vertical height. Both take explicit near/far planes, aspect, and a
+renderer-capability `homogeneous_depth` choice. The D3D path maps depth to
 `[0,1]`; homogeneous depth maps to `[-1,1]`.
 
 The renderer retains current pixel width/height and calculates aspect on every
@@ -219,10 +220,11 @@ until that ownership API exists.
 ### Consequences
 
 - GLM remains private while native and Python tests can inspect exact matrices.
-- Resizing changes horizontal projection without distorting vertical FOV.
+- Resizing changes horizontal projection without distorting vertical FOV or
+  orthographic height.
 - A camera can be configured and validated before scene components are added,
   without inventing implicit global-camera ownership.
-- Orthographic projection and multi-camera render targets are not claimed.
+- Multi-camera render targets are not claimed.
 
 ## ADR-0009: Canonical CPU texture cache with private GPU resources
 

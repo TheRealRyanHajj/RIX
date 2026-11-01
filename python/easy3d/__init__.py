@@ -18,7 +18,7 @@ from .assets import (
     load_image,
     load_obj,
 )
-from .camera import Camera
+from .camera import Camera, Projection
 from .components import LightComponent, MeshRenderer
 from . import debug
 from .entity import Entity
@@ -48,6 +48,7 @@ __all__ = [
     "ModelMaterialInfo",
     "ModelPartInfo",
     "Quat",
+    "Projection",
     "RendererStats",
     "Plane",
     "Scene",

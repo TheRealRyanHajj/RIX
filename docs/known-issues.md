@@ -3,16 +3,18 @@
 There are no remaining blockers to the Phase 0 exit gate on the validated
 machine.
 
-## Phase 1 is incomplete
+## Phase 1 exit gate awaits runtime camera movement
 
-Phase 1.1–1.9 are implemented, including native scene traversal, public
+Phase 1.1–1.10 are implemented, including native scene traversal, public
 primitive/model render entities, scene camera ownership, directional/ambient
 lighting, debug lines, conservative frustum culling, compatible-mesh hardware
-instancing, and frame counters. Orthographic cameras and the first-world/stress
-acceptance recording remain unimplemented checklist work. The baseline
-lighting intentionally supports ambient accumulation and one directional light;
-shadows, PBR, multiple
-directional-light blending, and transparent sorting remain later work.
+instancing, frame counters, perspective/orthographic projection, the first-world
+example, and the recorded 10,000-cube workload. The Phase 1 exit gate's moving
+camera evidence remains coupled to Phase 2.2's safe simulation scheduler;
+runtime scene mutation is deliberately rejected until that scheduler exists.
+The baseline lighting intentionally supports ambient accumulation and one
+directional light; shadows, PBR, multiple directional-light blending, and
+transparent sorting remain later work.
 
 Instancing currently requires identical mesh, material, texture/sampler, and
 uniform absolute scale. Non-uniform scale falls back to individual draws so the
