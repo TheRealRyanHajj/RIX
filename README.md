@@ -252,9 +252,21 @@ body.add_impulse((2, 0, 0))
 collider. Add a `Rigidbody` to make it dynamic or kinematic. Distances are
 meters, mass is kilograms, force is newtons, impulse is newton-seconds, and
 velocity is meters/second. Dynamic transforms are solver-owned; use
-`body.teleport(...)` for an explicit discontinuity. Trigger bodies can be
-created now, while overlap queries and enter/stay/exit callbacks remain Phase
-2.6 work.
+`body.teleport(...)` for an explicit discontinuity. `easy3d.physics` provides
+nearest/all raycasts, sphere/capsule casts, and box/sphere overlaps with layer,
+trigger and entity-exclusion filters:
+
+```python
+from easy3d import physics
+
+hit = physics.raycast(scene, (0, 2, 0), (0, -1, 0), 10)
+nearby = physics.overlap_sphere(scene, (0, 0, 0), 3,
+                                include_triggers=False)
+```
+
+Entity scripts can define `on_collision_enter/stay/exit(event)` and
+`on_trigger_enter/stay/exit(event)`. Events are immutable snapshots dispatched
+on the gameplay thread after the native fixed step; Jolt never calls Python.
 
 PNG and JPEG assets can be validated and shared without exposing renderer
 handles:

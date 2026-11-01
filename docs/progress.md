@@ -1,7 +1,7 @@
 # Easy3D implementation progress
 
-**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.5 passed;
-Phase 2.6 is next. Live pointer lock and physical gamepad validation remain
+**Current status (2026-11-01): Phase 0, Phase 1, and Phase 2.1–2.6 passed;
+Phase 2.7 is next. Live pointer lock and physical gamepad validation remain
 unverified.** Earlier blocked checkpoints below are retained as diagnostic
 history.
 
@@ -1845,3 +1845,82 @@ build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); e=Entity(s
 
 Phase 2.5: **DONE**. Immediate next task: Phase 2.6 — native physics queries and
 safe collision/trigger enter, stay and exit event snapshots.
+
+## 2026-11-01 — Phase 2.6 queries and contact events
+
+### Implemented
+
+- Added native nearest/all raycasts, sphere and capsule casts, sphere overlap and
+  oriented-box overlap. Results apply layer-mask, sensor and exact-entity
+  exclusion filters before conversion, are deduplicated where appropriate, and
+  have documented deterministic sort order.
+- Added immutable Python `PhysicsHit` snapshots and typed `easy3d.physics`
+  `raycast`, `sphere_cast`, `capsule_cast`, `overlap_sphere`, and `overlap_box`
+  APIs. Jolt IDs and collector storage never cross the binding boundary.
+- Added a bounded, mutex-protected native contact recorder. Jolt callbacks copy
+  data only; the scheduler dispatches frozen per-recipient `CollisionEvent`
+  values afterward on the gameplay thread through the existing profiling,
+  fail-fast/quarantine and deferred-mutation path.
+- Added collision and trigger `enter`, `stay`, and `exit` hooks for enabled,
+  started script entities. Normals are recipient-relative and stale/destroyed
+  pairs are not exposed.
+- Added sleeping-contact reconciliation: Jolt retiring solver contacts when all
+  moving bodies sleep does not fabricate an exit; reactivation remains stay and
+  real separation produces exit.
+
+### Failures found and fixed
+
+The first scene ray test assumed a previously impulsed body was still at
+`x=0`; aiming through the synchronized body pose fixed the test. One Python
+assertion called the documented `Vec3.length` property as a method and was
+corrected. Most importantly, the first Debug matrix reported
+`easy3d.physics (Failed)` because Jolt removes contacts when bodies sleep and a
+one-step teleport then had no cached removal to report. Contact reconciliation
+now tracks pairs touched in each update, retains all-sleeping pairs, and emits
+exit once an awake pair is no longer detected. A new four-second sleep
+regression asserts no false exit before the real separation. An orphaned yielded
+CTest process briefly caused `LNK1168` while holding the Debug test executable;
+only that exact process/session was ended before rebuilding.
+
+### Exact final verification evidence
+
+```text
+cmake --build build/windows-headless --parallel
+ctest --test-dir build/windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 11
+Total Test time (real) = 3.14 sec
+
+cmake --build build/windows-debug --config Debug --parallel
+ctest --test-dir build/windows-debug -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 4.29 sec
+
+cmake --build build/windows-release --config Release --parallel
+ctest --test-dir build/windows-release -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 1.47 sec
+
+build\venv311\Scripts\python.exe -m pip install -e .[dev]
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3273017
+sha256=0f38adbfce1b588a90370bc0ef114f5f58b533a80537665e399954e8c10b4248
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_physics_queries_events.py -q
+...                                                                      [100%]
+3 passed in 0.12s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 83%]
+..............                                                           [100%]
+86 passed in 0.48s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); e=Sphere(collider=True, scene=s); h=physics.sphere_cast(s,(0,0,3),.1,(0,0,-1),10); print(engine_version(), h.entity.name, h.distance, isinstance(h, PhysicsHit))"
+0.1.0 Sphere 2.3999998569488525 True
+```
+
+Phase 2.6: **DONE**. Immediate next task: Phase 2.7 — native first-person and
+third-person character motors with Python configuration hooks.

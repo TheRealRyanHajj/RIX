@@ -84,6 +84,23 @@ struct RigidBodyComponent final {
     void validate() const;
 };
 
+struct ScenePhysicsQueryHit final {
+    EntityHandle entity;
+    Vec3 point{};
+    Vec3 normal{};
+    float distance{0.0F};
+    float fraction{0.0F};
+};
+
+struct ScenePhysicsContactEvent final {
+    PhysicsContactPhase phase{PhysicsContactPhase::Enter};
+    EntityHandle first;
+    EntityHandle second;
+    Vec3 point{};
+    Vec3 normal{};
+    bool trigger{false};
+};
+
 class World final {
 public:
     World();
@@ -250,6 +267,45 @@ public:
     void add_rigid_body_force(EntityHandle handle, Vec3 force);
     void add_rigid_body_impulse(EntityHandle handle, Vec3 impulse);
     void teleport_rigid_body(EntityHandle handle, Vec3 position, Quat rotation);
+    [[nodiscard]] std::vector<ScenePhysicsQueryHit> raycast_all(
+        Vec3 origin,
+        Vec3 direction,
+        float max_distance,
+        std::uint8_t layer_mask = 0x0fU,
+        bool include_triggers = true,
+        std::optional<EntityHandle> excluded = std::nullopt) const;
+    [[nodiscard]] std::vector<ScenePhysicsQueryHit> overlap_sphere(
+        Vec3 center,
+        float radius,
+        std::uint8_t layer_mask = 0x0fU,
+        bool include_triggers = true,
+        std::optional<EntityHandle> excluded = std::nullopt) const;
+    [[nodiscard]] std::vector<ScenePhysicsQueryHit> overlap_box(
+        Vec3 center,
+        Vec3 half_extents,
+        Quat rotation = {},
+        std::uint8_t layer_mask = 0x0fU,
+        bool include_triggers = true,
+        std::optional<EntityHandle> excluded = std::nullopt) const;
+    [[nodiscard]] std::vector<ScenePhysicsQueryHit> sphere_cast_all(
+        Vec3 origin,
+        float radius,
+        Vec3 direction,
+        float max_distance,
+        std::uint8_t layer_mask = 0x0fU,
+        bool include_triggers = true,
+        std::optional<EntityHandle> excluded = std::nullopt) const;
+    [[nodiscard]] std::vector<ScenePhysicsQueryHit> capsule_cast_all(
+        Vec3 origin,
+        float radius,
+        float height,
+        Quat rotation,
+        Vec3 direction,
+        float max_distance,
+        std::uint8_t layer_mask = 0x0fU,
+        bool include_triggers = true,
+        std::optional<EntityHandle> excluded = std::nullopt) const;
+    [[nodiscard]] std::vector<ScenePhysicsContactEvent> drain_physics_events();
 
     [[nodiscard]] const Camera& camera() const noexcept;
     void set_camera(Camera camera);
@@ -279,6 +335,7 @@ private:
     [[nodiscard]] PhysicsBodyHandle create_physics_body(EntityHandle handle,
                                                         const PhysicsEntity& component);
     void replace_physics_body(EntityHandle handle, PhysicsEntity& component);
+    [[nodiscard]] EntityHandle handle_from_id(std::uint64_t id) const noexcept;
     static void validate_name(std::string_view name);
 
     std::string name_;

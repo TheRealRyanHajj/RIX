@@ -592,3 +592,33 @@ sensor configuration alone.
   explicit and inspectable.
 - Runtime shape/material reconfiguration, physics parenting and advanced shapes
   remain intentional future APIs rather than unsafe partial behavior.
+
+## ADR-0019: Snapshot physics queries and deferred contact dispatch
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Jolt contact listeners may run while bodies are locked and, with a future job
+system, from worker threads. Calling Python or mutating scene state there would
+violate GIL/thread ownership and can deadlock. Query collectors likewise contain
+Jolt IDs and temporary storage that must not escape the native call.
+
+### Decision
+
+Convert query collectors synchronously into immutable Easy3D snapshots with
+generation-checked entity identity, explicit filtering and deterministic sort
+orders. Contact listeners copy a bounded native event record only. Drain those
+records after each completed fixed physics step and pose sync, then dispatch
+per-recipient Python snapshots through the normal scheduler callback path.
+
+### Consequences
+
+- Python never runs from a Jolt callback and never retains a Jolt body pointer.
+- Collision and trigger callbacks share lifecycle, profiling, exception and
+  deferred-mutation rules with other gameplay hooks.
+- Query results remain safe after the native collector is destroyed; normal
+  entity stale-handle checks still apply if a result is retained too long.
+- Event queue exhaustion is an explicit `PhysicsError`, not unbounded memory
+  growth or silent loss.

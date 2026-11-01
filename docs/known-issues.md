@@ -38,10 +38,11 @@ The Jolt job backend is deliberately single-threaded. It establishes correct
 headless ownership/fixed stepping but is not a physics throughput claim. Phase
 2.5 exposes box/sphere colliders, static/kinematic/dynamic bodies, materials,
 forces/impulses and trigger configuration. Capsule/convex/mesh shapes, CCD and
-constraints remain Phase 2.8. Queries and collision/trigger enter/stay/exit
-callbacks remain Phase 2.6; creating a trigger now does not yet provide a public
-notification. Physics entities cannot be parented until moving-parent pose
-synchronization has a tested contract.
+constraints remain Phase 2.8. Phase 2.6 queries cover ray, sphere/capsule cast,
+and box/sphere overlap, but do not yet include convex casts or arbitrary mesh
+query shapes. Physics entities cannot be parented until moving-parent pose
+synchronization has a tested contract. Compound subshape contact aggregation is
+also deferred with compound shape support.
 Collider dimensions and material values are construction-time state in Phase
 2.5. Later entity scaling does not silently rebuild Jolt shapes; callers must
 remove and recreate a collider when its physical geometry changes.

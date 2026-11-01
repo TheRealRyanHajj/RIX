@@ -270,6 +270,14 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "unknown";
     };
+    const auto contact_phase_name = [](const easy3d::PhysicsContactPhase value) {
+        switch (value) {
+        case easy3d::PhysicsContactPhase::Enter: return "enter";
+        case easy3d::PhysicsContactPhase::Stay: return "stay";
+        case easy3d::PhysicsContactPhase::Exit: return "exit";
+        }
+        return "unknown";
+    };
 
     py::class_<easy3d::InputSystem>(module, "_NativeInput")
         .def("bind_action",
@@ -725,6 +733,187 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("handle"),
              py::arg("position"),
              py::arg("rotation"))
+        .def("physics_raycast_all",
+             [](const easy3d::Scene& scene,
+                const std::array<float, 3>& origin,
+                const std::array<float, 3>& direction,
+                const float max_distance,
+                const std::uint8_t layer_mask,
+                const bool include_triggers,
+                const std::optional<easy3d::EntityHandle> excluded) {
+                 py::list result;
+                 for (const easy3d::ScenePhysicsQueryHit& hit : scene.raycast_all(
+                          {origin[0], origin[1], origin[2]},
+                          {direction[0], direction[1], direction[2]},
+                          max_distance,
+                          layer_mask,
+                          include_triggers,
+                          excluded)) {
+                     result.append(py::make_tuple(
+                         hit.entity,
+                         py::make_tuple(hit.point.x, hit.point.y, hit.point.z),
+                         py::make_tuple(hit.normal.x, hit.normal.y, hit.normal.z),
+                         hit.distance,
+                         hit.fraction));
+                 }
+                 return result;
+             },
+             py::arg("origin"),
+             py::arg("direction"),
+             py::arg("max_distance"),
+             py::arg("layer_mask") = 0x0fU,
+             py::arg("include_triggers") = true,
+             py::arg("excluded") = std::nullopt)
+        .def("physics_overlap_sphere",
+             [](const easy3d::Scene& scene,
+                const std::array<float, 3>& center,
+                const float radius,
+                const std::uint8_t layer_mask,
+                const bool include_triggers,
+                const std::optional<easy3d::EntityHandle> excluded) {
+                 py::list result;
+                 for (const easy3d::ScenePhysicsQueryHit& hit : scene.overlap_sphere(
+                          {center[0], center[1], center[2]},
+                          radius,
+                          layer_mask,
+                          include_triggers,
+                          excluded)) {
+                     result.append(py::make_tuple(
+                         hit.entity,
+                         py::make_tuple(hit.point.x, hit.point.y, hit.point.z),
+                         py::make_tuple(hit.normal.x, hit.normal.y, hit.normal.z),
+                         hit.distance,
+                         hit.fraction));
+                 }
+                 return result;
+             },
+             py::arg("center"),
+             py::arg("radius"),
+             py::arg("layer_mask") = 0x0fU,
+             py::arg("include_triggers") = true,
+             py::arg("excluded") = std::nullopt)
+        .def("physics_overlap_box",
+             [](const easy3d::Scene& scene,
+                const std::array<float, 3>& center,
+                const std::array<float, 3>& half_extents,
+                const std::array<float, 4>& rotation,
+                const std::uint8_t layer_mask,
+                const bool include_triggers,
+                const std::optional<easy3d::EntityHandle> excluded) {
+                 py::list result;
+                 for (const easy3d::ScenePhysicsQueryHit& hit : scene.overlap_box(
+                          {center[0], center[1], center[2]},
+                          {half_extents[0], half_extents[1], half_extents[2]},
+                          {rotation[0], rotation[1], rotation[2], rotation[3]},
+                          layer_mask,
+                          include_triggers,
+                          excluded)) {
+                     result.append(py::make_tuple(
+                         hit.entity,
+                         py::make_tuple(hit.point.x, hit.point.y, hit.point.z),
+                         py::make_tuple(hit.normal.x, hit.normal.y, hit.normal.z),
+                         hit.distance,
+                         hit.fraction));
+                 }
+                 return result;
+             },
+             py::arg("center"),
+             py::arg("half_extents"),
+             py::arg("rotation"),
+             py::arg("layer_mask") = 0x0fU,
+             py::arg("include_triggers") = true,
+             py::arg("excluded") = std::nullopt)
+        .def("physics_sphere_cast_all",
+             [](const easy3d::Scene& scene,
+                const std::array<float, 3>& origin,
+                const float radius,
+                const std::array<float, 3>& direction,
+                const float max_distance,
+                const std::uint8_t layer_mask,
+                const bool include_triggers,
+                const std::optional<easy3d::EntityHandle> excluded) {
+                 py::list result;
+                 for (const easy3d::ScenePhysicsQueryHit& hit : scene.sphere_cast_all(
+                          {origin[0], origin[1], origin[2]},
+                          radius,
+                          {direction[0], direction[1], direction[2]},
+                          max_distance,
+                          layer_mask,
+                          include_triggers,
+                          excluded)) {
+                     result.append(py::make_tuple(
+                         hit.entity,
+                         py::make_tuple(hit.point.x, hit.point.y, hit.point.z),
+                         py::make_tuple(hit.normal.x, hit.normal.y, hit.normal.z),
+                         hit.distance,
+                         hit.fraction));
+                 }
+                 return result;
+             },
+             py::arg("origin"),
+             py::arg("radius"),
+             py::arg("direction"),
+             py::arg("max_distance"),
+             py::arg("layer_mask") = 0x0fU,
+             py::arg("include_triggers") = true,
+             py::arg("excluded") = std::nullopt)
+        .def("physics_capsule_cast_all",
+             [](const easy3d::Scene& scene,
+                const std::array<float, 3>& origin,
+                const float radius,
+                const float height,
+                const std::array<float, 4>& rotation,
+                const std::array<float, 3>& direction,
+                const float max_distance,
+                const std::uint8_t layer_mask,
+                const bool include_triggers,
+                const std::optional<easy3d::EntityHandle> excluded) {
+                 py::list result;
+                 for (const easy3d::ScenePhysicsQueryHit& hit : scene.capsule_cast_all(
+                          {origin[0], origin[1], origin[2]},
+                          radius,
+                          height,
+                          {rotation[0], rotation[1], rotation[2], rotation[3]},
+                          {direction[0], direction[1], direction[2]},
+                          max_distance,
+                          layer_mask,
+                          include_triggers,
+                          excluded)) {
+                     result.append(py::make_tuple(
+                         hit.entity,
+                         py::make_tuple(hit.point.x, hit.point.y, hit.point.z),
+                         py::make_tuple(hit.normal.x, hit.normal.y, hit.normal.z),
+                         hit.distance,
+                         hit.fraction));
+                 }
+                 return result;
+             },
+             py::arg("origin"),
+             py::arg("radius"),
+             py::arg("height"),
+             py::arg("rotation"),
+             py::arg("direction"),
+             py::arg("max_distance"),
+             py::arg("layer_mask") = 0x0fU,
+             py::arg("include_triggers") = true,
+             py::arg("excluded") = std::nullopt)
+        .def("drain_physics_events",
+             [contact_phase_name](easy3d::Scene& scene) {
+                 py::list result;
+                 for (const easy3d::ScenePhysicsContactEvent& event :
+                      scene.drain_physics_events()) {
+                     result.append(py::make_tuple(
+                         contact_phase_name(event.phase),
+                         event.trigger,
+                         event.first,
+                         event.second,
+                         py::make_tuple(event.point.x, event.point.y, event.point.z),
+                         py::make_tuple(event.normal.x,
+                                        event.normal.y,
+                                        event.normal.z)));
+                 }
+                 return result;
+             })
         .def("camera_info", [](const easy3d::Scene& scene) {
             const easy3d::Camera& camera = scene.camera();
             return py::make_tuple(

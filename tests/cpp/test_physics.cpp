@@ -1,5 +1,6 @@
 #include "easy3d/physics.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -36,12 +37,14 @@ int main() {
     floor_settings.layer = CollisionLayer::Static;
     floor_settings.position = {0.0F, -0.5F, 0.0F};
     floor_settings.half_extents = {5.0F, 0.5F, 5.0F};
+    floor_settings.user_data = 101;
     const PhysicsBodyHandle floor = world.create_body(floor_settings);
 
     PhysicsBodySettings ball_settings{};
     ball_settings.shape = PhysicsShape::Sphere;
     ball_settings.position = {0.0F, 3.0F, 0.0F};
     ball_settings.radius = 0.5F;
+    ball_settings.user_data = 202;
     const PhysicsBodyHandle ball = world.create_body(ball_settings);
     assert(world.body_count() == 2);
 
@@ -53,6 +56,59 @@ int main() {
     assert(std::abs(settled.x) < 1.0e-3F);
     assert(settled.y > 0.45F && settled.y < 0.56F);
     assert(std::abs(settled.z) < 1.0e-3F);
+
+    const std::vector<PhysicsQueryHit> ray_hits =
+        world.raycast_all({0.0F, 5.0F, 0.0F}, {0.0F, -1.0F, 0.0F}, 10.0F);
+    assert(ray_hits.size() == 2);
+    assert(ray_hits[0].user_data == 202);
+    assert(ray_hits[1].user_data == 101);
+    assert(ray_hits[0].distance < ray_hits[1].distance);
+    const std::vector<PhysicsQueryHit> filtered_ray_hits = world.raycast_all(
+        {0.0F, 5.0F, 0.0F},
+        {0.0F, -1.0F, 0.0F},
+        10.0F,
+        PhysicsQueryFilter{.excluded_user_data = 202});
+    assert(filtered_ray_hits.size() == 1 && filtered_ray_hits[0].user_data == 101);
+
+    const std::vector<PhysicsQueryHit> sphere_overlaps =
+        world.overlap_sphere(settled, 0.25F);
+    assert(sphere_overlaps.size() == 1 && sphere_overlaps[0].user_data == 202);
+    const std::vector<PhysicsQueryHit> box_overlaps =
+        world.overlap_box(settled, {0.25F, 0.25F, 0.25F});
+    assert(box_overlaps.size() == 1 && box_overlaps[0].user_data == 202);
+    const std::vector<PhysicsQueryHit> sphere_cast_hits = world.sphere_cast_all(
+        {0.0F, 5.0F, 0.0F}, 0.25F, {0.0F, -1.0F, 0.0F}, 10.0F);
+    assert(sphere_cast_hits.size() == 2 && sphere_cast_hits[0].user_data == 202 &&
+           sphere_cast_hits[1].user_data == 101);
+    const std::vector<PhysicsQueryHit> capsule_cast_hits = world.capsule_cast_all(
+        {0.0F, 5.0F, 0.0F},
+        0.2F,
+        1.0F,
+        Quat{},
+        {0.0F, -1.0F, 0.0F},
+        10.0F);
+    assert(capsule_cast_hits.size() == 2 && capsule_cast_hits[0].user_data == 202 &&
+           capsule_cast_hits[1].user_data == 101);
+
+    const std::vector<PhysicsContactEvent> contacts = world.drain_contact_events();
+    assert(std::any_of(contacts.begin(), contacts.end(), [](const auto& event) {
+        return event.phase == PhysicsContactPhase::Enter &&
+               ((event.first_user_data == 101 && event.second_user_data == 202) ||
+                (event.first_user_data == 202 && event.second_user_data == 101));
+    }));
+    assert(std::any_of(contacts.begin(), contacts.end(), [](const auto& event) {
+        return event.phase == PhysicsContactPhase::Stay;
+    }));
+    assert(std::none_of(contacts.begin(), contacts.end(), [](const auto& event) {
+        return event.phase == PhysicsContactPhase::Exit;
+    }));
+
+    world.set_body_transform(ball, {0.0F, 10.0F, 0.0F}, Quat{});
+    world.step(1.0F / 60.0F);
+    const std::vector<PhysicsContactEvent> exits = world.drain_contact_events();
+    assert(std::any_of(exits.begin(), exits.end(), [](const auto& event) {
+        return event.phase == PhysicsContactPhase::Exit;
+    }));
 
     world.destroy_body(ball);
     assert(!world.is_alive(ball));

@@ -251,6 +251,106 @@ class _NativeScene:
         position: tuple[float, float, float],
         rotation: tuple[float, float, float, float],
     ) -> None: ...
+    def physics_raycast_all(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        max_distance: float,
+        layer_mask: int = 15,
+        include_triggers: bool = True,
+        excluded: EntityHandle | None = None,
+    ) -> list[
+        tuple[
+            EntityHandle,
+            tuple[float, float, float],
+            tuple[float, float, float],
+            float,
+            float,
+        ]
+    ]: ...
+    def physics_overlap_sphere(
+        self,
+        center: tuple[float, float, float],
+        radius: float,
+        layer_mask: int = 15,
+        include_triggers: bool = True,
+        excluded: EntityHandle | None = None,
+    ) -> list[
+        tuple[
+            EntityHandle,
+            tuple[float, float, float],
+            tuple[float, float, float],
+            float,
+            float,
+        ]
+    ]: ...
+    def physics_overlap_box(
+        self,
+        center: tuple[float, float, float],
+        half_extents: tuple[float, float, float],
+        rotation: tuple[float, float, float, float],
+        layer_mask: int = 15,
+        include_triggers: bool = True,
+        excluded: EntityHandle | None = None,
+    ) -> list[
+        tuple[
+            EntityHandle,
+            tuple[float, float, float],
+            tuple[float, float, float],
+            float,
+            float,
+        ]
+    ]: ...
+    def physics_sphere_cast_all(
+        self,
+        origin: tuple[float, float, float],
+        radius: float,
+        direction: tuple[float, float, float],
+        max_distance: float,
+        layer_mask: int = 15,
+        include_triggers: bool = True,
+        excluded: EntityHandle | None = None,
+    ) -> list[
+        tuple[
+            EntityHandle,
+            tuple[float, float, float],
+            tuple[float, float, float],
+            float,
+            float,
+        ]
+    ]: ...
+    def physics_capsule_cast_all(
+        self,
+        origin: tuple[float, float, float],
+        radius: float,
+        height: float,
+        rotation: tuple[float, float, float, float],
+        direction: tuple[float, float, float],
+        max_distance: float,
+        layer_mask: int = 15,
+        include_triggers: bool = True,
+        excluded: EntityHandle | None = None,
+    ) -> list[
+        tuple[
+            EntityHandle,
+            tuple[float, float, float],
+            tuple[float, float, float],
+            float,
+            float,
+        ]
+    ]: ...
+    def drain_physics_events(
+        self,
+    ) -> list[
+        tuple[
+            str,
+            bool,
+            EntityHandle,
+            EntityHandle,
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ]
+    ]: ...
     def camera_info(
         self,
     ) -> tuple[

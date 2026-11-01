@@ -6,16 +6,29 @@
 #include <Jolt/Core/JobSystemSingleThreaded.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
+#include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <mutex>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -196,6 +209,216 @@ void validate_settings(const PhysicsBodySettings& settings) {
     }
 }
 
+[[nodiscard]] std::uint64_t body_pair_key(const JPH::BodyID first,
+                                          const JPH::BodyID second) noexcept {
+    const std::uint32_t first_value = first.GetIndexAndSequenceNumber();
+    const std::uint32_t second_value = second.GetIndexAndSequenceNumber();
+    const std::uint32_t lower = std::min(first_value, second_value);
+    const std::uint32_t upper = std::max(first_value, second_value);
+    return (static_cast<std::uint64_t>(lower) << 32U) | upper;
+}
+
+class ContactRecorder final : public JPH::ContactListener {
+public:
+    explicit ContactRecorder(const std::size_t max_pending_events)
+        : max_pending_events_(max_pending_events) {
+        pending_.reserve(max_pending_events_);
+        active_.reserve(std::max<std::size_t>(1U, max_pending_events_ / 4U));
+        active_bodies_.reserve(std::max<std::size_t>(1U, max_pending_events_ / 4U));
+        touched_.reserve(std::max<std::size_t>(1U, max_pending_events_ / 4U));
+    }
+
+    void OnContactAdded(const JPH::Body& first,
+                        const JPH::Body& second,
+                        const JPH::ContactManifold& manifold,
+                        JPH::ContactSettings&) override {
+        record(PhysicsContactPhase::Enter, first, second, manifold);
+    }
+
+    void OnContactPersisted(const JPH::Body& first,
+                            const JPH::Body& second,
+                            const JPH::ContactManifold& manifold,
+                            JPH::ContactSettings&) override {
+        record(PhysicsContactPhase::Stay, first, second, manifold);
+    }
+
+    void OnContactRemoved(const JPH::SubShapeIDPair&) override {}
+
+    void finalize_removals(const JPH::BodyInterface& bodies) {
+        const std::lock_guard lock(mutex_);
+        for (auto cached = active_.begin(); cached != active_.end();) {
+            const std::uint64_t key = cached->first;
+            if (touched_.contains(key)) {
+                ++cached;
+                continue;
+            }
+            const auto body_pair = active_bodies_.find(key);
+            if (body_pair == active_bodies_.end()) {
+                cached = active_.erase(cached);
+                continue;
+            }
+
+            bool all_bodies_added = true;
+            bool has_moving_body = false;
+            bool moving_body_active = false;
+            for (const JPH::BodyID body : {body_pair->second.first,
+                                           body_pair->second.second}) {
+                if (!bodies.IsAdded(body)) {
+                    all_bodies_added = false;
+                    continue;
+                }
+                if (bodies.GetMotionType(body) != JPH::EMotionType::Static) {
+                    has_moving_body = true;
+                    moving_body_active = moving_body_active || bodies.IsActive(body);
+                }
+            }
+            if (all_bodies_added && has_moving_body && !moving_body_active) {
+                ++cached;
+                continue;
+            }
+            PhysicsContactEvent event = cached->second;
+            event.phase = PhysicsContactPhase::Exit;
+            append(event);
+            active_bodies_.erase(body_pair);
+            cached = active_.erase(cached);
+        }
+        touched_.clear();
+    }
+
+    [[nodiscard]] std::vector<PhysicsContactEvent> drain() {
+        const std::lock_guard lock(mutex_);
+        if (overflowed_) {
+            pending_.clear();
+            overflowed_ = false;
+            throw PhysicsError("physics contact event queue capacity exhausted");
+        }
+        std::vector<PhysicsContactEvent> result;
+        result.swap(pending_);
+        return result;
+    }
+
+    void clear() noexcept {
+        const std::lock_guard lock(mutex_);
+        pending_.clear();
+        active_.clear();
+        active_bodies_.clear();
+        touched_.clear();
+        overflowed_ = false;
+    }
+
+private:
+    void record(const PhysicsContactPhase phase,
+                const JPH::Body& first,
+                const JPH::Body& second,
+                const JPH::ContactManifold& manifold) {
+        PhysicsContactEvent event{};
+        event.phase = phase;
+        event.first_user_data = first.GetUserData();
+        event.second_user_data = second.GetUserData();
+        event.normal = from_jolt_vec(manifold.mWorldSpaceNormal);
+        event.trigger = first.IsSensor() || second.IsSensor();
+        if (!manifold.mRelativeContactPointsOn1.empty()) {
+            event.point = from_jolt_position(manifold.GetWorldSpaceContactPointOn1(0));
+        } else {
+            event.point = from_jolt_position(manifold.mBaseOffset);
+        }
+
+        const std::lock_guard lock(mutex_);
+        const std::uint64_t key = body_pair_key(first.GetID(), second.GetID());
+        if (event.phase == PhysicsContactPhase::Enter && active_.contains(key)) {
+            event.phase = PhysicsContactPhase::Stay;
+        }
+        append(event);
+        try {
+            active_.insert_or_assign(key, event);
+            active_bodies_.insert_or_assign(key, BodyPair{first.GetID(), second.GetID()});
+            touched_.insert(key);
+        } catch (...) {
+            overflowed_ = true;
+        }
+    }
+
+    void append(const PhysicsContactEvent& event) noexcept {
+        if (pending_.size() < max_pending_events_) {
+            try {
+                pending_.push_back(event);
+            } catch (...) {
+                overflowed_ = true;
+            }
+        } else {
+            overflowed_ = true;
+        }
+    }
+
+    std::mutex mutex_;
+    struct BodyPair final {
+        JPH::BodyID first;
+        JPH::BodyID second;
+    };
+    std::size_t max_pending_events_;
+    bool overflowed_{false};
+    std::vector<PhysicsContactEvent> pending_;
+    std::unordered_map<std::uint64_t, PhysicsContactEvent> active_;
+    std::unordered_map<std::uint64_t, BodyPair> active_bodies_;
+    std::unordered_set<std::uint64_t> touched_;
+};
+
+[[nodiscard]] bool query_accepts(const JPH::BodyInterface& bodies,
+                                 const JPH::BodyID body,
+                                 const PhysicsQueryFilter filter) {
+    const JPH::ObjectLayer layer = bodies.GetObjectLayer(body);
+    if (layer >= 8U || (filter.layer_mask & (1U << layer)) == 0U) {
+        return false;
+    }
+    if (!filter.include_sensors && bodies.IsSensor(body)) {
+        return false;
+    }
+    const std::uint64_t user_data = bodies.GetUserData(body);
+    return filter.excluded_user_data == 0 || user_data != filter.excluded_user_data;
+}
+
+[[nodiscard]] std::vector<PhysicsQueryHit> cast_shape_all(
+    JPH::PhysicsSystem& physics_system,
+    const JPH::Shape& shape,
+    const Vec3 origin,
+    const Quat rotation,
+    const Vec3 direction,
+    const float max_distance,
+    const PhysicsQueryFilter filter) {
+    const Vec3 cast_delta = direction.normalized() * max_distance;
+    const JPH::RShapeCast cast = JPH::RShapeCast::sFromWorldTransform(
+        &shape,
+        JPH::Vec3::sOne(),
+        JPH::RMat44::sRotationTranslation(to_jolt(rotation.normalized()),
+                                         to_jolt_position(origin)),
+        to_jolt(cast_delta));
+    JPH::ShapeCastSettings settings;
+    JPH::AllHitCollisionCollector<JPH::CastShapeCollector> collector;
+    physics_system.GetNarrowPhaseQuery().CastShape(
+        cast, settings, JPH::RVec3::sZero(), collector);
+
+    const JPH::BodyInterface& bodies = physics_system.GetBodyInterface();
+    std::unordered_set<std::uint64_t> seen;
+    std::vector<PhysicsQueryHit> result;
+    result.reserve(collector.mHits.size());
+    for (const JPH::ShapeCastResult& hit : collector.mHits) {
+        if (!query_accepts(bodies, hit.mBodyID2, filter)) continue;
+        const std::uint64_t user_data = bodies.GetUserData(hit.mBodyID2);
+        if (!seen.insert(user_data).second) continue;
+        result.push_back({user_data,
+                          from_jolt_vec(hit.mContactPointOn2),
+                          from_jolt_vec(
+                              (-hit.mPenetrationAxis).NormalizedOr(JPH::Vec3::sZero())),
+                          max_distance * std::max(hit.mFraction, 0.0F),
+                          hit.mFraction});
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        if (left.fraction != right.fraction) return left.fraction < right.fraction;
+        return left.user_data < right.user_data;
+    });
+    return result;
+}
+
 } // namespace
 
 bool PhysicsBodyHandle::valid() const noexcept {
@@ -229,7 +452,9 @@ public:
           world_id(next_physics_world_id.fetch_add(1, std::memory_order_relaxed)),
           config(std::move(world_config)),
           temporary_allocator(static_cast<JPH::uint>(config.temporary_allocator_bytes)),
-          job_system(JPH::cMaxPhysicsJobs) {
+          job_system(JPH::cMaxPhysicsJobs),
+          contact_recorder(std::max<std::size_t>(
+              1'024U, static_cast<std::size_t>(config.max_contact_constraints) * 4U)) {
         if (world_id == 0) {
             throw PhysicsError("Easy3D exhausted native physics world identifiers");
         }
@@ -240,6 +465,7 @@ public:
                             broadphase_layers,
                             object_vs_broadphase_filter,
                             object_layer_pair_filter);
+        physics_system.SetContactListener(&contact_recorder);
         slots.reserve(config.max_bodies);
         free_indices.reserve(config.max_bodies);
     }
@@ -284,6 +510,7 @@ public:
             free_indices.push_back(static_cast<std::uint32_t>(index));
         }
         body_count = 0;
+        contact_recorder.clear();
     }
 
     JoltRuntime& runtime;
@@ -294,6 +521,7 @@ public:
     ObjectLayerPairFilter object_layer_pair_filter;
     JPH::TempAllocatorImpl temporary_allocator;
     JPH::JobSystemSingleThreaded job_system;
+    ContactRecorder contact_recorder;
     JPH::PhysicsSystem physics_system;
     std::vector<Slot> slots;
     std::vector<std::uint32_t> free_indices;
@@ -367,6 +595,7 @@ PhysicsBodyHandle PhysicsWorld::create_body(const PhysicsBodySettings& settings)
     body_settings.mRestitution = settings.material.restitution;
     body_settings.mGravityFactor = settings.gravity_factor;
     body_settings.mLinearVelocity = to_jolt(settings.linear_velocity);
+    body_settings.mUserData = settings.user_data;
     if (settings.motion_type == PhysicsMotionType::Dynamic) {
         body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
         body_settings.mMassPropertiesOverride.mMass = settings.mass;
@@ -486,6 +715,170 @@ void PhysicsWorld::add_impulse(const PhysicsBodyHandle handle, const Vec3 impuls
     impl_->physics_system.GetBodyInterface().AddImpulse(slot.body_id, to_jolt(impulse));
 }
 
+std::vector<PhysicsQueryHit> PhysicsWorld::raycast_all(
+    const Vec3 origin,
+    const Vec3 direction,
+    const float max_distance,
+    const PhysicsQueryFilter filter) const {
+    if (!finite(origin) || !finite(direction) || direction.length_squared() <= 1.0e-12F) {
+        throw std::invalid_argument("ray origin and nonzero direction must be finite");
+    }
+    if (!std::isfinite(max_distance) || max_distance <= 0.0F) {
+        throw std::invalid_argument("ray max distance must be finite and positive");
+    }
+
+    const Vec3 ray_delta = direction.normalized() * max_distance;
+    const JPH::RRayCast ray(to_jolt_position(origin), to_jolt(ray_delta));
+    JPH::RayCastSettings settings;
+    JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
+    impl_->physics_system.GetNarrowPhaseQuery().CastRay(ray, settings, collector);
+
+    const JPH::BodyInterface& bodies = impl_->physics_system.GetBodyInterface();
+    std::vector<PhysicsQueryHit> result;
+    result.reserve(collector.mHits.size());
+    for (const JPH::RayCastResult& hit : collector.mHits) {
+        if (!query_accepts(bodies, hit.mBodyID, filter)) {
+            continue;
+        }
+        const JPH::RVec3 point = ray.GetPointOnRay(hit.mFraction);
+        const JPH::TransformedShape transformed = bodies.GetTransformedShape(hit.mBodyID);
+        result.push_back({bodies.GetUserData(hit.mBodyID),
+                          from_jolt_position(point),
+                          from_jolt_vec(
+                              transformed.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point)),
+                          max_distance * hit.mFraction,
+                          hit.mFraction});
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        if (left.fraction != right.fraction) return left.fraction < right.fraction;
+        return left.user_data < right.user_data;
+    });
+    return result;
+}
+
+std::vector<PhysicsQueryHit> PhysicsWorld::overlap_sphere(
+    const Vec3 center,
+    const float radius,
+    const PhysicsQueryFilter filter) const {
+    if (!finite(center) || !std::isfinite(radius) || radius <= 0.0F) {
+        throw std::invalid_argument("overlap sphere center must be finite and radius positive");
+    }
+    const JPH::SphereShape shape(radius);
+    JPH::CollideShapeSettings settings;
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+    impl_->physics_system.GetNarrowPhaseQuery().CollideShape(
+        &shape,
+        JPH::Vec3::sOne(),
+        JPH::RMat44::sTranslation(to_jolt_position(center)),
+        settings,
+        JPH::RVec3::sZero(),
+        collector);
+
+    const JPH::BodyInterface& bodies = impl_->physics_system.GetBodyInterface();
+    std::unordered_set<std::uint64_t> seen;
+    std::vector<PhysicsQueryHit> result;
+    result.reserve(collector.mHits.size());
+    for (const JPH::CollideShapeResult& hit : collector.mHits) {
+        if (!query_accepts(bodies, hit.mBodyID2, filter)) continue;
+        const std::uint64_t user_data = bodies.GetUserData(hit.mBodyID2);
+        if (!seen.insert(user_data).second) continue;
+        result.push_back({user_data,
+                          from_jolt_vec(hit.mContactPointOn2),
+                          from_jolt_vec(
+                              (-hit.mPenetrationAxis).NormalizedOr(JPH::Vec3::sZero())),
+                          0.0F,
+                          0.0F});
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        return left.user_data < right.user_data;
+    });
+    return result;
+}
+
+std::vector<PhysicsQueryHit> PhysicsWorld::overlap_box(
+    const Vec3 center,
+    const Vec3 half_extents,
+    const Quat rotation,
+    const PhysicsQueryFilter filter) const {
+    if (!finite(center) || !finite(half_extents) || !finite(rotation) ||
+        half_extents.x <= 0.0F || half_extents.y <= 0.0F || half_extents.z <= 0.0F) {
+        throw std::invalid_argument(
+            "overlap box transform must be finite and half extents positive");
+    }
+    const JPH::BoxShape shape(to_jolt(half_extents));
+    JPH::CollideShapeSettings settings;
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+    impl_->physics_system.GetNarrowPhaseQuery().CollideShape(
+        &shape,
+        JPH::Vec3::sOne(),
+        JPH::RMat44::sRotationTranslation(to_jolt(rotation.normalized()),
+                                         to_jolt_position(center)),
+        settings,
+        JPH::RVec3::sZero(),
+        collector);
+
+    const JPH::BodyInterface& bodies = impl_->physics_system.GetBodyInterface();
+    std::unordered_set<std::uint64_t> seen;
+    std::vector<PhysicsQueryHit> result;
+    result.reserve(collector.mHits.size());
+    for (const JPH::CollideShapeResult& hit : collector.mHits) {
+        if (!query_accepts(bodies, hit.mBodyID2, filter)) continue;
+        const std::uint64_t user_data = bodies.GetUserData(hit.mBodyID2);
+        if (!seen.insert(user_data).second) continue;
+        result.push_back({user_data,
+                          from_jolt_vec(hit.mContactPointOn2),
+                          from_jolt_vec(
+                              (-hit.mPenetrationAxis).NormalizedOr(JPH::Vec3::sZero())),
+                          0.0F,
+                          0.0F});
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        return left.user_data < right.user_data;
+    });
+    return result;
+}
+
+std::vector<PhysicsQueryHit> PhysicsWorld::sphere_cast_all(
+    const Vec3 origin,
+    const float radius,
+    const Vec3 direction,
+    const float max_distance,
+    const PhysicsQueryFilter filter) const {
+    if (!finite(origin) || !std::isfinite(radius) || radius <= 0.0F ||
+        !finite(direction) || direction.length_squared() <= 1.0e-12F ||
+        !std::isfinite(max_distance) || max_distance <= 0.0F) {
+        throw std::invalid_argument(
+            "sphere cast requires finite origin/direction and positive radius/distance");
+    }
+    const JPH::SphereShape shape(radius);
+    return cast_shape_all(
+        impl_->physics_system, shape, origin, Quat{}, direction, max_distance, filter);
+}
+
+std::vector<PhysicsQueryHit> PhysicsWorld::capsule_cast_all(
+    const Vec3 origin,
+    const float radius,
+    const float height,
+    const Quat rotation,
+    const Vec3 direction,
+    const float max_distance,
+    const PhysicsQueryFilter filter) const {
+    if (!finite(origin) || !finite(rotation) || !std::isfinite(radius) || radius <= 0.0F ||
+        !std::isfinite(height) || height <= radius * 2.0F || !finite(direction) ||
+        direction.length_squared() <= 1.0e-12F || !std::isfinite(max_distance) ||
+        max_distance <= 0.0F) {
+        throw std::invalid_argument(
+            "capsule cast requires finite values, positive radius/distance, and height > diameter");
+    }
+    const JPH::CapsuleShape shape(height * 0.5F - radius, radius);
+    return cast_shape_all(
+        impl_->physics_system, shape, origin, rotation, direction, max_distance, filter);
+}
+
+std::vector<PhysicsContactEvent> PhysicsWorld::drain_contact_events() {
+    return impl_->contact_recorder.drain();
+}
+
 void PhysicsWorld::step(const float delta_seconds, const std::uint32_t collision_steps) {
     if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0F) {
         throw std::invalid_argument("physics delta must be finite and positive");
@@ -498,6 +891,8 @@ void PhysicsWorld::step(const float delta_seconds, const std::uint32_t collision
         static_cast<int>(collision_steps),
         &impl_->temporary_allocator,
         &impl_->job_system);
+    impl_->contact_recorder.finalize_removals(
+        impl_->physics_system.GetBodyInterface());
     if (error != JPH::EPhysicsUpdateError::None) {
         std::ostringstream message;
         message << "Jolt physics update reported capacity error bits 0x" << std::hex

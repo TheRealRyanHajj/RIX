@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
+from .math import Vec3
+from .physics import CollisionEvent
+
 if TYPE_CHECKING:
     from .entity import Entity
     from .scene import Scene
@@ -144,6 +147,7 @@ class SimulationScheduler:
             self._fixed_ticks += 1
             self._accumulator -= self.fixed_dt
             steps += 1
+            self._dispatch_physics_events(scene)
 
         self._run_hook(scene, "update", delta)
         self._run_hook(scene, "late_update", delta)
@@ -176,11 +180,34 @@ class SimulationScheduler:
                 self._invoke(entity, hook, delta)
         scene._commit_deferred(self.destroy_callback)
 
+    def _dispatch_physics_events(self, scene: Scene) -> None:
+        for phase, trigger, first_handle, second_handle, point, normal in (
+            scene._native.drain_physics_events()
+        ):
+            first = scene._entity_for_handle(first_handle)
+            second = scene._entity_for_handle(second_handle)
+            point_value = Vec3(point)
+            normal_value = Vec3(normal)
+            prefix = "on_trigger" if trigger else "on_collision"
+            hook = f"{prefix}_{phase}"
+            for entity, other, recipient_normal in (
+                (first, second, normal_value),
+                (second, first, -normal_value),
+            ):
+                state = self._lifecycle.setdefault(self._key(entity), _Lifecycle())
+                if entity.is_alive and entity.enabled and state.started:
+                    self._invoke(
+                        entity,
+                        hook,
+                        CollisionEvent(other, point_value, recipient_normal),
+                    )
+        scene._commit_deferred(self.destroy_callback)
+
     def _invoke(
         self,
         entity: Entity,
         hook: str,
-        *arguments: float,
+        *arguments: object,
         force: bool = False,
     ) -> None:
         callback = getattr(entity, hook, None)

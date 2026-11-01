@@ -1,5 +1,6 @@
 #include "easy3d/scene.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -112,6 +113,24 @@ int main() {
         !physics_scene.has_rigid_body_component(dynamic_entity) ||
         physics_scene.local_transform(dynamic_entity).position.y < 0.45F) {
         return fail(15, "scene physics components did not synchronize dynamic pose");
+    }
+    const easy3d::Vec3 dynamic_position =
+        physics_scene.local_transform(dynamic_entity).position;
+    const std::vector<easy3d::ScenePhysicsQueryHit> scene_ray_hits =
+        physics_scene.raycast_all({dynamic_position.x, 5.0F, dynamic_position.z},
+                                  {0.0F, -1.0F, 0.0F},
+                                  10.0F);
+    if (scene_ray_hits.size() != 2 || scene_ray_hits.front().entity != dynamic_entity ||
+        scene_ray_hits.back().entity != floor_entity) {
+        return fail(18, "scene raycast did not return sorted entity snapshots");
+    }
+    const std::vector<easy3d::ScenePhysicsContactEvent> scene_contacts =
+        physics_scene.drain_physics_events();
+    if (scene_contacts.empty() ||
+        !std::any_of(scene_contacts.begin(), scene_contacts.end(), [](const auto& event) {
+            return event.phase == easy3d::PhysicsContactPhase::Enter;
+        })) {
+        return fail(19, "scene did not translate native contact events");
     }
     physics_scene.teleport_rigid_body(
         dynamic_entity, {1.0F, 4.0F, 0.0F}, easy3d::Quat{});

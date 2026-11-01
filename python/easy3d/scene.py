@@ -197,9 +197,27 @@ class Scene:
         return self._native.create_entity(name)
 
     def _register_script_entity(self, entity: Entity) -> None:
-        hooks = ("awake", "start", "fixed_update", "update", "late_update", "on_destroy")
+        hooks = (
+            "awake",
+            "start",
+            "fixed_update",
+            "update",
+            "late_update",
+            "on_destroy",
+            "on_collision_enter",
+            "on_collision_stay",
+            "on_collision_exit",
+            "on_trigger_enter",
+            "on_trigger_stay",
+            "on_trigger_exit",
+        )
         if any(callable(getattr(entity, hook, None)) for hook in hooks):
             self._script_entities[entity.id] = entity
+
+    def _entity_for_handle(self, handle: EntityHandle) -> Entity:
+        from .entity import Entity
+
+        return self._script_entities.get(handle.id) or Entity._from_handle(self, handle)
 
     def _rollback_entity_construction(self, entity: Entity) -> None:
         """Remove a partially constructed entity without running lifecycle hooks."""

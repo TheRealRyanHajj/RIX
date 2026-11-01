@@ -226,9 +226,9 @@ the complete falling-body/collision/lifetime regression runs in the
 graphics-disabled build.
 
 The scheduler's fixed phase is currently `Python fixed_update → deferred
-mutation commit → Jolt PhysicsSystem::Update → dynamic entity pose sync`.
-Collision callback dispatch will be inserted after the native update in Phase
-2.6. Render updates remain after all catch-up physics ticks.
+mutation commit → Jolt PhysicsSystem::Update → dynamic entity pose sync →
+collision/trigger snapshot dispatch → deferred mutation commit`. Render updates
+remain after all catch-up physics ticks.
 
 `Scene` owns a generation-qualified entity-to-body table. Collider creation
 builds a static Jolt body from the entity world pose; attaching/removing a rigid
@@ -238,3 +238,24 @@ Static and kinematic entity changes push pose into Jolt, while dynamic pose
 changes are accepted only through the explicit teleport API and otherwise flow
 from Jolt to the entity after a step. Physics entities reject parenting until a
 local/world solver synchronization contract is implemented.
+
+## Physics queries and contact dispatch
+
+Narrow-phase ray, sphere/capsule cast and box/sphere overlap queries execute
+synchronously against a scene's Jolt world. Jolt IDs are converted immediately
+to generation-checked entity handles; collector storage never crosses the
+binding boundary. Native results apply layer/sensor/exclusion filters before
+conversion and deterministic sorting.
+
+The Jolt `ContactListener` never calls Python. It copies only user IDs,
+world-space contact data, phase and sensor state into a mutex-protected bounded
+queue. Queue overflow is surfaced as `PhysicsError` when drained rather than
+silently dropping an unbounded workload. The scheduler drains after each
+completed physics update and dynamic-pose sync, builds immutable per-recipient
+events, invokes callbacks through the existing exception/profiling path, and
+commits deferred mutations afterward.
+
+Contact reconciliation tracks which pairs were actually touched each step.
+Pairs retired only because all moving bodies slept remain logically active, so
+sleep does not fabricate an exit; an awakened pair that is no longer detected
+produces the deferred exit snapshot.

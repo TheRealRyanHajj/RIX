@@ -880,6 +880,169 @@ void Scene::teleport_rigid_body(const EntityHandle handle,
     physics_->set_body_transform(component.body, position, rotation);
 }
 
+std::vector<ScenePhysicsQueryHit> Scene::raycast_all(
+    const Vec3 origin,
+    const Vec3 direction,
+    const float max_distance,
+    const std::uint8_t layer_mask,
+    const bool include_triggers,
+    const std::optional<EntityHandle> excluded) const {
+    if (!finite(origin) || !finite(direction) || direction.length_squared() <= 1.0e-12F ||
+        !std::isfinite(max_distance) || max_distance <= 0.0F) {
+        throw std::invalid_argument(
+            "ray origin/direction must be finite and max distance positive");
+    }
+    if (excluded.has_value()) (void)world_.entity_name(*excluded);
+    if (!physics_) return {};
+    const PhysicsQueryFilter filter{
+        layer_mask,
+        include_triggers,
+        excluded.has_value() ? excluded->id() : 0,
+    };
+    std::vector<ScenePhysicsQueryHit> result;
+    for (const PhysicsQueryHit& hit :
+         physics_->raycast_all(origin, direction, max_distance, filter)) {
+        const EntityHandle entity = handle_from_id(hit.user_data);
+        if (world_.is_alive(entity)) {
+            result.push_back({entity, hit.point, hit.normal, hit.distance, hit.fraction});
+        }
+    }
+    return result;
+}
+
+std::vector<ScenePhysicsQueryHit> Scene::overlap_sphere(
+    const Vec3 center,
+    const float radius,
+    const std::uint8_t layer_mask,
+    const bool include_triggers,
+    const std::optional<EntityHandle> excluded) const {
+    if (!finite(center) || !std::isfinite(radius) || radius <= 0.0F) {
+        throw std::invalid_argument("overlap sphere center must be finite and radius positive");
+    }
+    if (excluded.has_value()) (void)world_.entity_name(*excluded);
+    if (!physics_) return {};
+    const PhysicsQueryFilter filter{
+        layer_mask,
+        include_triggers,
+        excluded.has_value() ? excluded->id() : 0,
+    };
+    std::vector<ScenePhysicsQueryHit> result;
+    for (const PhysicsQueryHit& hit : physics_->overlap_sphere(center, radius, filter)) {
+        const EntityHandle entity = handle_from_id(hit.user_data);
+        if (world_.is_alive(entity)) {
+            result.push_back({entity, hit.point, hit.normal, hit.distance, hit.fraction});
+        }
+    }
+    return result;
+}
+
+std::vector<ScenePhysicsQueryHit> Scene::overlap_box(
+    const Vec3 center,
+    const Vec3 half_extents,
+    const Quat rotation,
+    const std::uint8_t layer_mask,
+    const bool include_triggers,
+    const std::optional<EntityHandle> excluded) const {
+    if (!finite(center) || !finite(half_extents) || !finite(rotation) ||
+        half_extents.x <= 0.0F || half_extents.y <= 0.0F || half_extents.z <= 0.0F) {
+        throw std::invalid_argument(
+            "overlap box transform must be finite and half extents positive");
+    }
+    if (excluded.has_value()) (void)world_.entity_name(*excluded);
+    if (!physics_) return {};
+    const PhysicsQueryFilter filter{
+        layer_mask,
+        include_triggers,
+        excluded.has_value() ? excluded->id() : 0,
+    };
+    std::vector<ScenePhysicsQueryHit> result;
+    for (const PhysicsQueryHit& hit :
+         physics_->overlap_box(center, half_extents, rotation, filter)) {
+        const EntityHandle entity = handle_from_id(hit.user_data);
+        if (world_.is_alive(entity)) {
+            result.push_back({entity, hit.point, hit.normal, hit.distance, hit.fraction});
+        }
+    }
+    return result;
+}
+
+std::vector<ScenePhysicsQueryHit> Scene::sphere_cast_all(
+    const Vec3 origin,
+    const float radius,
+    const Vec3 direction,
+    const float max_distance,
+    const std::uint8_t layer_mask,
+    const bool include_triggers,
+    const std::optional<EntityHandle> excluded) const {
+    if (!finite(origin) || !std::isfinite(radius) || radius <= 0.0F ||
+        !finite(direction) || direction.length_squared() <= 1.0e-12F ||
+        !std::isfinite(max_distance) || max_distance <= 0.0F) {
+        throw std::invalid_argument(
+            "sphere cast requires finite values and positive radius/distance");
+    }
+    if (excluded.has_value()) (void)world_.entity_name(*excluded);
+    if (!physics_) return {};
+    const PhysicsQueryFilter filter{layer_mask,
+                                    include_triggers,
+                                    excluded.has_value() ? excluded->id() : 0};
+    std::vector<ScenePhysicsQueryHit> result;
+    for (const PhysicsQueryHit& hit :
+         physics_->sphere_cast_all(origin, radius, direction, max_distance, filter)) {
+        const EntityHandle entity = handle_from_id(hit.user_data);
+        if (world_.is_alive(entity)) {
+            result.push_back({entity, hit.point, hit.normal, hit.distance, hit.fraction});
+        }
+    }
+    return result;
+}
+
+std::vector<ScenePhysicsQueryHit> Scene::capsule_cast_all(
+    const Vec3 origin,
+    const float radius,
+    const float height,
+    const Quat rotation,
+    const Vec3 direction,
+    const float max_distance,
+    const std::uint8_t layer_mask,
+    const bool include_triggers,
+    const std::optional<EntityHandle> excluded) const {
+    if (!finite(origin) || !finite(rotation) || !std::isfinite(radius) || radius <= 0.0F ||
+        !std::isfinite(height) || height <= radius * 2.0F || !finite(direction) ||
+        direction.length_squared() <= 1.0e-12F || !std::isfinite(max_distance) ||
+        max_distance <= 0.0F) {
+        throw std::invalid_argument(
+            "capsule cast requires finite values, positive radius/distance, and height > diameter");
+    }
+    if (excluded.has_value()) (void)world_.entity_name(*excluded);
+    if (!physics_) return {};
+    const PhysicsQueryFilter filter{layer_mask,
+                                    include_triggers,
+                                    excluded.has_value() ? excluded->id() : 0};
+    std::vector<ScenePhysicsQueryHit> result;
+    for (const PhysicsQueryHit& hit : physics_->capsule_cast_all(
+             origin, radius, height, rotation, direction, max_distance, filter)) {
+        const EntityHandle entity = handle_from_id(hit.user_data);
+        if (world_.is_alive(entity)) {
+            result.push_back({entity, hit.point, hit.normal, hit.distance, hit.fraction});
+        }
+    }
+    return result;
+}
+
+std::vector<ScenePhysicsContactEvent> Scene::drain_physics_events() {
+    if (!physics_) return {};
+    std::vector<ScenePhysicsContactEvent> result;
+    for (const PhysicsContactEvent& event : physics_->drain_contact_events()) {
+        const EntityHandle first = handle_from_id(event.first_user_data);
+        const EntityHandle second = handle_from_id(event.second_user_data);
+        if (world_.is_alive(first) && world_.is_alive(second)) {
+            result.push_back(
+                {event.phase, first, second, event.point, event.normal, event.trigger});
+        }
+    }
+    return result;
+}
+
 const Camera& Scene::camera() const noexcept {
     return camera_;
 }
@@ -978,6 +1141,7 @@ PhysicsBodyHandle Scene::create_physics_body(const EntityHandle handle,
     settings.half_extents = component.collider.half_extents;
     settings.radius = component.collider.radius;
     settings.material = component.collider.material;
+    settings.user_data = handle.id();
     settings.motion_type = component.rigid_body.has_value()
                                ? component.rigid_body->motion_type
                                : PhysicsMotionType::Static;
@@ -997,6 +1161,12 @@ void Scene::replace_physics_body(const EntityHandle handle,
     const PhysicsBodyHandle replacement = create_physics_body(handle, component);
     physics_->destroy_body(component.body);
     component.body = replacement;
+}
+
+EntityHandle Scene::handle_from_id(const std::uint64_t id) const noexcept {
+    return {world_.id(),
+            static_cast<std::uint32_t>(id & 0xffff'ffffULL),
+            static_cast<std::uint32_t>(id >> 32U)};
 }
 
 World& Scene::world() noexcept {

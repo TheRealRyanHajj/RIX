@@ -323,7 +323,7 @@ broadphase. Public box/sphere `Collider` values use explicit meter dimensions;
 `Cube`, `Plane`, and `Sphere` can create matching colliders with
 `collider=True`. A collider without a `Rigidbody` is static. Attaching a
 `Rigidbody` selects dynamic or kinematic motion. Trigger colliders use Jolt
-sensor bodies; collision/trigger event snapshots remain Phase 2.6.
+sensor bodies.
 Collider geometry is captured in world-meter dimensions at construction and is
 not implicitly resized by later entity-scale changes; remove/recreate the
 collider when changing shape dimensions.
@@ -343,11 +343,50 @@ Static and kinematic transform writes update Jolt immediately. Physics entities
 cannot be parented in this release because local/world conversion under moving
 parents is not yet a defined solver contract.
 
+### Queries
+
+`easy3d.physics` exposes `raycast`/`raycast_all`,
+`sphere_cast`/`sphere_cast_all`, `capsule_cast`/`capsule_cast_all`,
+`overlap_sphere`, and oriented `overlap_box`. Directions are normalized by the
+engine and `max_distance` supplies the cast length. Capsule `height` is total
+tip-to-tip height and must exceed its diameter; its local axis is +Y before the
+optional public rotation.
+
+All results are immutable `PhysicsHit` snapshots containing a generation-safe
+entity wrapper, world-space point/normal, distance and normalized cast fraction.
+Ray/shape-cast results are sorted nearest first with entity ID as a stable tie
+break. Overlaps are deduplicated and sorted by entity ID. `layers` is an
+explicit subset of `static`, `dynamic`, `sensor`, and `character`;
+`include_triggers=False` rejects sensors, and `exclude=entity` rejects exactly
+that scene-local generation. Invalid/cross-scene exclusions and non-finite or
+degenerate geometry raise instead of producing partial results.
+
+### Contact and trigger events
+
+Scripts may implement `on_collision_enter`, `on_collision_stay`,
+`on_collision_exit`, `on_trigger_enter`, `on_trigger_stay`, and
+`on_trigger_exit`. Each receives a frozen `CollisionEvent(other, point,
+normal)`. The normal points from the recipient toward `other`; the second
+recipient gets the inverse normal. Exit uses the last safe contact snapshot.
+
+Jolt's contact listener copies bounded native records only. After
+`PhysicsSystem::Update` and dynamic pose synchronization, the scheduler drains
+those records and invokes Python on the gameplay thread under the existing
+profiling/fail-fast/quarantine policy, then commits deferred destruction. A
+contact event is offered to both live, enabled, started script entities.
+Destroying an entity/body drops events that cannot provide two valid entity
+handles rather than exposing a stale reference. The current simple shapes have
+one subshape; compound-shape contact aggregation remains with Phase 2.8.
+Jolt may retire solver contacts when all moving bodies sleep; Easy3D retains
+the logical pair without emitting a false exit, reports stay if it is detected
+again, and emits exit when an awake/separated or destroyed pair is reconciled.
+
 Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
 `(0, -9.81, 0)` without allocation and creates the world when changed. During a
 simulation tick the scheduler runs all eligible Python `fixed_update(dt)` hooks,
 commits deferred mutations, then advances the initialized Jolt world once with
-that same fixed `dt`. `scene.physics_step_count` is a diagnostic. Scene clear
+that same fixed `dt`, synchronizes dynamic poses and dispatches copied contact
+events. `scene.physics_step_count` is a diagnostic. Scene clear
 destroys all native bodies and invalidates their handles. A scene with no
 physics use pays no Jolt-world/temp-buffer allocation.
 

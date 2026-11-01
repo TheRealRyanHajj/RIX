@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <vector>
 
 namespace easy3d {
 
@@ -72,6 +73,36 @@ struct PhysicsBodySettings final {
     float mass{1.0F};
     float gravity_factor{1.0F};
     Vec3 linear_velocity{};
+    std::uint64_t user_data{0};
+};
+
+struct PhysicsQueryFilter final {
+    std::uint8_t layer_mask{0x0fU};
+    bool include_sensors{true};
+    std::uint64_t excluded_user_data{0};
+};
+
+struct PhysicsQueryHit final {
+    std::uint64_t user_data{0};
+    Vec3 point{};
+    Vec3 normal{};
+    float distance{0.0F};
+    float fraction{0.0F};
+};
+
+enum class PhysicsContactPhase : std::uint8_t {
+    Enter,
+    Stay,
+    Exit,
+};
+
+struct PhysicsContactEvent final {
+    PhysicsContactPhase phase{PhysicsContactPhase::Enter};
+    std::uint64_t first_user_data{0};
+    std::uint64_t second_user_data{0};
+    Vec3 point{};
+    Vec3 normal{};
+    bool trigger{false};
 };
 
 class PhysicsWorld final {
@@ -102,6 +133,36 @@ public:
     void set_body_transform(PhysicsBodyHandle handle, Vec3 position, Quat rotation);
     void add_force(PhysicsBodyHandle handle, Vec3 force);
     void add_impulse(PhysicsBodyHandle handle, Vec3 impulse);
+
+    [[nodiscard]] std::vector<PhysicsQueryHit> raycast_all(
+        Vec3 origin,
+        Vec3 direction,
+        float max_distance,
+        PhysicsQueryFilter filter = {}) const;
+    [[nodiscard]] std::vector<PhysicsQueryHit> overlap_sphere(
+        Vec3 center,
+        float radius,
+        PhysicsQueryFilter filter = {}) const;
+    [[nodiscard]] std::vector<PhysicsQueryHit> overlap_box(
+        Vec3 center,
+        Vec3 half_extents,
+        Quat rotation = {},
+        PhysicsQueryFilter filter = {}) const;
+    [[nodiscard]] std::vector<PhysicsQueryHit> sphere_cast_all(
+        Vec3 origin,
+        float radius,
+        Vec3 direction,
+        float max_distance,
+        PhysicsQueryFilter filter = {}) const;
+    [[nodiscard]] std::vector<PhysicsQueryHit> capsule_cast_all(
+        Vec3 origin,
+        float radius,
+        float height,
+        Quat rotation,
+        Vec3 direction,
+        float max_distance,
+        PhysicsQueryFilter filter = {}) const;
+    [[nodiscard]] std::vector<PhysicsContactEvent> drain_contact_events();
 
     void step(float delta_seconds, std::uint32_t collision_steps = 1);
     [[nodiscard]] std::uint64_t step_count() const noexcept;
