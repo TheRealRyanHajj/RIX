@@ -531,6 +531,13 @@ shared. `current_script_role()` reports the scheduler role only during a
 callback. Listen hosts run one server scheduler—the local client transport does
 not own or advance an authority scene.
 
+`register_match_state()` declares a canonical replicated match object.
+`ServerMatchState` owns legal waiting/countdown/playing/round-end/match-end
+transitions and simulation-tick deadlines; `ClientMatchState` is read-only and
+derives remaining display ticks from the replicated deadline. Late join uses
+the normal complete `NetworkVar` snapshot, so it receives current match phase,
+round, deadline and revision before becoming synchronized.
+
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 
 ```python

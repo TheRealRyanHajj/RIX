@@ -127,6 +127,12 @@ must still validate gameplay conditions such as distance, cooldown, match state
 and target visibility. Ownership assignment is server-only and is cleared when
 its connection disconnects; it is not yet sent as replica state.
 
+Phase 4.6 match timers are simulation-tick deadlines and must be advanced by
+authority game code (normally once per fixed tick); they are not implicitly
+wired into every `Server` because games choose when a match clock is paused.
+The built-in phase machine carries round/deadline/revision only. Scores, teams,
+combat rules and persistence belong to the sandbox/arena milestones.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

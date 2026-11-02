@@ -37,6 +37,13 @@ from .game import Game, RendererStats
 from .input import ActionState, Binding, Input, PointerState
 from .lights import Light
 from .math import Quat, Vec2, Vec3
+from .match import (
+    ClientMatchState,
+    MatchPhase,
+    MatchStateFields,
+    ServerMatchState,
+    register_match_state,
+)
 from .network import ListenServer, Server
 from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, Constraint, PhysicsHit
@@ -87,6 +94,7 @@ __all__ = [
     "Camera",
     "CallbackStats",
     "CharacterController",
+    "ClientMatchState",
     "ClientReplication",
     "Collider",
     "CollisionEvent",
@@ -122,6 +130,8 @@ __all__ = [
     "RpcSpec",
     "RpcStats",
     "MeshRenderer",
+    "MatchPhase",
+    "MatchStateFields",
     "Model",
     "ModelCache",
     "ModelInfo",
@@ -139,6 +149,7 @@ __all__ = [
     "Scene",
     "Server",
     "ServerReplication",
+    "ServerMatchState",
     "TransformFlushStats",
     "TransformReplicationStats",
     "TransformSnapshot",
@@ -165,6 +176,7 @@ __all__ = [
     "load_obj",
     "native_add",
     "network",
+    "register_match_state",
     "client_only",
     "current_script_role",
     "server_only",

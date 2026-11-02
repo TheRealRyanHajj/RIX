@@ -3599,3 +3599,45 @@ build\venv311\Scripts\python.exe -m pytest -q
 
 Phase 4.5: **DONE**. Immediate next task: Phase 4.6 — replicated match states
 and authority-only simulation timers with late-join correctness.
+
+## 2026-11-01 — Phase 4.6 replicated match state (active)
+
+### Bounded approach
+
+Build match state from the proven authority-only `NetworkVar` path rather than
+introducing a second replication protocol. Define a finite explicit state enum,
+authority tick deadlines (not wall-clock client timers), legal transitions and
+one registered match object prefab. Replicate current state, round number and
+deadline tick; clients derive display time but cannot advance state. Test illegal
+transitions, server-only timer expiry, listen-host single advancement and late
+join during every state. Do not add scoring/combat rules from Phase 4.7.
+
+### Implemented and verified
+
+- Added canonical `MatchPhase`, four-field match schema registration and typed
+  public `ServerMatchState`/`ClientMatchState` views.
+- Authority transitions enforce waiting → countdown → playing → round end or
+  match end, with explicit reset, nondecreasing signed-int64 simulation ticks,
+  overflow checks, round/revision tracking and no wall-clock authority.
+- Countdown/intermission deadlines advance only through the server-only wrapper;
+  client state is read-only and derives clamped remaining ticks for display.
+- State uses the existing reliable dirty-variable path. Real GNS late joins
+  independently validated waiting, countdown, playing, round-end and match-end
+  snapshots; a mid-countdown join also continued through the entire two-round
+  transition sequence with the original client.
+
+```text
+build\venv311\Scripts\python.exe -m pytest -q tests/python/test_match_state.py tests/python/test_network_vars.py tests/python/test_listen_server.py
+..............                                                           [100%]
+14 passed in 0.92s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 44%]
+........................................................................ [ 88%]
+...................                                                      [100%]
+163 passed in 19.04s
+```
+
+Phase 4.6: **DONE**. Immediate next task: Phase 4.7 — build the public-API
+2–8-player cooperative sandbox sample with synchronized spawn, movement,
+interaction/damage and destruction.

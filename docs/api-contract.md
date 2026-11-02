@@ -750,3 +750,19 @@ check and clients reject malformed, replayed or client-to-server calls from the
 authority channel. `RpcStats` reports received/executed/rate-limited counts.
 Reliable delivery does not confer authority. Game-specific validation remains
 the registered handler's responsibility.
+
+## Replicated match state
+
+`register_match_state(registry, prefab)` adds four bounded int64 fields to a
+dedicated prefab: phase, round, deadline simulation tick and transition
+revision. `ServerMatchState` accepts only `ServerReplication`, validates
+nondecreasing signed-int64 ticks and implements legal transitions among
+`WAITING`, `COUNTDOWN`, `PLAYING`, `ROUND_END` and `MATCH_END`. Countdown and
+intermission expiry is advanced explicitly from the authority simulation tick;
+wall-clock/render time never changes match authority.
+
+`ClientMatchState` accepts only `ClientReplication` and provides read-only
+properties plus `remaining_ticks(current_tick)`. All four values use the normal
+reliable dirty-field stream and complete late-join snapshot. A listen host has
+one `ServerMatchState` on its authority; its local transport client has no
+second timer or authority transition path.

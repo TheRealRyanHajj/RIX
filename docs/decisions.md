@@ -1109,3 +1109,15 @@ while invoking a callback. Method decorators declare server/client-only hooks;
 unmarked hooks remain shared and offline schedulers execute neither guarded
 role. Listen hosts retain one server scheduler and a transport-only local
 client, preventing accidental duplicate authority execution.
+
+## ADR-0035: Match clocks are replicated authority tick deadlines
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Represent match timing as a server-owned finite phase machine plus signed-int64
+simulation deadline, round and monotonic revision in ordinary reliable
+`NetworkVar` fields. Clients derive display time but cannot transition or tick
+the state. Explicit authority advancement preserves game-defined pause policy,
+uses the existing complete late-join snapshot, and avoids divergent wall clocks
+or a second listen-host timer.
