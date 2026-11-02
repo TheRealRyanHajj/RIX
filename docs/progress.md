@@ -4232,3 +4232,84 @@ meets its declared p99 100 ms, latency p95 50 ms, 200% CPU, 128 MiB RSS,
 80 KiB/tick and zero-deferral gates, but does not claim 60 Hz, external-network
 quality or dedicated-server-only cost. Phase 5.6: **DONE**. Exact next task:
 Phase 5.7 — reconnect/disconnect, input-spam, packet-loss and shutdown soak.
+
+## 2026-11-01 — Phase 5.7 adverse lifecycle soak
+
+Added `benchmarks/network_soak.py`, a finite real-GNS lifecycle soak. Under the
+declared adverse 100 ms one-way lag / 30 ms jitter / 5% fake-send loss profile,
+it sends reliable owner-gated input RPC bursts above a 16/second server rate
+limit, requires every RPC to reach server protocol handling, rotates client
+disconnects, validates reliable despawn on remaining mirrors, reconnects and
+requires a complete new snapshot/assignment. After all impaired cycles are
+coherent, it resets the process-global impairment, stops the populated server,
+and requires every client mirror to observe disconnect and clear. The CLI exits
+nonzero unless sent/received counts, rate limiting, reconnects, shutdowns and
+final ownership/object cleanup all agree.
+
+The first small soak found a real whole-server shutdown bug. GNS made all native
+connections inactive before Python received queued disconnect callbacks. The
+first user disconnect callback despawned its player; replication still treated
+the other stopped peers as ready, attempted to broadcast, then raised
+`NetworkError: cannot disconnect an inactive server connection`. Replication
+now intersects its ready set with the native active connection set before user
+teardown. Normal single-peer disconnects retain broadcasts; whole-server stop
+has no inactive recipients. The next run no longer crashed.
+
+That next run timed out waiting specifically for `SERVER_STOPPED` while the
+fake-loss scope was still active: an impaired close may instead become a
+liveness disconnect. The soak now finishes all loss/retransmission work inside
+the scope, resets impairment, then verifies deterministic explicit shutdown.
+The test preserves both requirements without asserting an unstable impaired
+disconnect code. The initial CLI also referenced nonexistent
+`network.NETWORK_CONDITIONS`; it was corrected to the public
+`REPRESENTATIVE_NETWORK_CONDITIONS` tuple.
+
+Exact focused and recorded evidence:
+
+```text
+# Initial small soak before shutdown ready-set fix:
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_soak.py -q -s
+E easy3d._easy3d.NetworkError: cannot disconnect an inactive server connection
+1 failed, 1 passed in 5.52s
+
+# After ready-set fix, before separating impaired and clean shutdown:
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_soak.py tests/python/test_replication_lifecycle.py tests/python/test_server.py -q -s
+E RuntimeError: network soak timed out waiting for server shutdown propagation
+1 failed, 10 passed in 28.63s
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_soak.py -q -s
+..
+2 passed in 8.13s
+
+build\venv311\Scripts\python.exe benchmarks/network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse --json
+{
+  "clients": 4,
+  "cycles": 10,
+  "profile": "adverse",
+  "inputs_sent": 2560,
+  "inputs_received": 2560,
+  "inputs_executed": 640,
+  "inputs_rate_limited": 1920,
+  "disconnects_observed": 14,
+  "reconnects_completed": 10,
+  "shutdown_disconnects_observed": 4,
+  "elapsed_seconds": 35.15232510003261,
+  "correct": true
+}
+# exit code 0
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 35%]
+........................................................................ [ 71%]
+..........................................................               [100%]
+202 passed in 28.38s
+```
+
+No native source changed; this extends the real native transport through its
+public Python lifecycle. Phase 5.7: **DONE**. Phase 5 exit gate is met for the
+documented workload and limits in `docs/benchmarks.md`, without claiming a 60
+Hz 32-player game or arbitrary-game capacity. Exact next task: Phase 6.1 —
+optional graphics upgrades with capability fallbacks and presets.

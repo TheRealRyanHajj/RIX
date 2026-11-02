@@ -182,6 +182,14 @@ headless workload in one process; see `docs/benchmarks.md`. Its aggregate tick
 includes all local client polling and does not claim a 60 Hz 32-player game,
 external-network quality, rendered-client cost, or dedicated-server-only cost.
 
+The Phase 5.7 soak is finite and local. Its adverse profile uses GNS test-only
+process-global fake-send controls, not a measured ISP trace. It verifies
+reliable completion under the configured run and application RPC rate limiting;
+it does not prove infinite uptime, memory-leak freedom over days, malicious
+distributed denial-of-service resistance, authentication, or Internet routing.
+Impairment is reset before explicit shutdown so close propagation is tested
+deterministically rather than through an arbitrary peer-timeout code.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

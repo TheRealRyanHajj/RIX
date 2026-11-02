@@ -1393,6 +1393,11 @@ class ServerReplication:
 
     def _on_disconnect(self, server: Server, event: NetworkEvent) -> None:
         self._ready_connections.discard(event.connection)
+        # A whole-server stop makes every native connection inactive before
+        # Python receives the queued disconnect callbacks. Reconcile the
+        # replication recipients now so user teardown (for example despawning
+        # this player's object) cannot broadcast to already-closed peers.
+        self._ready_connections.intersection_update(server.connections)
         for identifier, owner in tuple(self._owners.items()):
             if owner == event.connection:
                 self._owners[identifier] = None

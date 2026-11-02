@@ -667,6 +667,17 @@ replica, and enforces post-baseline CPU/RSS/tick/latency/byte budgets. See
 [`docs/benchmarks.md`](docs/benchmarks.md) for the exact machine, workload,
 results and limitations.
 
+Run the finite adverse-network lifecycle soak with:
+
+```powershell
+python benchmarks/network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse
+```
+
+It exercises bounded reliable input spam and rate limiting, rotating
+disconnect/reconnect/resynchronization cycles under configured lag/jitter/loss,
+then clean server-shutdown propagation. It terminates with nonzero status on an
+incorrect final report.
+
 ## Scope and license
 
 Advanced lighting, broader asset pipelines, and multiplayer systems remain

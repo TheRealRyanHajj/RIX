@@ -67,3 +67,27 @@ declared gate but does not sustain 60 aggregate loops per second on this
 machine; games needing that cadence must use interest filtering, lower network
 snapshot frequency, fewer relevant objects, or native/batched gameplay state.
 
+## Phase 5.7 adverse lifecycle soak
+
+```powershell
+python benchmarks/network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse
+```
+
+The finite run uses the declared adverse backend impairment (100 ms one-way
+lag, 30 ms jitter, 5% fake-send loss) while sending reliable owner-gated RPC
+input bursts above a 16-call/second authority limit. Each cycle requires every
+reliable call to reach the authority, disconnects one rotating client, observes
+reliable despawn on every remaining replica, reconnects it, and requires a
+complete fresh snapshot plus assignment. Impairment is then reset before an
+explicit whole-server shutdown, and every client must observe disconnect and
+clear its mirror. This separation tests loss recovery and deterministic clean
+shutdown without turning a deliberately dropped close packet into a peer-
+timeout benchmark.
+
+The recorded run sent and received all 2,560 input RPCs, executed 640 within
+the authority rate limits, dropped 1,920 at the application rate limiter,
+completed 10 reconnects, observed all 14 authority disconnects (10 rotating +
+4 shutdown) and all 4 client shutdowns, and finished correct in 35.152 seconds.
+This is local finite stress evidence, not a duration, WAN, or production-load
+guarantee.
+

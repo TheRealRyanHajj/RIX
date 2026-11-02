@@ -1236,3 +1236,20 @@ older safe baseline and a later ACK restores delta efficiency. Baseline
 recovery remains reliable. Cache delta construction only when connections
 reference the identical immutable baseline object, so divergent histories
 cannot be merged merely because their sequence numbers match.
+
+## ADR-0044: Soak loss recovery separately from deterministic clean shutdown
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Use a finite real-loopback soak with the declared adverse GNS impairment for
+reliable owner-gated input bursts, application rate limiting, rotating client
+disconnects, reliable despawn, reconnect and complete replication resync. Reset
+the process-global impairment only after every cycle is coherent, then stop the
+still-populated replicated server and require every client to clear.
+
+On native server stop, all connections become inactive before queued Python
+disconnect callbacks run. Intersect replication's ready recipients with the
+native active connection set before user teardown callbacks. This preserves
+normal single-peer leave broadcasts while preventing despawn broadcasts to
+already-inactive peers during whole-server shutdown.
