@@ -20,6 +20,8 @@ from ._easy3d import (
     _NetworkServer,
     _network_backend_info,
     _network_backend_smoke_test,
+    _network_clear_backend_impairment,
+    _network_set_backend_impairment,
     _NetworkSimulator,
 )
 
@@ -140,6 +142,113 @@ class NetworkBackendInfo:
     name: str
     version: str
     crypto_provider: str
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkCondition:
+    """Declared synthetic one-way lag, jitter, and packet-loss profile."""
+
+    name: str
+    one_way_latency_seconds: float
+    jitter_seconds: float
+    loss_probability: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("network condition name must be non-empty")
+        for label, value, maximum in (
+            ("one_way_latency_seconds", self.one_way_latency_seconds, 5.0),
+            ("jitter_seconds", self.jitter_seconds, 2.0),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{label} must be a number")
+            if not math.isfinite(float(value)) or not 0 <= value <= maximum:
+                raise ValueError(f"{label} must be in [0, {maximum}]")
+        loss = self.loss_probability
+        if isinstance(loss, bool) or not isinstance(loss, (int, float)):
+            raise TypeError("loss_probability must be a number")
+        if not math.isfinite(float(loss)) or not 0 <= loss <= 1:
+            raise ValueError("loss_probability must be between zero and one")
+
+    def create_simulated_link(self, *, seed: int = 0) -> SimulatedLink:
+        """Create the exact seeded packet-level simulator for this profile."""
+
+        return SimulatedLink(
+            latency=float(self.one_way_latency_seconds),
+            jitter=float(self.jitter_seconds),
+            loss=float(self.loss_probability),
+            seed=seed,
+        )
+
+
+LAN_NETWORK_CONDITION = NetworkCondition("lan", 0.005, 0.002, 0.0)
+REGIONAL_NETWORK_CONDITION = NetworkCondition("regional", 0.040, 0.010, 0.01)
+ADVERSE_NETWORK_CONDITION = NetworkCondition("adverse", 0.100, 0.030, 0.05)
+REPRESENTATIVE_NETWORK_CONDITIONS = (
+    LAN_NETWORK_CONDITION,
+    REGIONAL_NETWORK_CONDITION,
+    ADVERSE_NETWORK_CONDITION,
+)
+
+
+_backend_impairment_lock = threading.Lock()
+
+
+class BackendImpairment:
+    """Scoped process-global GameNetworkingSockets test impairment."""
+
+    __slots__ = ("_profile", "_active")
+
+    def __init__(self, profile: NetworkCondition) -> None:
+        if not isinstance(profile, NetworkCondition):
+            raise TypeError("profile must be an easy3d.network.NetworkCondition")
+        self._profile = profile
+        self._active = False
+
+    @property
+    def profile(self) -> NetworkCondition:
+        return self._profile
+
+    def __enter__(self) -> BackendImpairment:
+        if self._active:
+            raise NetworkError("backend impairment scope is already active")
+        if not _backend_impairment_lock.acquire(blocking=False):
+            raise NetworkError(
+                "backend impairment is process-global and another scope is active"
+            )
+        try:
+            lag_ms = round(self._profile.one_way_latency_seconds * 1000.0)
+            jitter_average_ms = self._profile.jitter_seconds * 1000.0
+            jitter_maximum_ms = min(5000.0, jitter_average_ms * 2.0)
+            _network_set_backend_impairment(
+                lag_ms,
+                jitter_average_ms,
+                jitter_maximum_ms,
+                self._profile.loss_probability * 100.0,
+            )
+            self._active = True
+            return self
+        except BaseException:
+            try:
+                _network_clear_backend_impairment()
+            finally:
+                _backend_impairment_lock.release()
+            raise
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        if not self._active:
+            return
+        try:
+            _network_clear_backend_impairment()
+        finally:
+            self._active = False
+            _backend_impairment_lock.release()
+
+
+def impair_backend(profile: NetworkCondition) -> BackendImpairment:
+    """Create a scoped real-backend impairment; enter only while GNS is alive."""
+
+    return BackendImpairment(profile)
 
 
 def backend_info() -> NetworkBackendInfo:
@@ -1134,6 +1243,8 @@ class SimulatedLink:
 
 
 __all__ = [
+    "ADVERSE_NETWORK_CONDITION",
+    "BackendImpairment",
     "Client",
     "ClientMetrics",
     "ClientState",
@@ -1144,11 +1255,15 @@ __all__ = [
     "ListenEvent",
     "ListenRole",
     "ListenServer",
+    "LAN_NETWORK_CONDITION",
+    "NetworkCondition",
     "NetworkEvent",
     "NetworkError",
     "NetworkBackendInfo",
     "NetworkStats",
     "NetworkTransport",
+    "REGIONAL_NETWORK_CONDITION",
+    "REPRESENTATIVE_NETWORK_CONDITIONS",
     "SendStatus",
     "Server",
     "ServerState",
@@ -1156,4 +1271,5 @@ __all__ = [
     "SimulatedLink",
     "backend_info",
     "backend_smoke_test",
+    "impair_backend",
 ]

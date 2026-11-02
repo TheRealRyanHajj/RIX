@@ -387,6 +387,22 @@ print(network.backend_info())
 assert network.backend_smoke_test()
 ```
 
+Phase 5 adds three explicitly synthetic profiles: LAN (5 ms one-way, 2 ms
+jitter, 0% loss), regional (40/10 ms, 1%), and adverse (100/30 ms, 5%). Use
+their seeded packet simulator for exact traces:
+
+```python
+from easy3d import network
+
+link = network.ADVERSE_NETWORK_CONDITION.create_simulated_link(seed=53)
+```
+
+For real GameNetworkingSockets retransmission tests, construct/start the
+backend owners first and enter `network.impair_backend(profile)` around connect
+and exchange. This setting is process-global, test-only, non-nestable, and
+always reset on scope exit. The profiles are regression scenarios, not claims
+about all Internet connections or performance guarantees.
+
 The backend is GameNetworkingSockets 1.6.1, statically linked with a matching
 Protobuf runtime and Windows BCrypt support. The smoke test initializes the
 process-global runtime and sends a reliable message through a native loopback

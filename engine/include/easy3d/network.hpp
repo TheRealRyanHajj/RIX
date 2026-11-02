@@ -118,6 +118,11 @@ struct NetworkServerConfig final {
 };
 
 [[nodiscard]] NetworkBackendInfo network_backend_info();
+void set_network_backend_impairment(std::int32_t lag_milliseconds,
+                                    float jitter_average_milliseconds,
+                                    float jitter_maximum_milliseconds,
+                                    float loss_percent);
+void clear_network_backend_impairment();
 
 class NetworkBackendRuntime final {
 public:

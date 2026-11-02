@@ -561,6 +561,21 @@ models datagram impairment and does not retransmit. Event queue exhaustion raise
 poll. No socket, server, client, handshake, or replication API is claimed by
 this foundation.
 
+`NetworkCondition(name, one_way_latency_seconds, jitter_seconds,
+loss_probability)` validates GNS-compatible bounds. The exported LAN, regional
+and adverse profiles are `(5ms, 2ms, 0%)`, `(40ms, 10ms, 1%)`, and `(100ms,
+30ms, 5%)`; `REPRESENTATIVE_NETWORK_CONDITIONS` preserves that order.
+`profile.create_simulated_link(seed=...)` uses the deterministic packet-level
+semantics above.
+
+`impair_backend(profile)` returns a context manager for real GNS testing. A
+`Server` or `Client` must already keep GNS initialized before entry. The scope
+applies send-side lag/jitter/loss process-wide, rejects nested/concurrent scopes,
+and clears every setting on normal or exceptional exit. GNS reliable delivery
+continues to retransmit/order; unreliable delivery may be lost. This is a test
+facility, not per-connection QoS, and the named profiles are regression inputs
+rather than network-quality promises.
+
 `backend_info()` returns a frozen `NetworkBackendInfo` containing availability,
 backend name/version and configured crypto provider. On the supported Windows
 build it reports GameNetworkingSockets 1.6.1 with Windows BCrypt.

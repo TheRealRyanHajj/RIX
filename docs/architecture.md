@@ -347,6 +347,15 @@ received, lost, byte, rejection and overflow counters. It is a deterministic
 datagram impairment tool: reliable intent is metadata and is not retransmitted
 by the simulator.
 
+Representative `NetworkCondition` profiles bind names to validated one-way
+lag, average jitter and packet-loss probability. They can construct the exact
+seeded simulator above. A separate `BackendImpairment` scope maps the same
+values to GameNetworkingSockets' official global fake-send lag, jitter and loss
+controls, allowing its real reliable ordering/retransmission to operate. The
+scope uses a process lock, rejects nesting/concurrency and clears settings on
+all exits. GNS must already be alive; these global controls are for isolated
+tests, never per-client production policy.
+
 Phase 3.2 links GameNetworkingSockets 1.6.1 and a source-matched Protobuf 5.29.3
 runtime statically. Windows BCrypt supplies platform crypto, ICE/WebRTC remains
 off, and a reference-counted process owner serializes native initialization and

@@ -24,20 +24,31 @@ int main() {
         if (!outer.ready()) {
             return fail(2, "GameNetworkingSockets runtime did not initialize");
         }
+        easy3d::set_network_backend_impairment(1, 0.0F, 0.0F, 0.0F);
+        easy3d::clear_network_backend_impairment();
+        bool rejected_impairment = false;
+        try {
+            easy3d::set_network_backend_impairment(5001, 0.0F, 0.0F, 0.0F);
+        } catch (const std::invalid_argument&) {
+            rejected_impairment = true;
+        }
+        if (!rejected_impairment) {
+            return fail(3, "invalid backend impairment was not rejected");
+        }
         {
             easy3d::NetworkBackendRuntime nested;
             if (!nested.ready() || !nested.loopback_smoke_test()) {
-                return fail(3, "GameNetworkingSockets loopback smoke test failed");
+                return fail(4, "GameNetworkingSockets loopback smoke test failed");
             }
         }
         if (!outer.ready() || !outer.loopback_smoke_test()) {
-            return fail(4, "nested runtime teardown killed the shared backend");
+            return fail(5, "nested runtime teardown killed the shared backend");
         }
 
         std::cout << "easy3d_network_backend_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "easy3d_network_backend_tests: FAIL: " << error.what() << '\n';
-        return 5;
+        return 6;
     }
 }

@@ -152,6 +152,16 @@ Replay advances one `CharacterVirtual` against the current collision world; it
 does not roll back dynamic bodies, contacts, scripts or the full scene. Remote
 players use delayed, clamped Phase 4 transform histories without extrapolation.
 
+The named network conditions are synthetic regression profiles, not measured
+ISP/mobile distributions. Seeded `SimulatedLink` is a packet scheduler and does
+not retransmit even when delivery metadata says reliable; use scoped backend
+impairment when testing real GNS reliability. Backend impairment is process-wide
+and therefore rejects overlapping scopes. At 100% loss, application messages do
+not arrive, connection establishment/liveness eventually times out, prediction
+queues can fill and raise `NetworkError`, and only a later correction/reconnect
+can restore authority. Unreliable transforms/inputs rely on newer state or
+application redundancy; they are never silently promoted to reliable.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

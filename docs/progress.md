@@ -3946,3 +3946,98 @@ Total Test time (real) = 1.57 sec
 Phase 5.2: **DONE**. Exact next task: Phase 5.3 — deterministic lag, jitter and
 loss scenarios at declared representative conditions with documented failure
 behavior.
+
+## 2026-11-01 — Phase 5.3 representative network impairment (active)
+
+### Bounded approach
+
+Keep the existing seeded `SimulatedLink` for deterministic packet-level unit
+tests. Add validated named condition profiles plus a process-global, scoped
+GameNetworkingSockets impairment context using the backend's official fake send
+lag/jitter/loss controls, reset unconditionally on exit. Reject concurrent or
+nested scopes because the upstream settings are global.
+
+Exercise every declared profile in the exact seeded simulator, then exercise
+reliable delivery/retransmission on real loopback GNS under the adverse profile
+with a tolerant deadline, never presenting it as an Internet guarantee or
+benchmark. Explicitly document total loss, timeout, prediction-queue saturation,
+correction gaps and unreliable latest-state recovery behavior.
+
+### Result
+
+Added immutable `NetworkCondition` plus declared LAN (5 ms one-way, 2 ms
+jitter, 0% loss), regional (40/10 ms, 1%) and adverse (100/30 ms, 5%) profiles.
+Every profile creates the existing manually clocked seeded native simulator for
+exact packet traces. All three profiles were tested with 500 unreliable
+messages, exact delivered+lost accounting, empty final in-flight state and
+same-seed trace equality. A 100% loss profile delivered none of 64 messages and
+reported all 64 lost.
+
+Added a guarded `BackendImpairment` context using GNS 1.6.1's official global
+fake-send lag, jitter and loss settings. It requires an initialized backend,
+rejects concurrent/nested use and clears settings on successful or exceptional
+exit. The adverse real-loopback test connected through impairment and delivered
+32 reliable messages in exact order; it passed 10 consecutive independent
+runs. This exercises GNS retransmission rather than assigning reliability to the
+packet simulator.
+
+The first native compile failed because `ISteamNetworkingUtils` is declared in
+the separate upstream `<steam/isteamnetworkingutils.h>` header rather than
+`steamnetworkingsockets.h`. The explicit public header include fixed the error;
+no dependency patch or bypass was used.
+
+Failure behavior is now explicit: deterministic total loss delivers no
+application messages; backend establishment/liveness eventually times out;
+unacknowledged prediction can fill its fixed queue and raises `NetworkError`;
+unreliable state needs later superseding data/application redundancy; a later
+correction or reconnect is the authority recovery path. Profiles are regression
+inputs, not measured Internet distributions or capacity claims.
+
+### Exact verification evidence
+
+```text
+# Initial supported-MSVC compile after adding GNS utilities calls:
+cmake --build --preset windows-debug
+backend_gns.cpp(41): error C2065: 'ISteamNetworkingUtils': undeclared identifier
+ninja: build stopped: subcommand failed.
+
+# After including <steam/isteamnetworkingutils.h>:
+cmake --build --preset windows-debug
+Build completed: 23 targets/actions, exit 0
+
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.67 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3933818
+sha256=5a98a87f2a3a044b376d2497d937cf260c6f309fe8bd48ea91e7a213691fc1fa
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_conditions.py -q -s
+.......
+7 passed in 1.26s
+
+# Adverse real-GNS reliable-delivery case invoked 10 consecutive times.
+10/10 adverse-profile iterations passed (individual runs 1.09–2.69 sec)
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 38%]
+........................................................................ [ 77%]
+...........................................                              [100%]
+187 passed in 21.57s
+
+cmake --build --preset windows-release
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 2.49 sec
+
+cmake --build build\windows-headless --config Release --parallel 4
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.64 sec
+```
+
+Phase 5.3: **DONE**. Exact next task: Phase 5.4 — measured bandwidth budgets,
+entity prioritization, spatial interest and delta-baseline recovery.

@@ -44,7 +44,17 @@ from .match import (
     ServerMatchState,
     register_match_state,
 )
-from .network import ListenServer, Server
+from .network import (
+    ADVERSE_NETWORK_CONDITION,
+    LAN_NETWORK_CONDITION,
+    REGIONAL_NETWORK_CONDITION,
+    REPRESENTATIVE_NETWORK_CONDITIONS,
+    BackendImpairment,
+    ListenServer,
+    NetworkCondition,
+    Server,
+    impair_backend,
+)
 from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, Constraint, PhysicsHit
 from .player import Player
@@ -99,6 +109,8 @@ from .utilities import (
 )
 
 __all__ = [
+    "ADVERSE_NETWORK_CONDITION",
+    "BackendImpairment",
     "EngineError",
     "AssetError",
     "Camera",
@@ -126,9 +138,11 @@ __all__ = [
     "LightComponent",
     "LanDiscoveryAnnouncer",
     "LanDiscoveryBrowser",
+    "LAN_NETWORK_CONDITION",
     "ListenServer",
     "MissingAssetError",
     "NetworkError",
+    "NetworkCondition",
     "NetworkObjectId",
     "NetworkTransform",
     "NetworkValueType",
@@ -156,6 +170,8 @@ __all__ = [
     "Player",
     "PredictedCharacterController",
     "PredictionRole",
+    "REGIONAL_NETWORK_CONDITION",
+    "REPRESENTATIVE_NETWORK_CONDITIONS",
     "ReconciliationResult",
     "RemoteInterpolationStats",
     "RemoteTransformInterpolator",
@@ -186,6 +202,7 @@ __all__ = [
     "TextureCache",
     "__version__",
     "engine_version",
+    "impair_backend",
     "debug",
     "discovery",
     "physics",

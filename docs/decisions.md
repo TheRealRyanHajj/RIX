@@ -1175,3 +1175,17 @@ scripts and contacts. Measure pre-snap position error and replay work. Keep
 remote actors on the existing bounded transform history with an explicit delay
 wrapper and telemetry. This provides deterministic motor parity without making
 an unsupported whole-world rollback claim.
+
+## ADR-0040: Separate deterministic packet traces from real GNS impairment
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Keep `SimulatedLink` seeded, manually clocked and packet-level, including loss
+of messages marked reliable. Define named synthetic condition profiles that can
+instantiate it. For retransmission/ordering evidence, map the same profiles to
+GameNetworkingSockets' official fake-send lag/jitter/loss globals inside one
+non-overlapping process scope and reset unconditionally. This preserves exact
+unit traces without pretending to reimplement GNS reliability, while making the
+global/test-only risk explicit. Profile results are regression evidence, not
+Internet quality or capacity guarantees.

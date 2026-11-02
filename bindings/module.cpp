@@ -120,6 +120,14 @@ PYBIND11_MODULE(_easy3d, module) {
         easy3d::NetworkBackendRuntime runtime;
         return runtime.ready() && runtime.loopback_smoke_test();
     });
+    module.def("_network_set_backend_impairment",
+               &easy3d::set_network_backend_impairment,
+               py::arg("lag_milliseconds"),
+               py::arg("jitter_average_milliseconds"),
+               py::arg("jitter_maximum_milliseconds"),
+               py::arg("loss_percent"));
+    module.def("_network_clear_backend_impairment",
+               &easy3d::clear_network_backend_impairment);
     py::class_<easy3d::SimulatedNetwork>(module, "_NetworkSimulator")
         .def(py::init([](const double latency_seconds,
                          const double jitter_seconds,

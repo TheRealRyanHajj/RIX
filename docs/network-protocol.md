@@ -24,6 +24,14 @@ The native simulator models datagrams below a reliability layer. It preserves
 the delivery label for protocol tests but does not retransmit a lost reliable
 message.
 
+Phase 5.3 adds validated synthetic profiles. LAN is 5 ms one-way/2 ms
+jitter/0% loss; regional is 40/10 ms/1%; adverse is 100/30 ms/5%. Each creates
+a seeded `SimulatedLink` for exact traces. `impair_backend(profile)` applies the
+same shape to GameNetworkingSockets' process-global fake-send controls for
+scoped loopback tests, so real reliable retransmission and ordering remain
+active. Scopes cannot overlap and reset on exit. They are test inputs, not
+production connection configuration or measured network distributions.
+
 ## Implemented in Phase 3.2
 
 - GameNetworkingSockets 1.6.1 is pinned at commit
