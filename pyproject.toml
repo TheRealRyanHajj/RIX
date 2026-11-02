@@ -21,6 +21,8 @@ classifiers = [
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
 
@@ -35,6 +37,7 @@ cmake.version = ">=3.26"
 ninja.version = ">=1.11"
 build-dir = "build/scikit-build/{wheel_tag}"
 wheel.packages = ["python/easy3d"]
+wheel.license-files = ["LICENSE", "LICENSES/THIRD_PARTY.md"]
 editable.mode = "redirect"
 sdist.include = [
     "CMakeLists.txt",

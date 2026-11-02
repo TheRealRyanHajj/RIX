@@ -19,8 +19,8 @@ Validation evidence and environment-specific limitations are recorded in
 - Visual Studio Build Tools with **Desktop development with C++**, an x64 MSVC
   toolset, and a Windows 10/11 SDK. Visual Studio 2022/MSVC v143 is the intended
   minimum; the recorded Phase 0 run used Build Tools 2026/MSVC 19.51.
-- CPython 3.11 x64 (3.12 and 3.13 are permitted but are not Phase 0 acceptance
-  substitutes until independently validated)
+- CPython 3.11, 3.12 or 3.13 x64. Each interpreter has an independently built
+  and clean-installed `win_amd64` wheel; other Python versions are unverified.
 - Git, CMake 3.26+, and Ninja 1.11+
 - Network access on the first configure to fetch immutable dependency commits
 
@@ -56,6 +56,31 @@ The presets use Ninja Multi-Config and therefore require `cl.exe` to be on
 Do not run the editable build from a shell that selects MinGW. Verify
 `Get-Command cl.exe` resolves inside Visual Studio's x64 developer environment
 before running pip; MSVC is the supported Windows compiler.
+
+## Windows wheel matrix
+
+Private binary wheels are produced and tested for CPython 3.11, 3.12 and 3.13
+on Windows x64. A consumer installing one of these wheels does not need CMake,
+MSVC, Ninja or network access:
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --no-index --find-links C:\private\easy3d-wheels easy3d==0.1.0
+.\.venv\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+```
+
+Release builders run from an x64 Visual Studio developer PowerShell:
+
+```powershell
+.\scripts\build_wheel_matrix.ps1
+```
+
+The script rejects unverified interpreter entries, creates ABI-specific wheels,
+installs each one into a clean generated environment, runs `pip check`, performs
+a native import/version smoke test and, by default, runs the complete Python
+test and typing suite. `-SkipTests` is intended only for a metadata-only rebuild
+after that exact source revision has already passed the full matrix. Every wheel
+contains `LICENSE`, `LICENSES/THIRD_PARTY.md`, `_easy3d.pyi` and `py.typed`.
 
 ## Interactive graphics smoke test
 

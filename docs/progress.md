@@ -4805,3 +4805,80 @@ recorded Windows/NVIDIA host, but no screenshot/human appearance inspection was
 performed; visual layout remains **UNVERIFIED**. Phase 6.5: **DONE**. Exact next
 task: Phase 6.6 — build and clean-install wheels only for locally available,
 independently tested CPython 3.11+ interpreters.
+
+## 2026-11-01 — Phase 6.6 verified Windows wheel matrix
+
+Inventoried three installed, 64-bit CPython interpreters and built a distinct
+MSVC `win_amd64` wheel for each: 3.11.9, 3.12.10 and 3.13.2. No classifier or
+artifact is published for an untested ABI. Each original artifact was installed
+with `--no-index` into its own newly cleared virtual environment, loaded from
+`site-packages`, passed `pip check` and the native version/add smoke, then ran
+the complete Python, mypy and stubtest suite. All three runs passed 216 tests.
+
+Added `scripts/build_wheel_matrix.ps1` as the repeatable release-builder path.
+It requires an x64 MSVC developer shell, validates CPython/Windows/64-bit,
+limits entries to the verified matrix, builds one wheel per ABI, clean-installs
+it, checks dependencies and native import/version behavior, runs the full suite
+by default and prints SHA-256 with an environment-independent .NET implementation.
+The first scripted run exposed that the Visual Studio-launched Windows
+PowerShell did not autoload `Get-FileHash`; replacing it with the .NET SHA-256
+API fixed the script, and the second complete scripted run passed all three
+legs. Earlier generated wheels were moved to the ignored, recoverable
+`build/wheelhouse/pre-license/` directory before final regeneration.
+
+The artifact audit initially found `LICENSE` but not the nested third-party
+notice. Explicit `wheel.license-files` configuration now includes both
+`LICENSE` and `LICENSES/THIRD_PARTY.md`; the final CPython 3.11 wheel inspection
+also confirmed `_easy3d.pyi`, `py.typed`, Python 3.11/3.12/3.13 classifiers and
+`Requires-Python: >=3.11`.
+
+Exact build and clean-wheel test evidence:
+
+```text
+# All builds ran after calling the VS 2026 x64 VsDevCmd environment.
+py -3.11 -m pip wheel . --no-deps --wheel-dir build\wheelhouse
+Created wheel: easy3d-0.1.0-cp311-cp311-win_amd64.whl
+
+py -3.12 -m pip wheel . --no-deps --wheel-dir build\wheelhouse
+Created wheel: easy3d-0.1.0-cp312-cp312-win_amd64.whl
+
+py -3.13 -m pip wheel . --no-deps --wheel-dir build\wheelhouse
+Created wheel: easy3d-0.1.0-cp313-cp313-win_amd64.whl
+
+# For each ABI: py -3.X -m venv --clear build\wheel-smoke\cp3XX;
+# install the exact wheel with --no-index; install pytest==9.2.0 and
+# mypy==1.18.2; run pip check, native import smoke and pytest -q.
+CPython 3.11.9: No broken requirements found.
+0.1.0 5 ...\build\wheel-smoke\cp311\Lib\site-packages\easy3d\__init__.py
+216 passed in 76.91s (0:01:16)
+
+CPython 3.12.10: No broken requirements found.
+0.1.0 5 ...\build\wheel-smoke\cp312\Lib\site-packages\easy3d\__init__.py
+216 passed in 69.35s (0:01:09)
+
+CPython 3.13.2: No broken requirements found.
+0.1.0 5 ...\build\wheel-smoke\cp313\Lib\site-packages\easy3d\__init__.py
+216 passed in 44.19s
+
+# Final metadata-corrected artifact run:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\build_wheel_matrix.ps1 -SkipTests
+easy3d-0.1.0-cp311-cp311-win_amd64.whl
+SHA256=f6e7c5e3b0439acb03f9264529b9ea241dcce6813c995eecbb0e9b91732d5cd8
+easy3d-0.1.0-cp312-cp312-win_amd64.whl
+SHA256=61dd431fd300bfbb28079fedd4ad6ca5a96fa87dfa8e151583e36adbdc927382
+easy3d-0.1.0-cp313-cp313-win_amd64.whl
+SHA256=bf8a086ccc62d3791dfa82c9606f5fd2aeeca81f366dbedece30f5166f91cc44
+# exit code 0; all three final wheels clean-installed, pip-checked and imported
+
+py -3.11 -m zipfile -l build\wheelhouse\easy3d-0.1.0-cp311-cp311-win_amd64.whl
+easy3d-0.1.0.dist-info/licenses/LICENSE
+easy3d-0.1.0.dist-info/licenses/LICENSES/THIRD_PARTY.md
+easy3d/_easy3d.pyi
+easy3d/py.typed
+```
+
+Wheel install/import and the full test matrix are **VERIFIED** on this Windows
+x64 host. The wheels remain private local artifacts and were not uploaded or
+published. Phase 6.6: **DONE**. Exact next task: Phase 6.7 — establish explicit
+versioning/compatibility/migration policy and private artifact distribution
+instructions.
