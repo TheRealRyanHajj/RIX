@@ -3328,3 +3328,79 @@ Phase 4.1: **DONE**. Immediate next task: Phase 4.2 — add bounded typed
 `NetworkVar` registration, dirty tracking, authoritative write checks and
 versioned value serialization on top of this lifecycle. No transform or RPC
 claims are made by this checkpoint.
+
+## 2026-11-01 — Phase 4.2 typed authoritative network variables (complete)
+
+### Bounded approach
+
+Extend each prefab's frozen schema with explicit nonzero uint16 field IDs,
+unique safe names, one supported wire type, a validated default and a per-value
+byte bound. Include canonical field definitions/defaults in the existing
+registry fingerprint so late join fails before accepting lifecycle when either
+side disagrees. Start with exact bool, signed int64, finite float64, safe UTF-8
+string and copied bytes; keep transforms in Phase 4.3.
+
+Create one `NetworkVar` state per declared field when an object spawns. Authority
+variables are writable and mark dirty only on actual value change; client
+mirrors reject writes. `ServerReplication.flush()` sends reliable fixed-header
+updates containing object ID, field ID, declared type, monotonically increasing
+field version and bounded encoded bytes, clearing dirty state after queueing or
+disconnecting a backpressured peer. Late-join snapshots send every current value
+between its spawn and end frames. Clients require known object/field/type,
+strictly increasing version and exact bounded decoding. Test each type/bound,
+no-op dirtiness, authority rejection, live batching, late join and malformed/
+stale updates. Do not add ownership transfer, delta compression, transforms,
+RPCs or client writes.
+
+### Implemented and verified
+
+- Added explicit per-prefab `NetworkVarSpec` schema for bool, signed int64,
+  finite float64, safe UTF-8 and copied bytes, including defaults and bounds in
+  the canonical prefab fingerprint. Fixed-width values also honor their bound.
+- Added writable authority `NetworkVar` state, read-only client mirrors, no-op
+  change detection, uint64 versions, dirty tracking and deterministic
+  `ServerReplication.flush()` ordering. Backpressured peers disconnect.
+- Added bounded type-5 value frames and strict object/field/type/length/version
+  parsing. Late join streams every current field without accumulating a frame
+  list and requires each declared snapshot field exactly once before sync.
+- Tests cover every type, invalid types/ranges/bounds, no-op dirtiness, client
+  write rejection, five-field live flush, no-dirty flush, current-value late
+  join, fingerprint change and stale update rejection. The combined focused
+  lifecycle/value suite passed 20 consecutive runs.
+
+Review after the first green run found that primitive encoders returned before
+checking declared byte caps, and snapshots accumulated frames and permitted a
+same-version field more than once. Encoding now applies one common bound;
+snapshot frames stream directly and track unique expected fields. All focused
+and full tests remained green after the fixes.
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests\python\test_network_vars.py tests\python\test_replication_lifecycle.py -q
+........                                                                 [100%]
+8 passed in 0.39s
+
+# The focused command was invoked 20 consecutive times before final packaging.
+20 consecutive NetworkVar/replication runs passed
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 48%]
+........................................................................ [ 96%]
+.....                                                                    [100%]
+149 passed in 18.22s
+
+# Native source did not change; the immediately preceding verified matrices remain:
+# headless 16/16, Debug 17/17, Release 17/17.
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3929446
+sha256=69b61beed022b3a20d2c056988445600c43258b1a25b01b18c3d9ab92a3fdf05
+Successfully installed easy3d-0.1.0
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+Phase 4.2: **DONE**. Immediate next task: Phase 4.3 — implement bounded
+tick/sequence transform snapshots, remote interpolation and basic relevance
+filtering. RPCs and client ownership remain unimplemented.

@@ -244,6 +244,19 @@ from a scene handle or reused in that authority session. Client-authored `E3DR`
 frames are forbidden. This format contains no prefab field state, transform,
 owner, RPC or Python serialization.
 
+## Implemented in Phase 4.2
+
+Value update type `5` uses the `E3DR` envelope followed by uint64 object ID,
+uint16 field ID, uint8 declared type, uint64 monotonically increasing field
+version, uint32 byte length and exact bytes. Types are bool, signed little-
+endian int64, finite IEEE float64, strict control-free UTF-8 and opaque bytes.
+Prefab fingerprints include canonical field ID/name/type/default/bound data.
+Values are reliable, bounded to 60 KiB, and must match the frozen schema.
+Snapshots stream every current field after its spawn; clients require every
+declared field exactly once before accepting snapshot end. Live stale,
+duplicate, unknown or type-mismatched updates are rejected. Clients cannot send
+lifecycle/value magic to the authority.
+
 ## Not implemented yet
 
 There is no rendered-Game attachment, firewall automation, DNS, replicated

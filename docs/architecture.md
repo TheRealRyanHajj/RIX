@@ -399,3 +399,12 @@ snapshot. `ClientReplication` validates the stream before declaring sync and
 owns only client-scene replicas. A failed send disconnects the affected peer;
 it never converts partial lifecycle delivery into silent success. This layer
 does not yet serialize component values or grant client authority.
+
+Network variables extend the frozen prefab fingerprint with canonical field
+ID/name/type/default/bound definitions. Each replicated object owns separate
+authority or client mirror state. Authority changes normalize through the same
+bounded codec used on receive, increment per-field versions and become dirty;
+flush sends only dirty state. Snapshot values are streamed after each spawn and
+uniquely accounted before end, avoiding an object-count-sized frame buffer.
+Client setters fail locally and stale/duplicate/type-mismatched updates fail the
+connection rather than mutating state.

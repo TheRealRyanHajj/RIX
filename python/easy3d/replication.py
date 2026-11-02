@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 import hashlib
+import math
 import struct
 import unicodedata
 from weakref import WeakKeyDictionary
@@ -29,12 +31,15 @@ _BEGIN = 1
 _SPAWN = 2
 _DESPAWN = 3
 _END = 4
+_VALUE = 5
 _HEADER = struct.Struct("<4sHBBI")
 _BEGIN_PAYLOAD = struct.Struct("<QII16s")
 _SPAWN_PAYLOAD = struct.Struct("<QI")
 _DESPAWN_PAYLOAD = struct.Struct("<Q")
 _END_PAYLOAD = struct.Struct("<Q")
 _MAX_FRAME_SIZE = 64
+_VALUE_PREFIX = struct.Struct("<QHBQI")
+_MAX_VALUE_BYTES = 60 * 1024
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -66,6 +71,128 @@ class PrefabId:
 PrefabFactory = Callable[[Scene], Entity]
 
 
+class NetworkValueType(str, Enum):
+    BOOL = "bool"
+    INT = "int"
+    FLOAT = "float"
+    STRING = "string"
+    BYTES = "bytes"
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkVarSpec:
+    id: int
+    name: str
+    type: NetworkValueType
+    default: object
+    max_bytes: int
+
+
+def _encode_value(spec: NetworkVarSpec, value: object) -> bytes:
+    if spec.type is NetworkValueType.BOOL:
+        if not isinstance(value, bool):
+            raise TypeError("bool NetworkVar requires bool")
+        encoded = b"\x01" if value else b"\x00"
+    elif spec.type is NetworkValueType.INT:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("int NetworkVar requires int")
+        if not -(2**63) <= value <= 2**63 - 1:
+            raise ValueError("int NetworkVar is outside signed int64")
+        encoded = struct.pack("<q", value)
+    elif spec.type is NetworkValueType.FLOAT:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("float NetworkVar requires a number")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("float NetworkVar must be finite")
+        encoded = struct.pack("<d", number)
+    elif spec.type is NetworkValueType.STRING:
+        if not isinstance(value, str):
+            raise TypeError("string NetworkVar requires str")
+        if any(unicodedata.category(char).startswith("C") for char in value):
+            raise ValueError("string NetworkVar cannot contain controls")
+        encoded = value.encode("utf-8")
+    else:
+        if not isinstance(value, (bytes, bytearray, memoryview)):
+            raise TypeError("bytes NetworkVar requires bytes-like data")
+        encoded = bytes(value)
+    if len(encoded) > spec.max_bytes:
+        raise ValueError("NetworkVar value exceeds its declared byte bound")
+    return encoded
+
+
+def _decode_value(spec: NetworkVarSpec, data: bytes) -> object:
+    if len(data) > spec.max_bytes:
+        raise ValueError("NetworkVar payload exceeds its declared bound")
+    if spec.type is NetworkValueType.BOOL:
+        if data not in (b"\x00", b"\x01"):
+            raise ValueError("invalid bool NetworkVar payload")
+        return data == b"\x01"
+    if spec.type is NetworkValueType.INT:
+        if len(data) != 8:
+            raise ValueError("invalid int NetworkVar payload")
+        return struct.unpack("<q", data)[0]
+    if spec.type is NetworkValueType.FLOAT:
+        if len(data) != 8:
+            raise ValueError("invalid float NetworkVar payload")
+        value = struct.unpack("<d", data)[0]
+        if not math.isfinite(value):
+            raise ValueError("non-finite float NetworkVar payload")
+        return value
+    if spec.type is NetworkValueType.STRING:
+        value = data.decode("utf-8", errors="strict")
+        if any(unicodedata.category(char).startswith("C") for char in value):
+            raise ValueError("string NetworkVar payload contains controls")
+        return value
+    return bytes(data)
+
+
+class NetworkVar:
+    __slots__ = ("_authority", "_dirty", "_spec", "_value", "_version")
+
+    def __init__(self, spec: NetworkVarSpec, *, authority: bool) -> None:
+        self._spec = spec
+        self._authority = authority
+        self._value = spec.default
+        self._version = 0
+        self._dirty = False
+
+    @property
+    def value(self) -> object:
+        return self._value
+
+    @value.setter
+    def value(self, value: object) -> None:
+        if not self._authority:
+            raise PermissionError("client NetworkVar mirrors are read-only")
+        encoded = _encode_value(self._spec, value)
+        normalized = _decode_value(self._spec, encoded)
+        if normalized != self._value:
+            if self._version == 2**64 - 1:
+                raise NetworkError("NetworkVar version space is exhausted")
+            self._value = normalized
+            self._version += 1
+            self._dirty = True
+
+    @property
+    def dirty(self) -> bool:
+        return self._dirty
+
+    @property
+    def version(self) -> int:
+        return self._version
+
+    @property
+    def spec(self) -> NetworkVarSpec:
+        return self._spec
+
+    def _apply(self, value: object, version: int) -> None:
+        if version <= self._version:
+            raise ValueError("NetworkVar version is stale or duplicated")
+        self._value = value
+        self._version = version
+
+
 @dataclass(frozen=True, slots=True)
 class PrefabRegistration:
     id: PrefabId
@@ -76,7 +203,14 @@ class PrefabRegistration:
 class PrefabRegistry:
     """Bounded explicit prefab/schema mapping shared by authority and clients."""
 
-    __slots__ = ("_capacity", "_entries", "_frozen", "_names", "_schema_version")
+    __slots__ = (
+        "_capacity",
+        "_entries",
+        "_fields",
+        "_frozen",
+        "_names",
+        "_schema_version",
+    )
 
     def __init__(self, *, schema_version: int = 1, capacity: int = 1024) -> None:
         if isinstance(schema_version, bool) or not isinstance(schema_version, int):
@@ -90,6 +224,7 @@ class PrefabRegistry:
         self._schema_version = schema_version
         self._capacity = capacity
         self._entries: dict[PrefabId, PrefabRegistration] = {}
+        self._fields: dict[PrefabId, dict[int, NetworkVarSpec]] = {}
         self._names: set[str] = set()
         self._frozen = False
 
@@ -113,6 +248,22 @@ class PrefabRegistry:
             encoded = registration.name.encode("utf-8")
             digest.update(struct.pack("<IH", registration.id.value, len(encoded)))
             digest.update(encoded)
+            for spec in self.variables(registration.id):
+                default = _encode_value(spec, spec.default)
+                field_name = spec.name.encode("utf-8")
+                digest.update(
+                    struct.pack(
+                        "<HBBHH",
+                        spec.id,
+                        list(NetworkValueType).index(spec.type) + 1,
+                        0,
+                        spec.max_bytes,
+                        len(field_name),
+                    )
+                )
+                digest.update(field_name)
+                digest.update(struct.pack("<I", len(default)))
+                digest.update(default)
         return digest.digest()
 
     def register(
@@ -141,8 +292,58 @@ class PrefabRegistry:
             raise NetworkError("prefab registry capacity is exhausted")
         registration = PrefabRegistration(identifier, name, factory)
         self._entries[identifier] = registration
+        self._fields[identifier] = {}
         self._names.add(name)
         return registration
+
+    def register_variable(
+        self,
+        prefab_id: PrefabId | int,
+        field_id: int,
+        name: str,
+        value_type: NetworkValueType | str,
+        default: object,
+        *,
+        max_bytes: int = 256,
+    ) -> NetworkVarSpec:
+        if self._frozen:
+            raise RuntimeError("prefab registry is frozen")
+        registration = self.resolve(prefab_id)
+        if isinstance(field_id, bool) or not isinstance(field_id, int):
+            raise TypeError("field_id must be an integer")
+        if not 1 <= field_id <= 65535:
+            raise ValueError("field_id must be a nonzero uint16")
+        if not isinstance(name, str):
+            raise TypeError("field name must be a string")
+        encoded_name = name.encode("utf-8")
+        if (
+            not encoded_name
+            or len(encoded_name) > 64
+            or any(unicodedata.category(char).startswith("C") for char in name)
+        ):
+            raise ValueError("field name must be 1-64 safe UTF-8 bytes")
+        try:
+            kind = value_type if isinstance(value_type, NetworkValueType) else NetworkValueType(value_type)
+        except ValueError as error:
+            raise ValueError("unsupported NetworkVar type") from error
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
+            raise TypeError("max_bytes must be an integer")
+        if not 1 <= max_bytes <= _MAX_VALUE_BYTES:
+            raise ValueError("max_bytes is outside the supported bound")
+        fields = self._fields[registration.id]
+        if field_id in fields or any(item.name == name for item in fields.values()):
+            raise ValueError("field ID and name must both be unique per prefab")
+        if len(fields) >= 256:
+            raise NetworkError("prefab NetworkVar capacity is exhausted")
+        spec = NetworkVarSpec(field_id, name, kind, default, max_bytes)
+        normalized = _decode_value(spec, _encode_value(spec, default))
+        spec = NetworkVarSpec(field_id, name, kind, normalized, max_bytes)
+        fields[field_id] = spec
+        return spec
+
+    def variables(self, prefab_id: PrefabId | int) -> tuple[NetworkVarSpec, ...]:
+        registration = self.resolve(prefab_id)
+        return tuple(self._fields[registration.id][key] for key in sorted(self._fields[registration.id]))
 
     def freeze(self) -> None:
         if not self._entries:
@@ -171,14 +372,32 @@ def _frame(message_type: int, payload: bytes) -> bytes:
     return result
 
 
+def _value_frame(
+    object_id: NetworkObjectId,
+    variable: NetworkVar,
+) -> bytes:
+    data = _encode_value(variable.spec, variable.value)
+    type_code = list(NetworkValueType).index(variable.spec.type) + 1
+    payload = _VALUE_PREFIX.pack(
+        object_id.value,
+        variable.spec.id,
+        type_code,
+        variable.version,
+        len(data),
+    ) + data
+    return _HEADER.pack(_MAGIC, _WIRE_VERSION, _VALUE, 0, len(payload)) + payload
+
+
 def _decode(frame: bytes) -> tuple[int, bytes]:
-    if len(frame) < _HEADER.size or len(frame) > _MAX_FRAME_SIZE:
+    if len(frame) < _HEADER.size or len(frame) > _HEADER.size + _VALUE_PREFIX.size + _MAX_VALUE_BYTES:
         raise ValueError("invalid replication frame size")
     magic, version, message_type, flags, size = _HEADER.unpack_from(frame)
     if magic != _MAGIC or version != _WIRE_VERSION or flags != 0:
         raise ValueError("invalid replication frame envelope")
-    if message_type not in (_BEGIN, _SPAWN, _DESPAWN, _END):
+    if message_type not in (_BEGIN, _SPAWN, _DESPAWN, _END, _VALUE):
         raise ValueError("unknown replication frame type")
+    if message_type != _VALUE and len(frame) > _MAX_FRAME_SIZE:
+        raise ValueError("lifecycle frame exceeds its fixed bound")
     if size != len(frame) - _HEADER.size:
         raise ValueError("invalid replication payload length")
     return message_type, frame[_HEADER.size :]
@@ -201,6 +420,7 @@ class ServerReplication:
         "_registry",
         "_server",
         "_snapshot_epoch",
+        "_variables",
         "__weakref__",
     )
 
@@ -230,6 +450,7 @@ class ServerReplication:
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
         self._next_id = 1
         self._snapshot_epoch = 0
+        self._variables: dict[tuple[NetworkObjectId, int], NetworkVar] = {}
         self._closed = False
         self._old_connect = server.on_connect
         self._old_disconnect = server.on_disconnect
@@ -263,6 +484,8 @@ class ServerReplication:
         self._next_id += 1
         replicated = ReplicatedObject(identifier, registration.id, entity)
         self._objects[identifier] = replicated
+        for spec in self._registry.variables(registration.id):
+            self._variables[(identifier, spec.id)] = NetworkVar(spec, authority=True)
         self._broadcast(
             _frame(
                 _SPAWN,
@@ -282,9 +505,35 @@ class ServerReplication:
         except KeyError as error:
             raise KeyError(f"unknown network object ID {identifier.value}") from error
         self._broadcast(_frame(_DESPAWN, _DESPAWN_PAYLOAD.pack(identifier.value)))
+        for key in [key for key in self._variables if key[0] == identifier]:
+            del self._variables[key]
         if replicated.entity.is_alive:
             replicated.entity.destroy()
         return replicated.entity
+
+    def variable(
+        self, object_id: NetworkObjectId | int, field_id: int
+    ) -> NetworkVar:
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        try:
+            return self._variables[(identifier, field_id)]
+        except KeyError as error:
+            raise KeyError("unknown network object field") from error
+
+    def flush(self) -> int:
+        count = 0
+        for (identifier, _field), variable in sorted(
+            self._variables.items(), key=lambda item: (item[0][0], item[0][1])
+        ):
+            if variable.dirty:
+                self._broadcast(_value_frame(identifier, variable))
+                variable._dirty = False
+                count += 1
+        return count
 
     def close(self, *, destroy: bool = False) -> None:
         if self._closed:
@@ -301,6 +550,7 @@ class ServerReplication:
                 if replicated.entity.is_alive:
                     replicated.entity.destroy()
             self._objects.clear()
+            self._variables.clear()
         self._closed = True
 
     def _on_connect(self, server: Server, connection: ConnectionId) -> None:
@@ -334,16 +584,27 @@ class ServerReplication:
                 self._registry.fingerprint,
             ),
         )
-        frames = [begin]
-        frames.extend(
-            _frame(_SPAWN, _SPAWN_PAYLOAD.pack(item.id.value, item.prefab_id.value))
-            for item in self.objects
-        )
-        frames.append(_frame(_END, _END_PAYLOAD.pack(epoch)))
-        for frame in frames:
-            if self._server.send(connection, frame) is not SendStatus.QUEUED:
+        if self._server.send(connection, begin) is not SendStatus.QUEUED:
+            self._server.disconnect(connection, "replication snapshot backpressure")
+            return
+        for item in self.objects:
+            spawn = _frame(
+                _SPAWN,
+                _SPAWN_PAYLOAD.pack(item.id.value, item.prefab_id.value),
+            )
+            if self._server.send(connection, spawn) is not SendStatus.QUEUED:
                 self._server.disconnect(connection, "replication snapshot backpressure")
                 return
+            for spec in self._registry.variables(item.prefab_id):
+                value = _value_frame(item.id, self._variables[(item.id, spec.id)])
+                if self._server.send(connection, value) is not SendStatus.QUEUED:
+                    self._server.disconnect(
+                        connection, "replication snapshot backpressure"
+                    )
+                    return
+        end = _frame(_END, _END_PAYLOAD.pack(epoch))
+        if self._server.send(connection, end) is not SendStatus.QUEUED:
+            self._server.disconnect(connection, "replication snapshot backpressure")
 
     def _broadcast(self, frame: bytes) -> None:
         for connection, status in self._server.broadcast(frame).items():
@@ -363,7 +624,9 @@ class ClientReplication:
         "_registry",
         "_scene",
         "_snapshot_epoch",
+        "_snapshot_fields",
         "_synchronized",
+        "_variables",
     )
 
     def __init__(
@@ -391,9 +654,11 @@ class ClientReplication:
         self._max_objects = max_objects
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
         self._snapshot_epoch: int | None = None
+        self._snapshot_fields: set[tuple[NetworkObjectId, int]] = set()
         self._expected_count = 0
         self._received_count = 0
         self._synchronized = False
+        self._variables: dict[tuple[NetworkObjectId, int], NetworkVar] = {}
 
     @property
     def objects(self) -> tuple[ReplicatedObject, ...]:
@@ -421,12 +686,27 @@ class ClientReplication:
                 application.append(event)
         return tuple(application)
 
+    def variable(
+        self, object_id: NetworkObjectId | int, field_id: int
+    ) -> NetworkVar:
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        try:
+            return self._variables[(identifier, field_id)]
+        except KeyError as error:
+            raise KeyError("unknown network object field") from error
+
     def clear(self) -> None:
         for replicated in self.objects:
             if replicated.entity.is_alive:
                 replicated.entity.destroy()
         self._objects.clear()
+        self._variables.clear()
         self._snapshot_epoch = None
+        self._snapshot_fields.clear()
         self._expected_count = 0
         self._received_count = 0
         self._synchronized = False
@@ -465,6 +745,10 @@ class ClientReplication:
                     entity.destroy()
                 raise TypeError("prefab factory returned an invalid client entity")
             self._objects[identifier] = ReplicatedObject(identifier, registration.id, entity)
+            for spec in self._registry.variables(registration.id):
+                self._variables[(identifier, spec.id)] = NetworkVar(
+                    spec, authority=False
+                )
             if self._snapshot_epoch is not None:
                 self._received_count += 1
                 if self._received_count > self._expected_count:
@@ -481,19 +765,61 @@ class ClientReplication:
                 raise ValueError("despawn references an unknown object") from error
             if replicated.entity.is_alive:
                 replicated.entity.destroy()
+            for key in [key for key in self._variables if key[0] == identifier]:
+                del self._variables[key]
+            return
+        if message_type == _VALUE:
+            if len(payload) < _VALUE_PREFIX.size:
+                raise ValueError("invalid NetworkVar update size")
+            object_value, field_id, type_code, version, size = (
+                _VALUE_PREFIX.unpack_from(payload)
+            )
+            if size != len(payload) - _VALUE_PREFIX.size:
+                raise ValueError("invalid NetworkVar payload length")
+            identifier = NetworkObjectId(object_value)
+            try:
+                variable = self._variables[(identifier, field_id)]
+                declared = list(NetworkValueType).index(variable.spec.type) + 1
+            except (KeyError, ValueError) as error:
+                raise ValueError("unknown NetworkVar object, field or type") from error
+            if type_code != declared:
+                raise ValueError("NetworkVar wire type does not match schema")
+            value = _decode_value(variable.spec, payload[_VALUE_PREFIX.size :])
+            field_key = (identifier, field_id)
+            if self._snapshot_epoch is not None:
+                if field_key in self._snapshot_fields or version < variable.version:
+                    raise ValueError("snapshot NetworkVar is duplicated or stale")
+                if version == variable.version:
+                    variable._value = value
+                else:
+                    variable._apply(value, version)
+                self._snapshot_fields.add(field_key)
+            else:
+                variable._apply(value, version)
             return
         if len(payload) != _END_PAYLOAD.size or self._snapshot_epoch is None:
             raise ValueError("invalid snapshot-end state or size")
         (epoch,) = _END_PAYLOAD.unpack(payload)
-        if epoch != self._snapshot_epoch or self._received_count != self._expected_count:
+        expected_fields = sum(
+            len(self._registry.variables(item.prefab_id)) for item in self.objects
+        )
+        if (
+            epoch != self._snapshot_epoch
+            or self._received_count != self._expected_count
+            or len(self._snapshot_fields) != expected_fields
+        ):
             raise ValueError("snapshot end does not match its declaration")
         self._snapshot_epoch = None
+        self._snapshot_fields.clear()
         self._synchronized = True
 
 
 __all__ = [
     "ClientReplication",
     "NetworkObjectId",
+    "NetworkValueType",
+    "NetworkVar",
+    "NetworkVarSpec",
     "PrefabId",
     "PrefabRegistration",
     "PrefabRegistry",

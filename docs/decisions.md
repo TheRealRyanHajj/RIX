@@ -1016,3 +1016,16 @@ client-authored lifecycle frames.
   objects or exposing scene handles on the wire.
 - Field state, transforms, ownership, RPCs and relevance require later versioned
   messages and are intentionally absent from this milestone.
+
+## ADR-0031: Frozen typed field schema with authority-only dirty state
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Declare each network variable in the prefab registry with explicit uint16 ID,
+name, wire type, default and byte bound, and include it in the fingerprint.
+Normalize authority assignments through the wire codec, increment a per-field
+uint64 version only on change, and flush reliable full-field updates. Client
+mirrors are read-only and require newer versions. Stream and uniquely account
+all current fields in late-join snapshots. This favors bounded correctness and
+schema diagnostics before delta compression, ownership or transforms.

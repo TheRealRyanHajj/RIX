@@ -102,7 +102,13 @@ are not persisted across server restart. Destroy replicated entities through
 `ServerReplication.despawn()`; externally destroying a mapped authority entity
 does not synthesize a network despawn. Prefab factories must be deterministic
 about entity type but no component values or transforms are serialized yet.
-There is no client ownership, `NetworkVar`, RPC, relevance or resync protocol.
+There is no client ownership, RPC, relevance or resync protocol.
+
+Phase 4.2 adds authoritative `NetworkVar` values, but callers must explicitly
+call `ServerReplication.flush()`; it is not scheduler-integrated yet. Values are
+reliable full-field updates without delta compression. Client writes and
+ownership are intentionally rejected. Transforms remain Phase 4.3 rather than
+being encoded as generic variables.
 
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection

@@ -320,7 +320,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 ### PHASE 4 — Replication, networked gameplay
 
 - [x] **4.1** Implement stable network IDs, prefab registration, schema/version mapping, server-owned spawn/despawn and late join.
-- [ ] **4.2** Implement typed `NetworkVar`, dirty tracking, serialization bounds and authority checks.
+- [x] **4.2** Implement typed `NetworkVar`, dirty tracking, serialization bounds and authority checks.
 - [ ] **4.3** Implement `NetworkTransform`, snapshot tick/sequence, interpolation for remote actors and basic relevance filtering.
 - [ ] **4.4** Implement RPC registration, direction/ownership authorization, rate limiting, reliable/unreliable channels and defensive parsing.
 - [ ] **4.5** Implement game-context/script-authority guards; prevent double execution on listen hosts.

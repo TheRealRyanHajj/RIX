@@ -44,6 +44,8 @@ from .player import Player
 from .replication import (
     ClientReplication,
     NetworkObjectId,
+    NetworkValueType,
+    NetworkVar,
     PrefabId,
     PrefabRegistry,
     ServerReplication,
@@ -91,6 +93,8 @@ __all__ = [
     "MissingAssetError",
     "NetworkError",
     "NetworkObjectId",
+    "NetworkValueType",
+    "NetworkVar",
     "PhysicsError",
     "PhysicsMaterial",
     "PhysicsHit",

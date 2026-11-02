@@ -693,3 +693,13 @@ clears replicas. Client-authored `E3DR` messages are rejected by the authority.
 Phase 4.1 contains lifecycle only: prefab payload/state, `NetworkVar`, transform
 snapshots, ownership, RPC, relevance, prediction and resynchronization are not
 part of this contract yet.
+
+`PrefabRegistry.register_variable(prefab, field_id, name, type, default,
+max_bytes=...)` adds a canonical field definition before freeze. Supported
+types are `bool`, signed `int`, finite `float`, control-free UTF-8 `string` and
+copied `bytes`; values must fit the declared bound. `ServerReplication.variable`
+returns a writable authority `NetworkVar`. Actual changes increment its uint64
+version and mark it dirty; equal assignments do not. `flush()` reliably queues
+dirty fields and clears their dirty flags. Client variables are read-only and
+accept only known object/field/type updates with strictly newer versions.
+Late-join snapshots include every current field value before snapshot end.
