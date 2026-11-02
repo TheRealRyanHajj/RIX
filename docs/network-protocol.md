@@ -234,7 +234,7 @@ no entity synchronization, RPC, ownership or authentication format exists yet.
 ## Implemented in Phase 4.1
 
 Lifecycle replication uses reliable application messages with a 12-byte
-little-endian envelope: magic `E3DR`, 16-bit wire version `1`, 8-bit type, zero
+little-endian envelope: magic `E3DR`, 16-bit wire version `2`, 8-bit type, zero
 flags and exact 32-bit payload length. Every lifecycle frame is at most 64
 bytes. Types are snapshot begin (`1`), spawn (`2`), despawn (`3`) and snapshot
 end (`4`).
@@ -287,7 +287,7 @@ The optional relevance predicate is authority-local policy and is not encoded
 on the wire. It suppresses only type-6 traffic; reliable lifecycle and type-5
 field state remain visible. There is no acknowledgement/baseline recovery,
 spatial interest grid, extrapolation, prediction or reconciliation in this
-format revision.
+Phase 4 format revision.
 
 ## Implemented in Phase 4.4
 
@@ -317,10 +317,32 @@ readiness only after end is queued. Duplicate/replayed or malformed requests
 disconnect; excess valid requests inside the interval are ignored. The request
 contains no entity IDs or state.
 
+## Implemented in Phase 5.4
+
+Wire version 2 adds transform ACK type `9`, delta type `10` and baseline request
+type `11`. ACK is reliable and carries object ID plus received transform
+sequence. A delta is 52 payload/64 total bytes: object ID, new sequence, tick,
+ACKed baseline sequence, then ten signed int16 differences. Position units are
+centimeters, quaternion-component units are 1/16000 and scale units are 1/1000.
+Authority falls back to the 76-byte full type `6` on range/validity failure and
+retains the exact quantized reconstruction as the sent baseline candidate.
+
+Baseline request is reliable and carries a monotonic nonzero request sequence
+plus object ID. It is valid only from a snapshot-ready peer for a declared live
+transform. Authority clears only that connection/object ACK baseline; the next
+relevant update is full. Future ACKs, replayed requests, unknown objects and
+malformed controls are rejected. Sent baseline history is capped at 32 entries
+per connection/object and client history remains 2–256.
+
+Per-connection token budgets, priority callbacks and spatial-radius observers
+are authority-local scheduling policy and are not serialized. They affect only
+unreliable transform frames. Reliable lifecycle, values and RPCs bypass this
+replaceable-stream budget.
+
 ## Not implemented yet
 
-There is no rendered-Game attachment, firewall automation, DNS, replicated
-ownership transfer or resynchronization yet. LAN discovery is IPv4/local-subnet
+There is no rendered-Game attachment, firewall automation, DNS or replicated
+ownership transfer. LAN discovery is IPv4/local-subnet
 only.
 Transport encryption also does not
 establish account or player identity; authentication remains a separate

@@ -481,3 +481,23 @@ control frame temporarily removes only that peer, streams a new complete
 snapshot and re-adds it on queue success. No client state is accepted and no
 parallel delta-patch format exists. Healthy peers continue receiving live state
 throughout another client's rebuild.
+
+Replication wire version 2 adds per-object transform ACK, compact delta and
+baseline-recovery controls. Authority may delta only from a snapshot ACKed by
+that exact connection. Position uses signed int16 centimeters, quaternion
+component differences use 1/16000 units and scale uses 1/1000 units; overflow or
+invalid reconstruction falls back to a full float32 snapshot. Authority stores
+the quantized reconstruction—not the ideal source—as the sent snapshot so an
+ACK selects exactly the state held by the client. Sent history is bounded to 32
+snapshots per connection/object; client history retains its configured 2–256.
+If the named baseline is gone, the client drops that delta, sends a monotonic
+reliable request, and the authority clears only that baseline so the next
+relevant update is full.
+
+Replaceable transform work uses a per-connection tick-refilled token bucket.
+Stable ordering combines an optional finite application priority with
+`SpatialInterest` distance priority and object ID as tie-breaker. Out-of-radius
+objects retain reliable lifecycle/fields and their last transform; interest is
+not a visibility/despawn authority policy. Budget exhaustion defers transforms
+and is reported, while critical reliable streams are intentionally not dropped
+to meet a cosmetic bandwidth target.

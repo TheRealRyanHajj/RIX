@@ -754,8 +754,25 @@ sequence and queues one fixed position/quaternion/scale frame per relevant
 object/connection using unreliable delivery. Local-space values must be finite;
 quaternions are normalized and scale components must be nonzero. Per-flush work
 is capped by `max_transform_sends`. `TransformFlushStats` reports queued,
-filtered and backpressured sends; replaceable backpressure does not disconnect
-an otherwise healthy peer.
+filtered, backpressured, budget-deferred, full/delta and byte counts;
+replaceable backpressure does not disconnect an otherwise healthy peer.
+
+`ServerReplication` defaults to a per-connection transform token budget of 256
+KiB/s, 64 KiB burst and 60 simulation ticks/s. All are bounded constructor
+arguments. An optional `priority(connection, object)` returns a finite numeric
+priority. `SpatialInterest(radius)` stores explicit connection observer
+positions, filters objects outside the radius and contributes nearer-first
+priority; object ID is the stable final tie-breaker. These policies never
+suppress reliable lifecycle, variables or RPCs.
+
+Each accepted full/delta sample is ACKed reliably. Authority sends a 64-byte
+quantized delta only from that connection/object's ACKed snapshot; otherwise it
+sends the 76-byte full frame. Delta ranges are signed int16 centimeters for
+position, 1/16000 quaternion-component difference and 1/1000 scale difference.
+Overflow/invalid reconstruction falls back to full. Sent baseline candidates
+and client histories are bounded. If a delta names an evicted client baseline,
+the client drops it and sends a monotonic reliable recovery request; authority
+clears that one baseline and its next relevant update is full.
 
 `ClientReplication(..., max_transform_samples=32)` stores at most 2–256 samples
 per object. Unknown, duplicate, stale-sequence and older-tick unreliable frames
@@ -769,6 +786,8 @@ interpolates rotation before applying only to client replica entities. The
 optional server
 `relevance_filter(connection, object)` suppresses transform frames only; it does
 not despawn the object or hide its lifecycle/NetworkVar state.
+`delta_baseline_stats` exposes full/delta receive, ACK and recovery-request
+counts.
 
 `PrefabRegistry.register_rpc(prefab, rpc_id, name, direction, arguments,
 handler, reliable=..., rate_limit=..., require_owner=...)` adds a stable RPC to

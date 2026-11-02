@@ -162,6 +162,15 @@ queues can fill and raise `NetworkError`, and only a later correction/reconnect
 can restore authority. Unreliable transforms/inputs rely on newer state or
 application redundancy; they are never silently promoted to reliable.
 
+Phase 5.4 bandwidth limits apply to replaceable transform frames, not critical
+reliable lifecycle/fields/RPC traffic. The default values are engineering
+defaults, not a proven 32-player capacity budget. `SpatialInterest` filters
+transform updates only: objects remain spawned with reliable fields and hold
+their last received pose outside the radius. Deltas are lossy at 1 cm position,
+1/16000 quaternion-component and 0.001 scale resolution; larger deltas fall back
+to full float32. ACKs and recovery requests consume reliable bandwidth, and no
+cross-object packet aggregation is implemented yet.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

@@ -29,7 +29,7 @@ from .scene import Scene
 
 
 _MAGIC = b"E3DR"
-_WIRE_VERSION = 1
+_WIRE_VERSION = 2
 _BEGIN = 1
 _SPAWN = 2
 _DESPAWN = 3
@@ -38,6 +38,9 @@ _VALUE = 5
 _TRANSFORM = 6
 _RPC = 7
 _RESYNC = 8
+_TRANSFORM_ACK = 9
+_TRANSFORM_DELTA = 10
+_BASELINE_REQUEST = 11
 _HEADER = struct.Struct("<4sHBBI")
 _BEGIN_PAYLOAD = struct.Struct("<QII16s")
 _SPAWN_PAYLOAD = struct.Struct("<QI")
@@ -47,6 +50,9 @@ _MAX_FRAME_SIZE = 64
 _VALUE_PREFIX = struct.Struct("<QHBQI")
 _MAX_VALUE_BYTES = 60 * 1024
 _TRANSFORM_PAYLOAD = struct.Struct("<QQQ10f")
+_TRANSFORM_DELTA_PAYLOAD = struct.Struct("<QQQQ10h")
+_TRANSFORM_ACK_PAYLOAD = struct.Struct("<QQ")
+_BASELINE_REQUEST_PAYLOAD = struct.Struct("<QQ")
 _MAX_TRANSFORM_SAMPLES = 256
 _MAX_FLOAT32 = 3.4028234663852886e38
 _RPC_PREFIX = struct.Struct("<QHQB")
@@ -160,12 +166,68 @@ class TransformReplicationStats:
 
 
 @dataclass(frozen=True, slots=True)
+class DeltaBaselineStats:
+    full_received: int
+    delta_received: int
+    acknowledgements_sent: int
+    recovery_requests: int
+
+
+@dataclass(frozen=True, slots=True)
 class TransformFlushStats:
     sequence: int
     tick: int
     queued: int
     filtered: int
     backpressured: int
+    budget_deferred: int = 0
+    full_snapshots: int = 0
+    delta_snapshots: int = 0
+    bytes_queued: int = 0
+
+
+class SpatialInterest:
+    """Bounded distance interest and distance-derived priority per connection."""
+
+    __slots__ = ("_radius", "_radius_squared", "_observers")
+
+    def __init__(self, radius: float) -> None:
+        if isinstance(radius, bool) or not isinstance(radius, (int, float)):
+            raise TypeError("spatial interest radius must be a number")
+        value = float(radius)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("spatial interest radius must be finite and positive")
+        self._radius = value
+        self._radius_squared = value * value
+        self._observers: dict[ConnectionId, Vec3] = {}
+
+    @property
+    def radius(self) -> float:
+        return self._radius
+
+    def set_observer(
+        self, connection: ConnectionId, position: Vec3 | tuple[float, float, float]
+    ) -> None:
+        if not isinstance(connection, ConnectionId):
+            raise TypeError("connection must be an easy3d.network.ConnectionId")
+        self._observers[connection] = Vec3.from_value(position)
+
+    def remove_observer(self, connection: ConnectionId) -> None:
+        self._observers.pop(connection, None)
+
+    def relevant(self, connection: ConnectionId, item: ReplicatedObject) -> bool:
+        observer = self._observers.get(connection)
+        if observer is None:
+            return False
+        offset = item.entity.position - observer
+        return offset.length_squared <= self._radius_squared
+
+    def priority(self, connection: ConnectionId, item: ReplicatedObject) -> float:
+        observer = self._observers.get(connection)
+        if observer is None:
+            return float("-inf")
+        distance = (item.entity.position - observer).length
+        return max(0.0, self._radius - distance)
 
 
 def _encode_value(spec: NetworkVarSpec, value: object) -> bytes:
@@ -634,6 +696,93 @@ def _transform_frame(
     return _HEADER.pack(_MAGIC, _WIRE_VERSION, _TRANSFORM, 0, len(payload)) + payload
 
 
+def _snapshot_from_frame(frame: bytes) -> TransformSnapshot:
+    unpacked = _TRANSFORM_PAYLOAD.unpack(frame[_HEADER.size :])
+    _object_value, sequence, tick = unpacked[:3]
+    values = unpacked[3:]
+    return TransformSnapshot(
+        tick,
+        sequence,
+        Vec3(values[:3]),
+        Quat(values[3:7]).normalized(),
+        Vec3(values[7:10]),
+    )
+
+
+def _transform_delta_frame(
+    object_id: NetworkObjectId,
+    current: TransformSnapshot,
+    baseline: TransformSnapshot,
+) -> tuple[bytes, TransformSnapshot] | None:
+    current_rotation = tuple(current.rotation)
+    baseline_rotation = tuple(baseline.rotation)
+    if sum(
+        left * right
+        for left, right in zip(current_rotation, baseline_rotation, strict=True)
+    ) < 0.0:
+        current_rotation = tuple(-value for value in current_rotation)
+    current_position = tuple(current.position)
+    baseline_position = tuple(baseline.position)
+    current_scale = tuple(current.scale)
+    baseline_scale = tuple(baseline.scale)
+    differences = (
+        *((current_position[index] - baseline_position[index]) * 100.0 for index in range(3)),
+        *((current_rotation[index] - baseline_rotation[index]) * 16000.0 for index in range(4)),
+        *((current_scale[index] - baseline_scale[index]) * 1000.0 for index in range(3)),
+    )
+    quantized = tuple(round(value) for value in differences)
+    if any(value < -32767 or value > 32767 for value in quantized):
+        return None
+    payload = _TRANSFORM_DELTA_PAYLOAD.pack(
+        object_id.value,
+        current.sequence,
+        current.tick,
+        baseline.sequence,
+        *quantized,
+    )
+    frame = _HEADER.pack(
+        _MAGIC, _WIRE_VERSION, _TRANSFORM_DELTA, 0, len(payload)
+    ) + payload
+    reconstructed_position = Vec3(
+        tuple(
+            baseline_position[index] + quantized[index] / 100.0
+            for index in range(3)
+        )
+    )
+    reconstructed_rotation = Quat(
+        tuple(
+            baseline_rotation[index] + quantized[index + 3] / 16000.0
+            for index in range(4)
+        )
+    ).normalized()
+    reconstructed_scale = Vec3(
+        tuple(
+            baseline_scale[index] + quantized[index + 7] / 1000.0
+            for index in range(3)
+        )
+    )
+    if any(component == 0.0 for component in reconstructed_scale):
+        return None
+    return frame, TransformSnapshot(
+        current.tick,
+        current.sequence,
+        reconstructed_position,
+        reconstructed_rotation,
+        reconstructed_scale,
+    )
+
+
+def _transform_ack_frame(object_id: NetworkObjectId, sequence: int) -> bytes:
+    return _frame(_TRANSFORM_ACK, _TRANSFORM_ACK_PAYLOAD.pack(object_id.value, sequence))
+
+
+def _baseline_request_frame(sequence: int, object_id: NetworkObjectId) -> bytes:
+    return _frame(
+        _BASELINE_REQUEST,
+        _BASELINE_REQUEST_PAYLOAD.pack(sequence, object_id.value),
+    )
+
+
 def _rpc_value_spec(index: int, argument: RpcArgumentSpec) -> NetworkVarSpec:
     return NetworkVarSpec(index + 1, f"arg{index}", argument.type, b"", argument.max_bytes)
 
@@ -711,12 +860,17 @@ def _decode(frame: bytes) -> tuple[int, bytes]:
         _TRANSFORM,
         _RPC,
         _RESYNC,
+        _TRANSFORM_ACK,
+        _TRANSFORM_DELTA,
+        _BASELINE_REQUEST,
     ):
         raise ValueError("unknown replication frame type")
-    if message_type not in (_VALUE, _TRANSFORM, _RPC) and len(frame) > _MAX_FRAME_SIZE:
+    if message_type not in (_VALUE, _TRANSFORM, _TRANSFORM_DELTA, _RPC) and len(frame) > _MAX_FRAME_SIZE:
         raise ValueError("lifecycle frame exceeds its fixed bound")
     if message_type == _TRANSFORM and len(frame) != _HEADER.size + _TRANSFORM_PAYLOAD.size:
         raise ValueError("invalid transform frame size")
+    if message_type == _TRANSFORM_DELTA and len(frame) != _HEADER.size + _TRANSFORM_DELTA_PAYLOAD.size:
+        raise ValueError("invalid transform delta frame size")
     if message_type == _RPC and len(frame) > _HEADER.size + _MAX_RPC_BYTES:
         raise ValueError("RPC frame exceeds its total byte bound")
     if size != len(frame) - _HEADER.size:
@@ -734,6 +888,15 @@ class ServerReplication:
         "_closed",
         "_max_objects",
         "_max_transform_sends",
+        "_transform_budget_bytes_per_second",
+        "_transform_budget_burst_bytes",
+        "_transform_tick_rate",
+        "_transform_tokens",
+        "_transform_baselines",
+        "_transform_sent_history",
+        "_baseline_request_sequences",
+        "_priority",
+        "_spatial_interest",
         "_next_id",
         "_objects",
         "_owners",
@@ -768,6 +931,11 @@ class ServerReplication:
         max_objects: int = 65536,
         max_transform_sends: int = 65536,
         relevance_filter: Callable[[ConnectionId, ReplicatedObject], bool] | None = None,
+        priority: Callable[[ConnectionId, ReplicatedObject], float] | None = None,
+        spatial_interest: SpatialInterest | None = None,
+        transform_budget_bytes_per_second: int = 256 * 1024,
+        transform_budget_burst_bytes: int = 64 * 1024,
+        transform_tick_rate: int = 60,
     ) -> None:
         if not isinstance(server, Server):
             raise TypeError("server must be an easy3d.Server")
@@ -783,6 +951,21 @@ class ServerReplication:
             raise ValueError("max_transform_sends must be in [1, 1000000]")
         if relevance_filter is not None and not callable(relevance_filter):
             raise TypeError("relevance_filter must be callable")
+        if priority is not None and not callable(priority):
+            raise TypeError("priority must be callable")
+        if spatial_interest is not None and not isinstance(
+            spatial_interest, SpatialInterest
+        ):
+            raise TypeError("spatial_interest must be a SpatialInterest")
+        for name, value, minimum in (
+            ("transform_budget_bytes_per_second", transform_budget_bytes_per_second, 1024),
+            ("transform_budget_burst_bytes", transform_budget_burst_bytes, _HEADER.size + _TRANSFORM_PAYLOAD.size),
+            ("transform_tick_rate", transform_tick_rate, 1),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value < minimum:
+                raise ValueError(f"{name} is below its supported minimum")
         if server in _attached_servers:
             raise RuntimeError("this server already has a replication owner")
         if server.connections:
@@ -794,6 +977,19 @@ class ServerReplication:
         self._resync_last_times: dict[ConnectionId, float] = {}
         self._max_objects = max_objects
         self._max_transform_sends = max_transform_sends
+        self._transform_budget_bytes_per_second = transform_budget_bytes_per_second
+        self._transform_budget_burst_bytes = transform_budget_burst_bytes
+        self._transform_tick_rate = transform_tick_rate
+        self._transform_tokens: dict[ConnectionId, float] = {}
+        self._transform_baselines: dict[
+            tuple[ConnectionId, NetworkObjectId], TransformSnapshot
+        ] = {}
+        self._transform_sent_history: dict[
+            tuple[ConnectionId, NetworkObjectId], deque[TransformSnapshot]
+        ] = {}
+        self._baseline_request_sequences: dict[ConnectionId, int] = {}
+        self._priority = priority
+        self._spatial_interest = spatial_interest
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
         self._owners: dict[NetworkObjectId, ConnectionId | None] = {}
         self._ready_connections: set[ConnectionId] = set()
@@ -843,6 +1039,14 @@ class ServerReplication:
             raise TypeError("relevance_filter must be callable")
         self._relevance_filter = relevance_filter
 
+    def set_priority(
+        self,
+        priority: Callable[[ConnectionId, ReplicatedObject], float] | None,
+    ) -> None:
+        if priority is not None and not callable(priority):
+            raise TypeError("priority must be callable")
+        self._priority = priority
+
     def spawn(self, prefab_id: PrefabId | int) -> ReplicatedObject:
         if self._closed:
             raise RuntimeError("server replication is closed")
@@ -890,6 +1094,10 @@ class ServerReplication:
             del self._rpc_windows[key]
         for key in [key for key in self._variables if key[0] == identifier]:
             del self._variables[key]
+        for key in [key for key in self._transform_baselines if key[1] == identifier]:
+            del self._transform_baselines[key]
+        for key in [key for key in self._transform_sent_history if key[1] == identifier]:
+            del self._transform_sent_history[key]
         if replicated.entity.is_alive:
             replicated.entity.destroy()
         return replicated.entity
@@ -1009,34 +1217,105 @@ class ServerReplication:
         if len(transform_objects) * len(connections) > self._max_transform_sends:
             raise NetworkError("transform snapshot send bound is exceeded")
         sequence = self._transform_sequence + 1
-        sends: list[tuple[ConnectionId, bytes]] = []
         filtered = 0
         frames = {
             item.id: _transform_frame(item, sequence, tick)
             for item in transform_objects
         }
-        for connection in connections:
-            for item in transform_objects:
-                if self._relevance_filter is not None and not self._relevance_filter(
-                    connection, item
-                ):
-                    filtered += 1
-                    continue
-                sends.append((connection, frames[item.id]))
+        snapshots = {
+            identifier: _snapshot_from_frame(frame)
+            for identifier, frame in frames.items()
+        }
+        tick_delta = (
+            1
+            if self._last_transform_tick is None
+            else max(0, tick - self._last_transform_tick)
+        )
         queued = 0
         backpressured = 0
-        for connection, frame in sends:
-            status = self._server.send(
-                connection, frame, delivery=Delivery.UNRELIABLE
+        budget_deferred = 0
+        full_snapshots = 0
+        delta_snapshots = 0
+        bytes_queued = 0
+        for connection in connections:
+            tokens = min(
+                float(self._transform_budget_burst_bytes),
+                self._transform_tokens.get(
+                    connection, float(self._transform_budget_burst_bytes)
+                )
+                + self._transform_budget_bytes_per_second
+                * tick_delta
+                / self._transform_tick_rate,
             )
-            if status is SendStatus.QUEUED:
-                queued += 1
-            else:
-                backpressured += 1
+            relevant: list[tuple[float, ReplicatedObject]] = []
+            for item in transform_objects:
+                is_relevant = (
+                    self._relevance_filter is None
+                    or self._relevance_filter(connection, item)
+                ) and (
+                    self._spatial_interest is None
+                    or self._spatial_interest.relevant(connection, item)
+                )
+                if not is_relevant:
+                    filtered += 1
+                    continue
+                priority_value = 0.0
+                if self._spatial_interest is not None:
+                    priority_value += self._spatial_interest.priority(connection, item)
+                if self._priority is not None:
+                    declared = float(self._priority(connection, item))
+                    if not math.isfinite(declared):
+                        raise ValueError("transform priority must be finite")
+                    priority_value += declared
+                relevant.append((priority_value, item))
+            relevant.sort(key=lambda entry: (-entry[0], entry[1].id.value))
+            for _priority, item in relevant:
+                current = snapshots[item.id]
+                baseline = self._transform_baselines.get((connection, item.id))
+                delta = (
+                    None
+                    if baseline is None
+                    else _transform_delta_frame(item.id, current, baseline)
+                )
+                is_delta = delta is not None
+                transmitted = current
+                if delta is None:
+                    frame = frames[item.id]
+                else:
+                    frame, transmitted = delta
+                if len(frame) > tokens:
+                    budget_deferred += 1
+                    continue
+                status = self._server.send(
+                    connection, frame, delivery=Delivery.UNRELIABLE
+                )
+                if status is SendStatus.QUEUED:
+                    queued += 1
+                    bytes_queued += len(frame)
+                    tokens -= len(frame)
+                    if is_delta:
+                        delta_snapshots += 1
+                    else:
+                        full_snapshots += 1
+                    history = self._transform_sent_history.setdefault(
+                        (connection, item.id), deque(maxlen=32)
+                    )
+                    history.append(transmitted)
+                else:
+                    backpressured += 1
+            self._transform_tokens[connection] = tokens
         self._transform_sequence = sequence
         self._last_transform_tick = tick
         self._last_transform_flush = TransformFlushStats(
-            sequence, tick, queued, filtered, backpressured
+            sequence,
+            tick,
+            queued,
+            filtered,
+            backpressured,
+            budget_deferred,
+            full_snapshots,
+            delta_snapshots,
+            bytes_queued,
         )
         return self._last_transform_flush
 
@@ -1061,6 +1340,9 @@ class ServerReplication:
         self._closed = True
 
     def _on_connect(self, server: Server, connection: ConnectionId) -> None:
+        self._transform_tokens[connection] = float(
+            self._transform_budget_burst_bytes
+        )
         if self._send_snapshot(connection):
             self._ready_connections.add(connection)
         if connection in self._ready_connections and self._old_connect is not None:
@@ -1074,6 +1356,14 @@ class ServerReplication:
         self._rpc_last_sequences.pop(event.connection, None)
         self._resync_last_sequences.pop(event.connection, None)
         self._resync_last_times.pop(event.connection, None)
+        self._baseline_request_sequences.pop(event.connection, None)
+        self._transform_tokens.pop(event.connection, None)
+        for key in [key for key in self._transform_baselines if key[0] == event.connection]:
+            del self._transform_baselines[key]
+        for key in [key for key in self._transform_sent_history if key[0] == event.connection]:
+            del self._transform_sent_history[key]
+        if self._spatial_interest is not None:
+            self._spatial_interest.remove_observer(event.connection)
         for key in [key for key in self._rpc_windows if key[0] == event.connection]:
             del self._rpc_windows[key]
         if self._old_disconnect is not None:
@@ -1087,6 +1377,10 @@ class ServerReplication:
                     self._receive_rpc(event.connection, payload)
                 elif message_type == _RESYNC:
                     self._receive_resync(event.connection, payload)
+                elif message_type == _TRANSFORM_ACK:
+                    self._receive_transform_ack(event.connection, payload)
+                elif message_type == _BASELINE_REQUEST:
+                    self._receive_baseline_request(event.connection, payload)
                 else:
                     raise PermissionError("client-authored replication is forbidden")
             except (KeyError, PermissionError, TypeError, ValueError) as error:
@@ -1110,8 +1404,52 @@ class ServerReplication:
             return
         self._resync_last_times[connection] = now
         self._ready_connections.discard(connection)
+        for key in [key for key in self._transform_baselines if key[0] == connection]:
+            del self._transform_baselines[key]
+        for key in [key for key in self._transform_sent_history if key[0] == connection]:
+            del self._transform_sent_history[key]
         if self._send_snapshot(connection):
             self._ready_connections.add(connection)
+
+    def _receive_transform_ack(
+        self, connection: ConnectionId, payload: bytes
+    ) -> None:
+        if connection not in self._ready_connections:
+            raise PermissionError("transform ACK arrived before snapshot readiness")
+        if len(payload) != _TRANSFORM_ACK_PAYLOAD.size:
+            raise ValueError("invalid transform ACK size")
+        object_value, sequence = _TRANSFORM_ACK_PAYLOAD.unpack(payload)
+        identifier = NetworkObjectId(object_value)
+        replicated = self._objects.get(identifier)
+        if replicated is None or not self._registry.has_transform(replicated.prefab_id):
+            raise ValueError("transform ACK references an unknown transform")
+        if sequence > self._transform_sequence:
+            raise ValueError("transform ACK sequence is from the future")
+        history = self._transform_sent_history.get((connection, identifier), ())
+        for snapshot in reversed(history):
+            if snapshot.sequence == sequence:
+                current = self._transform_baselines.get((connection, identifier))
+                if current is None or snapshot.sequence >= current.sequence:
+                    self._transform_baselines[(connection, identifier)] = snapshot
+                return
+
+    def _receive_baseline_request(
+        self, connection: ConnectionId, payload: bytes
+    ) -> None:
+        if connection not in self._ready_connections:
+            raise PermissionError("baseline request arrived before snapshot readiness")
+        if len(payload) != _BASELINE_REQUEST_PAYLOAD.size:
+            raise ValueError("invalid baseline request size")
+        request_sequence, object_value = _BASELINE_REQUEST_PAYLOAD.unpack(payload)
+        last = self._baseline_request_sequences.get(connection, 0)
+        if request_sequence == 0 or request_sequence <= last:
+            raise ValueError("baseline request sequence is stale or duplicated")
+        identifier = NetworkObjectId(object_value)
+        replicated = self._objects.get(identifier)
+        if replicated is None or not self._registry.has_transform(replicated.prefab_id):
+            raise ValueError("baseline request references an unknown transform")
+        self._baseline_request_sequences[connection] = request_sequence
+        self._transform_baselines.pop((connection, identifier), None)
 
     def _receive_rpc(self, connection: ConnectionId, payload: bytes) -> None:
         if connection not in self._ready_connections:
@@ -1187,6 +1525,9 @@ class ServerReplication:
                     relevant = (
                         self._relevance_filter is None
                         or self._relevance_filter(connection, item)
+                    ) and (
+                        self._spatial_interest is None
+                        or self._spatial_interest.relevant(connection, item)
                     )
                 except Exception:
                     self._server.disconnect(connection, "replication relevance callback failed")
@@ -1202,6 +1543,11 @@ class ServerReplication:
                             connection, "replication snapshot backpressure"
                         )
                         return False
+                    snapshot = _snapshot_from_frame(transform)
+                    history = self._transform_sent_history.setdefault(
+                        (connection, item.id), deque(maxlen=32)
+                    )
+                    history.append(snapshot)
         end = _frame(_END, _END_PAYLOAD.pack(epoch))
         if self._server.send(connection, end) is not SendStatus.QUEUED:
             self._server.disconnect(connection, "replication snapshot backpressure")
@@ -1274,6 +1620,11 @@ class ClientReplication:
         "_expected_count",
         "_history_evictions",
         "_interpolated",
+        "_full_transforms",
+        "_delta_transforms",
+        "_transform_acks_sent",
+        "_baseline_requests",
+        "_baseline_request_sequence",
         "_max_objects",
         "_max_transform_samples",
         "_objects",
@@ -1342,6 +1693,11 @@ class ClientReplication:
         self._unknown_transforms = 0
         self._history_evictions = 0
         self._interpolated = 0
+        self._full_transforms = 0
+        self._delta_transforms = 0
+        self._transform_acks_sent = 0
+        self._baseline_requests = 0
+        self._baseline_request_sequence = 0
         self._rpc_sequence = 0
         self._rpc_last_sequence = 0
         self._rpc_received = 0
@@ -1363,6 +1719,15 @@ class ClientReplication:
             self._unknown_transforms,
             self._history_evictions,
             self._interpolated,
+        )
+
+    @property
+    def delta_baseline_stats(self) -> DeltaBaselineStats:
+        return DeltaBaselineStats(
+            self._full_transforms,
+            self._delta_transforms,
+            self._transform_acks_sent,
+            self._baseline_requests,
         )
 
     @property
@@ -1498,6 +1863,43 @@ class ClientReplication:
         self._synchronized = False
         self._rpc_last_sequence = 0
 
+    def _store_transform(
+        self, identifier: NetworkObjectId, snapshot: TransformSnapshot
+    ) -> bool:
+        history = self._transform_history.setdefault(
+            identifier, deque(maxlen=self._max_transform_samples)
+        )
+        if history and (
+            snapshot.sequence <= history[-1].sequence
+            or snapshot.tick < history[-1].tick
+        ):
+            self._stale_transforms += 1
+            return False
+        if history and snapshot.tick == history[-1].tick:
+            history[-1] = snapshot
+        else:
+            if len(history) == self._max_transform_samples:
+                self._history_evictions += 1
+            history.append(snapshot)
+        status = self._client.send(
+            _transform_ack_frame(identifier, snapshot.sequence),
+            delivery=Delivery.RELIABLE,
+        )
+        if status is SendStatus.QUEUED:
+            self._transform_acks_sent += 1
+        return True
+
+    def _request_transform_baseline(self, identifier: NetworkObjectId) -> None:
+        if self._baseline_request_sequence == 2**64 - 1:
+            raise NetworkError("baseline request sequence space is exhausted")
+        self._baseline_request_sequence += 1
+        status = self._client.send(
+            _baseline_request_frame(self._baseline_request_sequence, identifier),
+            delivery=Delivery.RELIABLE,
+        )
+        if status is SendStatus.QUEUED:
+            self._baseline_requests += 1
+
     def _apply(self, frame: bytes) -> None:
         message_type, payload = _decode(frame)
         if message_type == _BEGIN:
@@ -1600,6 +2002,7 @@ class ClientReplication:
                 raise ValueError("transform update contains non-finite components")
             replicated = self._objects.get(identifier)
             self._received_transforms += 1
+            self._full_transforms += 1
             if replicated is None:
                 self._unknown_transforms += 1
                 return
@@ -1613,21 +2016,58 @@ class ClientReplication:
             scale = Vec3(values[7:10])
             if any(component == 0.0 for component in scale):
                 raise ValueError("transform update contains a zero scale component")
-            history = self._transform_history.setdefault(
-                identifier, deque(maxlen=self._max_transform_samples)
-            )
-            if history and (
-                sequence <= history[-1].sequence or tick < history[-1].tick
-            ):
-                self._stale_transforms += 1
-                return
             snapshot = TransformSnapshot(tick, sequence, position, rotation, scale)
-            if history and tick == history[-1].tick:
-                history[-1] = snapshot
+            self._store_transform(identifier, snapshot)
+            return
+        if message_type == _TRANSFORM_DELTA:
+            unpacked = _TRANSFORM_DELTA_PAYLOAD.unpack(payload)
+            object_value, sequence, tick, baseline_sequence = unpacked[:4]
+            identifier = NetworkObjectId(object_value)
+            replicated = self._objects.get(identifier)
+            self._received_transforms += 1
+            self._delta_transforms += 1
+            if replicated is None:
+                self._unknown_transforms += 1
                 return
-            if len(history) == self._max_transform_samples:
-                self._history_evictions += 1
-            history.append(snapshot)
+            if not self._registry.has_transform(replicated.prefab_id):
+                raise ValueError("transform delta is not declared by the prefab schema")
+            history = self._transform_history.get(identifier, ())
+            baseline = next(
+                (
+                    snapshot
+                    for snapshot in reversed(history)
+                    if snapshot.sequence == baseline_sequence
+                ),
+                None,
+            )
+            if baseline is None:
+                self._request_transform_baseline(identifier)
+                return
+            values = unpacked[4:]
+            base_position = tuple(baseline.position)
+            base_rotation = tuple(baseline.rotation)
+            base_scale = tuple(baseline.scale)
+            position = Vec3(
+                tuple(base_position[index] + values[index] / 100.0 for index in range(3))
+            )
+            try:
+                rotation = Quat(
+                    tuple(
+                        base_rotation[index] + values[index + 3] / 16000.0
+                        for index in range(4)
+                    )
+                ).normalized()
+            except ValueError as error:
+                raise ValueError("transform delta reconstructs a zero quaternion") from error
+            scale = Vec3(
+                tuple(base_scale[index] + values[index + 7] / 1000.0 for index in range(3))
+            )
+            if any(component == 0.0 for component in scale):
+                raise ValueError("transform delta reconstructs zero scale")
+            self._store_transform(
+                identifier,
+                TransformSnapshot(tick, sequence, position, rotation, scale),
+            )
             return
         if message_type == _RPC:
             if not self._synchronized:
@@ -1670,6 +2110,7 @@ class ClientReplication:
 
 __all__ = [
     "ClientReplication",
+    "DeltaBaselineStats",
     "NetworkObjectId",
     "NetworkTransform",
     "NetworkValueType",
@@ -1684,6 +2125,7 @@ __all__ = [
     "RpcSpec",
     "RpcStats",
     "ServerReplication",
+    "SpatialInterest",
     "TransformFlushStats",
     "TransformReplicationStats",
     "TransformSnapshot",

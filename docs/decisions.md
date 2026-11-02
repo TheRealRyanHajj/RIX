@@ -1189,3 +1189,18 @@ non-overlapping process scope and reset unconditionally. This preserves exact
 unit traces without pretending to reimplement GNS reliability, while making the
 global/test-only risk explicit. Profile results are regression evidence, not
 Internet quality or capacity guarantees.
+
+## ADR-0041: Budget only replaceable transforms and delta from ACKed state
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Never discard lifecycle, values, match state or RPCs to satisfy a transform
+budget. Refill per-connection transform tokens from explicit simulation ticks,
+order relevant entities by finite application plus distance priority, and defer
+over-budget frames. Delta only against a snapshot acknowledged by that client.
+Quantize position/quaternion/scale differences into int16 and retain the exact
+reconstruction as the candidate baseline. A missing baseline causes a reliable,
+monotonic recovery request and one forced full update. Spatial radius controls
+transform relevance without changing spawn/authority state. This keeps overload
+and loss recoverable without claiming full lifecycle interest management.

@@ -4041,3 +4041,84 @@ Total Test time (real) = 1.64 sec
 
 Phase 5.3: **DONE**. Exact next task: Phase 5.4 — measured bandwidth budgets,
 entity prioritization, spatial interest and delta-baseline recovery.
+
+## 2026-11-01 — Phase 5.4 bounded prioritized transform deltas (active)
+
+### Bounded approach
+
+Keep reliable lifecycle, variables, match state and RPC outside a replaceable
+stream budget so overload cannot silently delete authority. Add a per-connection
+token budget for transform bytes, stable priority ordering and optional
+distance-based `SpatialInterest`; lifecycle remains coherent outside the radius.
+
+Advance the replication wire version and send compact int16 transform deltas
+only against a snapshot that the specific client acknowledged. Retain bounded
+sent/history windows. If the client no longer has the named baseline, send a
+monotonic reliable recovery request, clear only that connection/object baseline
+and force the next relevant transform to be full. Store the quantized
+reconstruction as the authority baseline so chained deltas cannot accumulate
+client/server baseline drift. Test budgets, priority, interest, delta size,
+acknowledgement, missing-baseline recovery, resync and malicious bounds.
+
+### Result
+
+Advanced replication wire version to 2. A full type-6 transform remains 76
+bytes total. After a per-connection/object reliable ACK, authority emits a
+64-byte type-10 delta with signed int16 centimeter position, 1/16000 quaternion
+component and 0.001 scale differences. Overflow/invalid reconstruction falls
+back to full. Authority retains the exact quantized reconstruction as the sent
+candidate, so a later ACK selects the same baseline the client holds rather
+than accumulating hidden baseline error.
+
+Client histories decode only a named retained baseline. A missing baseline
+drops the replaceable delta and queues one monotonic reliable type-11 recovery
+request; authority clears only that baseline and the next relevant flush is
+full. Type-9 ACKs cannot name a future sequence. Sent history is capped at 32
+per connection/object and all state is cleared on despawn/disconnect/resync.
+
+Added per-connection transform token budgets (default 256 KiB/s, 64 KiB burst,
+60 ticks/s), stable finite application priority, and `SpatialInterest` observer
+radius/distance priority. One 76-byte burst test with two nearby and one distant
+object sent the preferred nearby object, budget-deferred the ordinary nearby
+object and interest-filtered the distant object. Lifecycle remained present.
+Critical reliable lifecycle/values/RPCs intentionally bypass the replaceable
+transform budget.
+
+The delta/recovery and interest/budget integration tests passed 20 consecutive
+runs. The first attempted focused regression command referenced the nonexistent
+singular filenames `test_replication.py` and `test_network_var.py`; pytest
+correctly returned “file or directory not found.” It was corrected to
+`test_replication_lifecycle.py` and `test_network_vars.py`, and all 21 selected
+replication tests passed.
+
+### Exact verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests/python/test_replication_scaling.py -q -s
+..
+2 passed in 0.25s
+
+# Scaling integration suite invoked 20 consecutive times.
+20/20 iterations passed (individual runs 0.22–0.27 sec)
+
+# Initial mistyped focused command:
+build\venv311\Scripts\python.exe -m pytest ... tests/python/test_replication.py ...
+ERROR: file or directory not found: tests/python/test_replication.py
+no tests ran in 0.00s
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_transform.py tests/python/test_network_rpc.py tests/python/test_replication_lifecycle.py tests/python/test_network_vars.py tests/python/test_replication_resync.py tests/python/test_replication_scaling.py -q
+.....................                                                    [100%]
+21 passed in 1.38s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 38%]
+........................................................................ [ 76%]
+.............................................                            [100%]
+189 passed in 21.29s
+```
+
+No native source changed in Phase 5.4; the immediately preceding Phase 5.3
+MSVC matrices remain the native checkpoint (Debug 17/17, Release 17/17,
+headless 16/16). Phase 5.4: **DONE**. Exact next task: Phase 5.5 — cooperative
+and competitive arena samples with authoritative damage, scoring and match
+state.

@@ -318,6 +318,15 @@ Remote replicas continue to use the bounded transform history. A
 interpolation calls/applied-object totals; it neither extrapolates nor changes
 the locally predicted character.
 
+Transform replication has a per-connection token budget (256 KiB/s, 64 KiB
+burst and 60 ticks/s by default), stable priority callback, and optional
+`SpatialInterest(radius)` observer filter. These controls affect only
+replaceable transforms; reliable lifecycle, values, match state, and RPCs remain
+coherent. Once a client acknowledges a full transform, subsequent values use a
+64-byte quantized delta instead of the 76-byte full frame where representable.
+A missing client baseline requests one reliable recovery and forces the next
+relevant snapshot full.
+
 Run the complete Phase 2 course with:
 
 ```powershell

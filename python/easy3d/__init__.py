@@ -70,6 +70,7 @@ from .prediction import (
 )
 from .replication import (
     ClientReplication,
+    DeltaBaselineStats,
     NetworkObjectId,
     NetworkTransform,
     NetworkValueType,
@@ -81,6 +82,7 @@ from .replication import (
     RpcSpec,
     RpcStats,
     ServerReplication,
+    SpatialInterest,
     TransformFlushStats,
     TransformReplicationStats,
     TransformSnapshot,
@@ -120,6 +122,7 @@ __all__ = [
     "CharacterInputCommand",
     "ClientMatchState",
     "ClientReplication",
+    "DeltaBaselineStats",
     "Collider",
     "CollisionEvent",
     "Constraint",
@@ -191,6 +194,7 @@ __all__ = [
     "ScriptCallbackError",
     "ScriptRole",
     "Sphere",
+    "SpatialInterest",
     "State",
     "StateMachine",
     "Subscription",
