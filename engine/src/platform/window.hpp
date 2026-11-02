@@ -16,6 +16,7 @@ void run_window_loop(const EngineConfig& config,
                      std::atomic_uint32_t& viewport_height,
                      RendererStatsAtomic& renderer_stats,
                      InputSystem& input,
+                     AudioSystem& audio,
                      Engine::FrameCallback frame_callback);
 
 } // namespace easy3d::platform

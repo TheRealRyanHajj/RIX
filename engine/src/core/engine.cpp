@@ -141,6 +141,7 @@ void Engine::run(FrameCallback frame_callback) {
         viewport_height_,
         renderer_stats_,
         input_,
+        audio_,
         std::move(frame_callback));
 }
 
@@ -181,6 +182,14 @@ InputSystem& Engine::input() noexcept {
 
 const InputSystem& Engine::input() const noexcept {
     return input_;
+}
+
+AudioSystem& Engine::audio() noexcept {
+    return audio_;
+}
+
+const AudioSystem& Engine::audio() const noexcept {
+    return audio_;
 }
 
 const EngineConfig& Engine::config() const noexcept {

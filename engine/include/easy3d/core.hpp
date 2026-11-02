@@ -1,6 +1,7 @@
 #pragma once
 
 #include "easy3d/input.hpp"
+#include "easy3d/audio.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -111,6 +112,8 @@ public:
     [[nodiscard]] RendererStats renderer_stats() const noexcept;
     [[nodiscard]] InputSystem& input() noexcept;
     [[nodiscard]] const InputSystem& input() const noexcept;
+    [[nodiscard]] AudioSystem& audio() noexcept;
+    [[nodiscard]] const AudioSystem& audio() const noexcept;
     [[nodiscard]] const EngineConfig& config() const noexcept;
 
 private:
@@ -123,6 +126,7 @@ private:
     std::atomic_uint32_t viewport_height_{1};
     RendererStatsAtomic renderer_stats_;
     InputSystem input_;
+    AudioSystem audio_;
     Scene* scene_{nullptr};
 };
 

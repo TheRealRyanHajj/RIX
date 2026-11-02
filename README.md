@@ -1,7 +1,7 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–5 and the Phase 6 graphics-preset/native-HUD milestones
+native core. Phases 0–5 and the Phase 6 graphics-preset/native-HUD/audio milestones
 are validated for their documented workloads and limits.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
@@ -189,6 +189,32 @@ Buttons use the topmost enabled hit at the mouse press edge and may safely
 mutate the active scene in their callback. `RendererStats.ui_elements` and
 `.ui_draw_calls` expose the last native overlay submission. Run
 `python examples/09_hud/main.py` for the complete resizable example.
+
+## Native WAV and positional audio
+
+Each `Game` owns an `Audio` cache and native mixer. Load uncompressed 16-bit
+mono/stereo WAV files once, then start ordinary or camera-relative voices:
+
+```python
+sound = game.audio.load("assets/chime.wav")
+effect = game.audio.play(sound, volume=0.8)
+engine = game.audio.play(
+    game.audio.load("assets/engine.wav"),
+    loop=True,
+    position=(3, 0, -2),
+    minimum_distance=1,
+    maximum_distance=30,
+)
+engine.position = moving_entity.world_position
+```
+
+The SDL3 device adapter requests 48 kHz stereo float output. The mixer converts
+source rates, mixes/clips concurrent voices, applies distance attenuation and
+equal-power left/right panning against the active scene camera, and retires
+completed voices. `game.audio.available` is true only while a device is active;
+device failure is reported but does not prevent a graphics window from running.
+Run `python examples/10_audio/main.py` with headphones for the moving-source
+example.
 
 ## Input and action maps
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from ._easy3d import Engine
+from .audio import Audio
 from .input import Input
 from .scene import Scene
 from .scheduler import SchedulerStats, SimulationScheduler
@@ -87,6 +88,7 @@ class Game:
             graphics_preset,
         )
         self._input = Input(self._engine.input)
+        self._audio = Audio(self._engine)
         self._scheduler = SimulationScheduler(
             fixed_hz=fixed_hz,
             max_frame_seconds=max_frame_seconds,
@@ -104,6 +106,12 @@ class Game:
     @property
     def input(self) -> Input:
         return self._input
+
+    @property
+    def audio(self) -> Audio:
+        """Game-local decoded sounds and native playback voices."""
+
+        return self._audio
 
     @property
     def is_running(self) -> bool:

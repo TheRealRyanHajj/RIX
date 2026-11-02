@@ -7,7 +7,7 @@ applicable notices.
 
 | Component | Immutable pin | License | Use |
 |---|---|---|---|
-| SDL | `829a65d769d935c4852f8159e964312c0957260a` (`release-3.4.18`) | zlib | Native window and events |
+| SDL | `829a65d769d935c4852f8159e964312c0957260a` (`release-3.4.18`) | zlib | Native window, events and audio-device output |
 | bgfx.cmake | `1af3832b87ad0588c05f1f0bd7ee17a7b14d2315` | CC0-1.0 | CMake integration |
 | bgfx | `b2513038f4b753ebeced40821c193978daa0492f` | BSD-2-Clause | Renderer |
 | bx | `da13683750ff8df8f44a5a15f637b6ae9460a04b` | BSD-2-Clause | bgfx support library |

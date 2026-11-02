@@ -20,6 +20,7 @@ from .assets import (
     load_image,
     load_obj,
 )
+from .audio import Audio, AudioSource, Sound
 from .camera import Camera, Projection
 from .components import (
     CharacterController,
@@ -112,6 +113,8 @@ from .utilities import (
 from .ui import Anchor, Button, HUD, Panel, Sprite, Stack, Text, UIElement
 
 __all__ = [
+    "Audio",
+    "AudioSource",
     "Anchor",
     "Button",
     "HUD",
@@ -205,6 +208,7 @@ __all__ = [
     "ScriptRole",
     "Sphere",
     "SpatialInterest",
+    "Sound",
     "State",
     "StateMachine",
     "Subscription",

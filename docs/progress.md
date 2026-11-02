@@ -4496,3 +4496,114 @@ at 8020 frames with six UI elements/eight UI draws. This is D3D11 evidence on
 the recorded NVIDIA adapter only. Phase 6.2: **DONE**. Exact next task: Phase
 6.3 — lightweight playback and positional audio backend selected through an
 ADR.
+
+## 2026-11-01 — Phase 6.3 native WAV playback and positional audio
+
+Added a platform-neutral, thread-safe native audio system with bounded decoded
+sounds/voices, PCM16-to-float conversion, linear sample-rate conversion,
+concurrent stereo mixing, hard clipping, reusable one-shot voice retirement,
+looping and live gain/position controls. Optional spatial voices use linear
+minimum/maximum-distance attenuation and equal-power panning against the active
+scene camera's normalized right vector. The graphics-disabled build retains and
+tests this mixer without SDL or a playback device.
+
+The Windows adapter now initializes SDL3 audio as optional, opens the default
+playback stream at 48 kHz stereo float, services it only from the native SDL
+callback and shuts it down before SDL. Device failure logs and leaves
+`game.audio.available` false without preventing window creation. No exception
+may cross the C callback boundary. Python exposes typed `Audio`, immutable
+`Sound`, and controllable `AudioSource` values. The bounded importer accepts
+cached, whole-file, uncompressed PCM16 mono/stereo WAV only. Added the moving
+two-tone `examples/10_audio` D3D11 scene and ADR-0047; SDL3 was already pinned,
+so no new third-party component was introduced.
+
+Failures and corrections:
+
+- The first Debug build failed because `window_win32.cpp` dereferenced the
+  forward-declared `Scene` while copying its camera into the listener. Adding
+  the concrete `easy3d/scene.hpp` include fixed the compile error; the rebuilt
+  target and suite passed.
+- Review found that retaining completed voice records would eventually consume
+  the 1,024-entry table despite zero active playback. Completed/stopped voices
+  are now erased, `stop()` is idempotent, and a native test successfully plays
+  and retires 1,100 sequential instances.
+- Review also wrapped all audio callback work so allocation or other C++
+  exceptions cannot unwind through SDL's C ABI.
+
+Exact verification evidence:
+
+```text
+cmake --preset windows-debug
+cmake --build --preset windows-debug
+# first attempt: FAILED at window_win32.cpp:313/314 and :452/453,
+# "use of undefined type 'easy3d::Scene'"; corrected as described above
+
+cmake --build --preset windows-debug
+# exit code 0; easy3d_core and easy3d_audio_tests linked
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 18
+Total Test time (real) = 1.78 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 18
+Total Test time (real) = 2.19 sec
+
+cmake --build build\windows-headless --config Release --parallel 4
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 3.71 sec
+
+# Final callback-boundary and 1,100-replay test after the full runs:
+cmake --build --preset windows-debug --target easy3d_audio_tests
+ctest --preset windows-debug -R easy3d.audio --output-on-failure
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 0.23 sec
+
+cmake --build --preset windows-release --target easy3d_audio_tests
+ctest --preset windows-release -R easy3d.audio --output-on-failure
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 0.20 sec
+
+cmake --build build\windows-headless --config Release --target easy3d_audio_tests
+ctest --test-dir build\windows-headless -C Release -R easy3d.audio --output-on-failure
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 0.17 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4069098 sha256=0eb6dd959063cca9e2870c10de55e13425ea82654965b51ca0f82df242d06182
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.Audio, easy3d.Sound, easy3d.AudioSource)"
+0.1.0
+<class 'easy3d.audio.Audio'> <class 'easy3d.audio.Sound'> <class 'easy3d.audio.AudioSource'>
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_audio.py -q
+...                                                                      [100%]
+3 passed in 0.36s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 34%]
+........................................................................ [ 68%]
+..................................................................       [100%]
+210 passed in 53.41s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe examples\10_audio\main.py --seconds 2
+Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
+audio_example: PASS frames=179 sounds=2 backend=SDL3
+Easy3D audio: SDL3 default playback, 48000 Hz stereo float
+```
+
+The timed example ran on the GUI-capable Windows/D3D11 host and proves that SDL3
+opened the default playback device while two looping spatial
+voices moved across the camera listener, then destroyed the stream and window
+cleanly. Automated native tests verify the produced sample values. The agent
+cannot hear the endpoint, so perceptual audibility/quality remains explicitly
+**UNVERIFIED** pending a human headphone/speaker run. Phase 6.3: **DONE**. Exact
+next task: Phase 6.4 — define the import contract, then add glTF/GLB geometry,
+skeletons and animation clips without weakening the existing OBJ path.

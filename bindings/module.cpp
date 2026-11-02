@@ -9,10 +9,12 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -811,6 +813,85 @@ PYBIND11_MODULE(_easy3d, module) {
             static_cast<easy3d::InputSystem& (easy3d::Engine::*)() noexcept>(
                 &easy3d::Engine::input),
             py::return_value_policy::reference_internal)
+        .def("audio_create_pcm16_sound",
+             [](easy3d::Engine& engine,
+                const py::bytes& data,
+                const std::uint8_t channels,
+                const std::uint32_t sample_rate) {
+                 const std::string bytes = data;
+                 if (bytes.empty() || bytes.size() % 2 != 0) {
+                     throw py::value_error(
+                         "PCM16 data must contain a non-empty even number of bytes");
+                 }
+                 std::vector<std::int16_t> samples(bytes.size() / 2);
+                 for (std::size_t index = 0; index < samples.size(); ++index) {
+                     const auto low = static_cast<std::uint8_t>(bytes[index * 2]);
+                     const auto high = static_cast<std::uint8_t>(bytes[index * 2 + 1]);
+                     const std::uint16_t value = static_cast<std::uint16_t>(low) |
+                                                 (static_cast<std::uint16_t>(high) << 8U);
+                     samples[index] = static_cast<std::int16_t>(value);
+                 }
+                 return engine.audio().create_pcm16_sound(
+                     std::move(samples), channels, sample_rate);
+             },
+             py::arg("data"),
+             py::arg("channels"),
+             py::arg("sample_rate"))
+        .def("audio_play",
+             [](easy3d::Engine& engine,
+                const std::uint64_t sound,
+                const float volume,
+                const bool loop,
+                const bool spatial,
+                const std::array<float, 3>& position,
+                const float minimum_distance,
+                const float maximum_distance) {
+                 easy3d::AudioPlayConfig config;
+                 config.volume = volume;
+                 config.loop = loop;
+                 config.spatial = spatial;
+                 config.position = {position[0], position[1], position[2]};
+                 config.minimum_distance = minimum_distance;
+                 config.maximum_distance = maximum_distance;
+                 return engine.audio().play(sound, config);
+             },
+             py::arg("sound"),
+             py::arg("volume") = 1.0F,
+             py::arg("loop") = false,
+             py::arg("spatial") = false,
+             py::arg("position") = std::array<float, 3>{0.0F, 0.0F, 0.0F},
+             py::arg("minimum_distance") = 1.0F,
+             py::arg("maximum_distance") = 50.0F)
+        .def("audio_stop", [](easy3d::Engine& engine, const std::uint64_t voice) {
+            engine.audio().stop(voice);
+        })
+        .def("audio_set_volume",
+             [](easy3d::Engine& engine,
+                const std::uint64_t voice,
+                const float volume) {
+                 engine.audio().set_voice_volume(voice, volume);
+             })
+        .def("audio_set_position",
+             [](easy3d::Engine& engine,
+                const std::uint64_t voice,
+                const std::array<float, 3>& position) {
+                 engine.audio().set_voice_position(
+                     voice, {position[0], position[1], position[2]});
+             })
+        .def("audio_voice_playing",
+             [](const easy3d::Engine& engine, const std::uint64_t voice) {
+                 return engine.audio().voice_playing(voice);
+             })
+        .def_property_readonly("audio_backend_active", [](const easy3d::Engine& engine) {
+            return engine.audio().backend_active();
+        })
+        .def_property_readonly("audio_sound_count", [](const easy3d::Engine& engine) {
+            return engine.audio().sound_count();
+        })
+        .def_property_readonly("audio_active_voice_count",
+                               [](const easy3d::Engine& engine) {
+                                   return engine.audio().active_voice_count();
+                               })
         .def_property_readonly("renderer_stats", [](const easy3d::Engine& engine) {
             const easy3d::RendererStats stats = engine.renderer_stats();
             return py::make_tuple(stats.draw_calls,

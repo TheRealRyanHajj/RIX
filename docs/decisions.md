@@ -1289,3 +1289,22 @@ thread mutation boundary, use the engine's atomic framebuffer extent, and scale
 SDL logical pointer events into framebuffer pixels. This preserves normal Python
 callbacks while keeping hit testing deterministic, resize-aware and independent
 from the renderer's GPU resources.
+
+## ADR-0047: Use SDL3 output with an Easy3D-owned bounded PCM mixer
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Reuse the already pinned SDL3 runtime solely for default-device lifecycle and
+its native pull callback. Keep decoded sound data, voice cursors, resampling,
+mixing and positional policy in a platform-neutral C++ `AudioSystem`, including
+graphics-disabled builds. This adds no dependency or license surface, keeps the
+audio thread out of Python, permits deterministic sample-level unit tests, and
+leaves a narrow adapter seam for a different platform device API later.
+
+Constrain the first import contract to bounded, whole-file, uncompressed PCM16
+WAV. Mix to 48 kHz stereo float with linear interpolation, distance attenuation
+and equal-power pan relative to the active camera. Treat device availability as
+optional: a playback failure logs and disables audio but must not prevent the
+window from running. Streaming codecs, authored buses/effects and HRTF remain a
+future separately specified milestone rather than hidden transitive features.

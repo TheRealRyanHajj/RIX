@@ -11,6 +11,7 @@ void run_window_loop(const EngineConfig&,
                      std::atomic_uint32_t&,
                      RendererStatsAtomic&,
                      InputSystem&,
+                     AudioSystem&,
                      Engine::FrameCallback) {
     throw EngineError("Easy3D was built without the Windows graphics backend");
 }

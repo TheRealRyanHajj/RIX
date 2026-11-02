@@ -265,6 +265,34 @@ keyboard/controller focus or navigation is implied. `Scene.clear()`,
 wrappers predictably. `RendererStats.ui_elements` and `ui_draw_calls` report the
 last submitted overlay.
 
+## Audio assets and voices
+
+`Game.audio.load(path)` accepts RIFF/WAVE files readable by Python's standard
+`wave` module with uncompressed 16-bit PCM, one or two channels, 8–192 kHz and
+at least one complete frame. Resolved paths are cached per game. A single
+decoded file is limited to 256 MiB; malformed, truncated, compressed, empty,
+8-bit, 24-bit and multichannel inputs raise before entering the native mixer.
+The returned `Sound` exposes `path`, `channels`, `sample_rate`, `frame_count`
+and `duration` and belongs to exactly that game's `Audio` manager.
+
+`Audio.play(sound, volume=1, loop=False, position=None,
+minimum_distance=1, maximum_distance=50)` returns an `AudioSource`. Volume is
+finite in `[0,4]`. Omitting position produces equal left/right gain; providing
+a finite position enables camera-relative attenuation and panning and requires
+`0 < minimum_distance < maximum_distance`. `AudioSource.volume` and
+`.position` are mutable while playing. `.playing` reports whether the native
+voice remains active and `stop()` is idempotent. Completed and stopped voices
+are retired; the native limits are 256 decoded sounds and 1,024 simultaneously
+active voices per game.
+
+The active `Scene.camera` supplies listener position and right direction once
+per frame. SDL3 opens the default output as 48 kHz stereo float during
+`Game.run()` and performs sample-rate conversion in Easy3D's native mixer.
+`Audio.available` reports that device lifetime. Device initialization/open
+failure logs a diagnostic and leaves audio unavailable without failing the
+window. This API does not claim streaming, compressed codecs, device selection,
+HRTF, reverb, occlusion or sample-accurate scheduling.
+
 ## Input and remappable actions
 
 Each `Game` owns one `game.input` object. Physical control identifiers are

@@ -1,5 +1,6 @@
 #include "platform/window.hpp"
 #include "renderer/bgfx_renderer.hpp"
+#include "easy3d/scene.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -11,8 +12,10 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace easy3d::platform {
 namespace {
@@ -27,6 +30,10 @@ public:
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             throw EngineError(sdl_error("SDL video/gamepad initialization failed"));
         }
+        if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+            std::cerr << "Easy3D audio: SDL audio initialization unavailable ("
+                      << SDL_GetError() << ")\n";
+        }
     }
 
     ~SdlVideo() { SDL_Quit(); }
@@ -40,6 +47,65 @@ struct WindowDeleter {
 
 struct GamepadDeleter {
     void operator()(SDL_Gamepad* gamepad) const noexcept { SDL_CloseGamepad(gamepad); }
+};
+
+void SDLCALL fill_audio(void* const userdata,
+                        SDL_AudioStream* const stream,
+                        const int additional_amount,
+                        const int) {
+    if (userdata == nullptr || additional_amount <= 0) {
+        return;
+    }
+    constexpr std::size_t channels = 2;
+    constexpr std::uint32_t sample_rate = 48'000;
+    const std::size_t frame_count = static_cast<std::size_t>(additional_amount) /
+                                    (sizeof(float) * channels);
+    if (frame_count == 0) {
+        return;
+    }
+    try {
+        thread_local std::vector<float> buffer;
+        buffer.resize(frame_count * channels);
+        static_cast<AudioSystem*>(userdata)->mix(buffer.data(), frame_count, sample_rate);
+        (void)SDL_PutAudioStreamData(
+            stream, buffer.data(), static_cast<int>(buffer.size() * sizeof(float)));
+    } catch (...) {
+        // Exceptions must never cross SDL's native audio callback boundary.
+    }
+}
+
+class SdlAudioOutput final {
+public:
+    explicit SdlAudioOutput(AudioSystem& audio) : audio_(audio) {
+        const SDL_AudioSpec spec{SDL_AUDIO_F32, 2, 48'000};
+        stream_ = SDL_OpenAudioDeviceStream(
+            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, fill_audio, &audio_);
+        if (stream_ == nullptr) {
+            std::cerr << "Easy3D audio: unavailable (" << SDL_GetError() << ")\n";
+            return;
+        }
+        if (!SDL_ResumeAudioStreamDevice(stream_)) {
+            std::cerr << "Easy3D audio: could not start (" << SDL_GetError() << ")\n";
+            SDL_DestroyAudioStream(stream_);
+            stream_ = nullptr;
+            return;
+        }
+        audio_.set_backend_active(true);
+        std::cout << "Easy3D audio: SDL3 default playback, 48000 Hz stereo float\n";
+    }
+
+    ~SdlAudioOutput() {
+        audio_.set_backend_active(false);
+        if (stream_ != nullptr) {
+            SDL_DestroyAudioStream(stream_);
+        }
+    }
+    SdlAudioOutput(const SdlAudioOutput&) = delete;
+    SdlAudioOutput& operator=(const SdlAudioOutput&) = delete;
+
+private:
+    AudioSystem& audio_;
+    SDL_AudioStream* stream_{nullptr};
 };
 
 [[nodiscard]] std::string canonical_name(const std::string_view device,
@@ -199,6 +265,7 @@ void run_window_loop(const EngineConfig& config,
                      std::atomic_uint32_t& viewport_height,
                      RendererStatsAtomic& renderer_stats,
                      InputSystem& input,
+                     AudioSystem& audio,
                      Engine::FrameCallback frame_callback) {
     SdlVideo sdl;
 
@@ -251,6 +318,10 @@ void run_window_loop(const EngineConfig& config,
                                     config.graphics_preset,
                                     config.geometry_diagnostic,
                                     scene);
+    if (scene != nullptr && scene->active()) {
+        audio.set_listener(scene->camera().position, scene->camera().right());
+    }
+    SdlAudioOutput audio_output(audio);
 
     using Clock = std::chrono::steady_clock;
     const auto minimum_frame = config.fps_limit > 0.0
@@ -385,6 +456,9 @@ void run_window_loop(const EngineConfig& config,
         input.end_frame();
         if (frame_callback) {
             frame_callback(last_frame_seconds.load());
+        }
+        if (scene != nullptr && scene->active()) {
+            audio.set_listener(scene->camera().position, scene->camera().right());
         }
 
         renderer.present();

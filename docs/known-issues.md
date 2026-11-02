@@ -294,6 +294,21 @@ future UI scale policy is required for consistent physical size across mixed-
 DPI monitors. Button callbacks are polled in the Python frame bridge and are
 not available to a graphics-disabled dedicated server loop.
 
+## Audio is buffered PCM playback, not a full sound engine
+
+Phase 6.3 accepts only uncompressed 16-bit mono/stereo WAV files and decodes the
+whole asset into memory. There is no Ogg/MP3/FLAC codec, streaming music,
+hot-unload API, device selection/hot-switch policy, bus/effect graph, fades,
+pitch control, doppler, HRTF, occlusion, reverb or sample-accurate scheduling.
+Spatialization is intentionally basic linear distance rolloff and stereo pan;
+it is not a binaural or physically modeled result. Each game retains at most
+256 decoded sounds and 1,024 simultaneous voices.
+
+Automated tests verify mixer samples and this Windows host opened its SDL3
+default playback stream during a timed D3D11 run. The agent cannot perceive
+speaker output, so audible quality and the user's particular endpoint remain a
+manual headphone/speaker check with `python examples/10_audio/main.py`.
+
 ## Pinned GLM emits CMake policy deprecation warnings
 
 GLM 1.0.1 is pinned by immutable commit and builds successfully, but its

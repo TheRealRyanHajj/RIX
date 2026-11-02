@@ -200,6 +200,7 @@ if(EASY3D_ENABLE_NETWORKING)
 endif()
 
 set(easy3d_core_sources
+    engine/src/audio/audio.cpp
     engine/src/assets/image.cpp
     engine/src/assets/model.cpp
     engine/src/core/engine.cpp
@@ -446,6 +447,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_input_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_input_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.input COMMAND easy3d_input_tests)
+
+    add_executable(easy3d_audio_tests tests/cpp/test_audio.cpp)
+    target_compile_features(easy3d_audio_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_audio_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.audio COMMAND easy3d_audio_tests)
 
     add_executable(easy3d_network_tests tests/cpp/test_network.cpp)
     target_compile_features(easy3d_network_tests PRIVATE cxx_std_20)

@@ -164,6 +164,27 @@ are scaled from logical units to framebuffer pixels before entering `Input`.
 Dispatch occurs inside the frame mutation boundary before scheduler phases and
 chooses only the topmost enabled visible button on the press edge.
 
+## Native audio ownership and callback boundary
+
+`Engine` owns one platform-neutral `AudioSystem` even in graphics-disabled
+builds. Decoded PCM16 input is converted once to native float samples and kept
+behind monotonic sound IDs. Playback creates bounded voices with independent
+cursor, loop, gain and optional world position. The mixer linearly resamples to
+the requested output rate, downmixes mono to stereo, applies linear distance
+rolloff plus equal-power pan against a normalized listener-right vector, sums
+voices and hard-clips the final stereo buffer. Its mutex covers the SDL audio
+callback and Python control operations; completed/stopped voices are erased so
+the simultaneous-voice bound is reusable.
+
+The Windows adapter initializes SDL audio as an optional subsystem after the
+required video/gamepad subsystems. It opens the default playback stream as
+48 kHz stereo `float`, feeds it only from SDL's native callback, and marks the
+backend active for exactly the stream lifetime. No Python callback or object is
+touched by the audio thread. A missing device therefore disables output without
+aborting window/renderer startup. The window thread copies active-scene camera
+position/right into the mixer after each gameplay callback, so entity scripts
+can move sources and cameras without crossing threads unsafely.
+
 ## Input ownership and frame boundaries
 
 `Engine` owns one platform-neutral `InputSystem`; it has no SDL dependency and
