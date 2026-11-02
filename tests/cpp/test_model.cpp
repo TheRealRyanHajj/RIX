@@ -1,26 +1,45 @@
 #include "easy3d/assets.hpp"
 
+#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <random>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 
 namespace {
 
 class TemporaryDirectory final {
 public:
-    TemporaryDirectory()
-        : path_(std::filesystem::temp_directory_path() /
-                ("easy3d_model_test_" + std::to_string(++sequence_))) {
-        std::filesystem::create_directories(path_);
+    TemporaryDirectory() : path_(create()) {}
+    ~TemporaryDirectory() {
+        std::error_code ignored;
+        std::filesystem::remove_all(path_, ignored);
     }
-    ~TemporaryDirectory() { std::filesystem::remove_all(path_); }
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
 
 private:
-    static inline std::uint64_t sequence_{0};
+    [[nodiscard]] static std::filesystem::path create() {
+        const std::filesystem::path root = std::filesystem::temp_directory_path();
+        std::random_device random;
+        for (int attempt = 0; attempt < 32; ++attempt) {
+            const auto ticks = std::chrono::high_resolution_clock::now()
+                                   .time_since_epoch()
+                                   .count();
+            const auto candidate =
+                root / ("easy3d_model_test_" + std::to_string(ticks) + "_" +
+                        std::to_string(random()));
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                return candidate;
+            }
+        }
+        throw std::runtime_error("failed to create unique model-test directory");
+    }
+
     std::filesystem::path path_;
 };
 

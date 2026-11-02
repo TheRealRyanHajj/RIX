@@ -1,8 +1,49 @@
 #include "easy3d/scene.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+
+namespace {
+
+class TemporaryDirectory final {
+public:
+    TemporaryDirectory() : path_(create()) {}
+    ~TemporaryDirectory() {
+        std::error_code ignored;
+        std::filesystem::remove_all(path_, ignored);
+    }
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+
+private:
+    [[nodiscard]] static std::filesystem::path create() {
+        const std::filesystem::path root = std::filesystem::temp_directory_path();
+        std::random_device random;
+        for (int attempt = 0; attempt < 32; ++attempt) {
+            const auto ticks = std::chrono::high_resolution_clock::now()
+                                   .time_since_epoch()
+                                   .count();
+            const auto candidate =
+                root / ("easy3d_render_component_test_" + std::to_string(ticks) + "_" +
+                        std::to_string(random()));
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                return candidate;
+            }
+        }
+        throw std::runtime_error(
+            "failed to create unique render-component-test directory");
+    }
+
+    std::filesystem::path path_;
+};
+
+} // namespace
 
 int main() {
     try {
@@ -59,8 +100,8 @@ int main() {
             return 6;
         }
 
-        const std::filesystem::path model_path =
-            std::filesystem::temp_directory_path() / "easy3d_render_component.obj";
+        TemporaryDirectory temporary;
+        const std::filesystem::path model_path = temporary.path() / "model.obj";
         {
             std::ofstream model(model_path, std::ios::binary);
             model << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";

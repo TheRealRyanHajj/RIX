@@ -60,11 +60,11 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
-Phase 3.6 exposes a numeric direct-IP client, headless authoritative server and
-isolated headless listen-host composition with the Phase 3.3 handshake. There
-is not yet rendered-`Game` attachment, DNS, LAN discovery, automatic firewall
-rule, player identity, replication, or a supported two-process sample; those
-are Phase 3.7–4.x work. Transports advance only when
+Phase 3.7 exposes a numeric direct-IP client, headless authoritative server,
+isolated headless listen-host composition and opt-in IPv4 LAN discovery. There
+is not yet rendered-`Game` attachment, DNS, automatic firewall rule, player
+identity, replication, or a supported two-process sample; those are later
+work. Transports advance only when
 their owning thread polls (the server `run()` loop does this automatically), so
 a stalled owning loop also stalls callbacks and deadline enforcement.
 Exact protocol/schema equality is the only compatibility policy in wire format
@@ -76,10 +76,15 @@ is not replayed. GNS rate/ping metrics can be zero or `-1` before enough live
 traffic exists. Direct transport encryption is unauthenticated and is not a
 player/account identity guarantee.
 
-Server bind addresses are numeric only. Binding a LAN-facing address can cause
-Windows Firewall to prompt or block inbound traffic; Easy3D does not create or
-modify firewall rules. Phase 3.5 is validated over local IPv4 loopback, with
-native multi-client and Python client/server tests. Separate-process LAN and
+Server bind addresses are numeric only. Binding a LAN-facing game server or the
+UDP discovery announcer can cause Windows Firewall to prompt or block inbound
+traffic; Easy3D does not create or modify firewall rules. Discovery uses IPv4
+limited/directed broadcast and cannot cross routers by design. Guest Wi-Fi
+client isolation, VPN routing, virtual adapters and host firewall policy can
+hide an otherwise healthy server. Discovery names and endpoints are
+unauthenticated LAN input; a matching nonce is request correlation, not
+identity. Select a result explicitly and retain numeric direct IP as fallback.
+Phase 3.7 is validated over local IPv4 UDP loopback. Separate-machine and
 abrupt-process-loss validation remain Phase 3.8.
 
 The listen host's local client still traverses the OS loopback transport; it is

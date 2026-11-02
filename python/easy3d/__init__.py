@@ -29,7 +29,8 @@ from .components import (
     PhysicsMaterial,
     Rigidbody,
 )
-from . import debug, network, physics
+from . import debug, discovery, network, physics
+from .discovery import LanDiscoveryAnnouncer, LanDiscoveryBrowser
 from .entity import Entity
 from ._version import __version__
 from .game import Game, RendererStats
@@ -76,6 +77,8 @@ __all__ = [
     "Input",
     "Light",
     "LightComponent",
+    "LanDiscoveryAnnouncer",
+    "LanDiscoveryBrowser",
     "ListenServer",
     "MissingAssetError",
     "NetworkError",
@@ -114,6 +117,7 @@ __all__ = [
     "__version__",
     "engine_version",
     "debug",
+    "discovery",
     "physics",
     "load_image",
     "load_obj",

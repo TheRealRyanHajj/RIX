@@ -2944,3 +2944,142 @@ git diff --check
 Phase 3.6: **DONE**. Immediate next task: Phase 3.7 — add explicit opt-in,
 bounded LAN discovery with defensive parsing and Windows firewall/subnet
 guidance. Direct IP remains the required fallback; no replication is claimed.
+
+## 2026-11-01 — Phase 3.7 bounded opt-in LAN discovery (complete)
+
+### Bounded approach
+
+Implement discovery as a separate, explicitly started, poll-owned IPv4 UDP
+control plane in `easy3d.discovery`; do not alter the GNS gameplay transport or
+make `Client.connect()` discover automatically. A browser sends a fixed binary
+query containing a random nonce to a configured limited/directed broadcast
+address. An announcer validates the complete datagram and returns one bounded
+unicast response to the query source. The browser accepts responses only for
+its current nonce and response window, validates all lengths/UTF-8 before
+allocation, and exposes addresses for an explicit direct-IP connection choice.
+
+Cap datagrams at 512 bytes, server names at 128 UTF-8 bytes, packets processed
+per poll, discovered entries, and per-source announcer rate-limit state. Expire
+results by a finite TTL. Use no background thread, callbacks, DNS, serialization
+framework, firewall mutation, multicast service, authentication claim or
+automatic connection. Keep direct numeric IPv4/IPv6 GNS connection unchanged;
+the initial LAN discovery mechanism is IPv4 broadcast only.
+
+Test codecs deterministically with malformed/truncated/oversized/control-text
+inputs, then exercise a real nonblocking UDP query/response over loopback with
+an ephemeral discovery port. Test nonce rejection, cache capacity/expiry,
+per-source response throttling, lifecycle/restart and port collision. Document
+Windows Defender Firewall prompts/rules, router/subnet broadcast boundaries,
+VPN/guest-network isolation and exact direct-IP fallback before checking 3.7.
+
+### Implemented
+
+- Added typed `easy3d.discovery.LanDiscoveryAnnouncer` and
+  `LanDiscoveryBrowser`, also exported at package root. Both are explicitly
+  started, caller-polled and independent of the GNS gameplay transport. The
+  browser never connects automatically; results expose numeric addresses for a
+  later explicit `Client.connect()` decision.
+- Added a fixed little-endian `E3DD` format-1 envelope, nonzero random query
+  nonce, unicast response, stable optional instance ID, numeric game port,
+  protocol/schema versions and control-free UTF-8 name. Exact length, type,
+  flags, version, required-field and UTF-8 checks reject malformed peer bytes.
+- Bounded datagrams to 512 bytes, names to 128 UTF-8 bytes, work per poll,
+  per-source-address response rate state, response duration, result TTL and LRU
+  cache capacity. The browser requires its current nonce and configured source
+  discovery port. Immutable stats expose malformed, unmatched, rate-limited
+  and eviction counts.
+- Added real Windows UDP loopback query/response tests plus malformed,
+  oversized, invalid-text, wrong-nonce/source-port, compatibility, rate-limit,
+  cache expiry/eviction, maximum work, restart and port-collision coverage. The
+  focused suite passed 30 consecutive invocations.
+- Documented Windows Private-profile firewall behavior and an optional scoped
+  development rule/removal command, limited/directed broadcast, guest Wi-Fi,
+  VPN/virtual-adapter/router boundaries and numeric direct-IP fallback. IPv6
+  direct IP remains supported, but discovery format 1 is explicitly IPv4 only.
+- Added ADR-0028 and protocol/API/architecture/known-limit documentation. No
+  dependency or third-party notice changed; discovery uses Python's standard
+  library for this low-frequency control plane.
+- Made the existing model/render-component native tests allocate atomically
+  unique temporary directories. This preserves the source-removal lifetime
+  assertion while allowing Debug, Release and headless matrices to run at the
+  same time without deleting each other's fixtures.
+
+### Failures found and corrected
+
+- A repeated discovery test intermittently retained a 20 ms TTL entry after a
+  nominal 25 ms sleep. This CPython reports `GetTickCount64()` with a 15.625 ms
+  monotonic resolution, so the sleep could advance only 16 ms. The test now
+  waits against observed monotonic expiry; 30 consecutive final runs passed.
+- Running all three native CTest matrices concurrently exposed pre-existing
+  shared `%TEMP%` fixture names: one model test saw another process remove its
+  texture, and one render test saw the other process hold its OBJ. Each test
+  now atomically creates and owns a unique directory. All three matrices then
+  passed concurrently, and both affected tests passed 20 repeated invocations
+  in every build tree.
+- The first rebuild after that test fix was launched from an ordinary shell and
+  MSVC could not find standard header `cstddef`. Re-running the exact build in
+  the documented x64 Visual Studio developer environment succeeded. This was a
+  command-environment error, not a source workaround.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests\python\test_discovery.py -q
+..........                                                               [100%]
+10 passed in 0.20s
+
+# The focused command above was then invoked 30 consecutive times.
+30 consecutive focused discovery runs passed
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 53%]
+...............................................................          [100%]
+135 passed in 0.85s
+
+cmake --build build\windows-headless --config Debug --parallel 4
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.15 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.19 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.03 sec
+
+# Each command ran concurrently for the three build trees:
+ctest --test-dir <build-tree> -C <config> -R "easy3d\.(model|render_components)" --repeat until-fail:20 --output-on-failure
+# 2/2 passed in every tree; observed totals 0.95–1.09 sec.
+
+# From the documented Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3928239
+sha256=a228e6b4dd690470aa1186e8d56e40ecf13ff656db74e3e42406f36cc049e4f6
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.LanDiscoveryBrowser)"
+0.1.0
+<class 'easy3d.discovery.LanDiscoveryBrowser'>
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+The real UDP protocol, limits and lifecycle are verified on one Windows host
+over IPv4 loopback. Broadcast across two physical machines, actual Defender
+prompt/rule behavior, guest/VPN/router policies and abrupt process loss remain
+**UNVERIFIED** and are not claimed; Phase 3.8 owns the two-process/local-LAN
+sample and integration matrix.
+
+Phase 3.7: **DONE**. Immediate next task: Phase 3.8 — provide a supported
+two-process server/client sample and subprocess integration coverage for
+loopback exchange, port collision and abrupt peer loss. No replication is
+claimed by this checkpoint.

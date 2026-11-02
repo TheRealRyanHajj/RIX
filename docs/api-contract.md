@@ -623,3 +623,31 @@ thread-safe request while running and closes both roles when manually stepped.
 clients appear only as authority events with `local_host=False`. The local host
 receives no implicit privilege, player identity, entity replication, rendering
 or prediction behavior.
+
+## Opt-in LAN discovery
+
+`easy3d.discovery.LanDiscoveryAnnouncer(name, game_port, ...)` and
+`LanDiscoveryBrowser(...)` (also exported at package root) are explicitly
+started, single-owner IPv4 UDP objects. They are independent of `Server` and
+`Client`; callers must poll the announcer alongside a running authority and
+must explicitly choose a `DiscoveredServer.address`/`port` for a later
+`Client.connect()` call. Neither object owns a thread or changes Windows
+Firewall configuration.
+
+The announcer name is non-empty, control-free UTF-8 capped at 128 bytes. Ports,
+protocol/schema versions and optional persistent 64-bit instance ID are
+validated before a socket opens. `poll(maximum_packets)` accepts only complete
+format-1 query datagrams, caps work at its configured per-poll limit, rate
+limits repeat source addresses and bounds rate-limit state. `start()` reports
+bind/port-collision failures as `NetworkError`; `close()` is idempotent.
+
+The browser binds an ephemeral UDP port only after `start()`. `refresh()` sends
+one random nonzero nonce to the configured limited/directed broadcast address
+and replaces the prior response window. `poll()` ignores malformed and stale/
+unmatched responses, accepts responses only from the configured discovery
+port, and returns newly validated immutable `DiscoveredServer` values. Its
+`servers` property is the current finite-capacity, finite-TTL cache. A result's
+`compatible` flag is exact protocol/schema comparison; incompatible results
+remain visible but are not connected automatically. Stats are immutable
+snapshots. Discovery supplies no DNS, IPv6 broadcast, authentication, account
+identity, room directory, relay or cross-subnet guarantee.

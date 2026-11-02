@@ -176,10 +176,34 @@ is pumped after each authoritative tick and cannot cause a second
 `fixed_update`, authority callback or physics step. The host receives no
 transport-level privilege beyond sharing a machine and loopback path.
 
+## Implemented in Phase 3.7
+
+LAN discovery is a separate opt-in IPv4 UDP query/response protocol, not a GNS
+gameplay message. Every datagram is at most 512 bytes and begins with a 12-byte
+little-endian envelope: magic `E3DD`, 16-bit wire version `1`, 8-bit type (`1`
+query or `2` response), zero 8-bit flags, and an exact 32-bit payload length.
+A query payload is one nonzero random 64-bit nonce.
+
+A response repeats the query nonce and carries a nonzero 64-bit server-instance
+ID, 16-bit gameplay port, 16-bit application protocol version, 32-bit schema
+version, 16-bit UTF-8 name length and exactly that many name bytes. Names are
+non-empty, control-free and at most 128 bytes. Integers are range checked and
+trailing, truncated, oversized, wrong-version and invalid-UTF-8 datagrams are
+dropped. The browser accepts only its current nonce within a finite response
+window and only from the configured UDP discovery port.
+
+The announcer replies by unicast to the query's ephemeral source. Work per poll,
+repeat responses per source and remembered source state are bounded. Browser
+results use a bounded TTL/LRU cache and expose exact protocol/schema
+compatibility. Nonces correlate a response with a recent query; they are not an
+authentication or anti-spoofing mechanism. Discovery never starts a GNS
+connection, and the Phase 3.3 handshake still validates any address the user
+later selects.
+
 ## Not implemented yet
 
-There is no rendered-Game attachment, discovery, firewall automation, DNS,
-replication or RPC yet. Phase 3.8 supplies a supported two-process sample and
+There is no rendered-Game attachment, firewall automation, DNS, replication or
+RPC yet. LAN discovery is IPv4/local-subnet only. Phase 3.8 supplies a supported two-process sample and
 abrupt-disconnect/port-collision integration. Transport encryption also does not
 establish account or player identity; authentication remains a separate
 extension boundary.

@@ -911,3 +911,38 @@ partial startup failure.
   ID. This does not yet create player identity or network-object ownership.
 - Rendered `Game` attachment, discovery, replication and host prediction remain
   later milestones.
+
+## ADR-0028: Polled bounded UDP query/response for opt-in LAN discovery
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+LAN browsing is useful before the user knows a direct address, but it is not
+gameplay transport, authentication or a reason to introduce a service thread.
+Broadcast input is untrusted, Windows firewall and adapter policy vary, and a
+naive listener/cache can be flooded. GNS remains the supported direct-IP data
+plane and already performs the compatibility handshake after connection.
+
+### Decision
+
+Implement an explicitly started, caller-polled IPv4 UDP control plane in the
+typed Python package. A browser broadcasts a fixed, random-nonce query from an
+ephemeral port; an announcer on a configured discovery port returns one bounded
+unicast response containing its instance ID, game port, exact protocol/schema
+versions and safe UTF-8 name. Cap datagrams, names, work per poll, per-source
+response rate state, response windows, result TTL and cache capacity. Require
+the source discovery port and current nonce, but make no authentication claim.
+Never auto-connect, resolve DNS, change firewall state or route discovery.
+
+### Consequences
+
+- Discovery can be enabled or omitted without changing dedicated/listen server
+  or client transport ownership.
+- Low-frequency socket work remains on the Python owning thread; gameplay bytes
+  continue through the native bounded GNS backend.
+- Limited/directed broadcast can be blocked by firewalls, VPNs, guest-network
+  isolation and routers. Numeric direct IP is the documented fallback.
+- IPv6 discovery, mDNS/directory/relay services, authentication and
+  separate-machine evidence are not implied by this local IPv4 milestone.

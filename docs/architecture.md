@@ -364,3 +364,13 @@ coincidentally equal local connection numbers from becoming shared identity,
 and `local_host` distinguishes the private peer from later remote clients.
 This keeps listen-host callbacks from executing authoritative Python logic or
 physics twice.
+
+LAN discovery is deliberately outside the gameplay transport. A pure-Python,
+poll-owned IPv4 UDP control plane sends a bounded nonce query and receives a
+bounded unicast description; no discovery thread or socket enters the native
+GNS callback path. The announcer caps work per poll and keeps a finite LRU of
+per-source response timestamps. The browser accepts only its current nonce
+during a finite window and stores a finite TTL/LRU result cache. A result is
+only an address suggestion: the caller must explicitly pass its numeric address
+and game port to `Client.connect()`, where the ordinary protocol handshake
+still applies.

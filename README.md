@@ -1,8 +1,8 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2 and the Phase 3.6 direct-IP client, headless server and
-isolated listen host are validated.
+native core. Phases 0–2 and Phase 3.1–3.7 transport, server, listen-host and
+opt-in LAN-discovery foundations are validated.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -419,7 +419,52 @@ loopback client with no scene. `ListenEvent.role` and `local_host` keep the two
 role-local connection-ID spaces explicit and distinguish later remote clients.
 Run `python examples/05_listen_host/main.py` for bounded input/reply and clean
 shutdown output. LAN discovery, rendered-Game attachment, replication and
-player identity remain later milestones.
+player identity remain separate milestones.
+
+LAN discovery is an explicit, polled control plane; it never connects a client
+automatically:
+
+```python
+from easy3d import LanDiscoveryAnnouncer, LanDiscoveryBrowser
+
+# Server process: poll alongside the authoritative server.
+announcer = LanDiscoveryAnnouncer("My LAN game", game_port=7777)
+announcer.start()
+announcer.poll()
+
+# Client process: send one query, then poll during its response window.
+browser = LanDiscoveryBrowser()
+browser.start()
+browser.refresh()
+for server in browser.poll():
+    print(server.name, server.address, server.port, server.compatible)
+```
+
+The default UDP discovery port is `47777`; responses advertise the separate
+GNS game port. The cache, packet size, server name, per-poll work, response
+window and announcer rate-limit state are bounded. Discovery is IPv4-broadcast
+only, unauthenticated, and confined by router/subnet policy. Direct numeric
+IPv4/IPv6 connection remains available when broadcast is unavailable.
+
+On Windows, allow inbound UDP `47777` for the Python/game executable on the
+**Private** network profile if Defender Firewall prompts or blocks the
+announcer. Easy3D never changes firewall state. Administrators who explicitly
+want a development rule can use an elevated PowerShell command such as:
+
+```powershell
+$pythonExe = (Get-Command python).Source
+New-NetFirewallRule -DisplayName "Easy3D LAN discovery (dev)" `
+  -Direction Inbound -Action Allow -Protocol UDP -LocalPort 47777 `
+  -Profile Private -Program $pythonExe
+```
+
+Remove that optional rule with
+`Remove-NetFirewallRule -DisplayName "Easy3D LAN discovery (dev)"`. Limited
+broadcast (`255.255.255.255`) normally stays on the local subnet; guest Wi-Fi
+client isolation, VPNs, virtual adapters and router policy may block it. A
+known directed broadcast such as `192.168.1.255` can be passed as
+`target_address`, but it is still subject to network policy. Use the numeric
+server address with `network.Client.connect()` as the fallback.
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 
