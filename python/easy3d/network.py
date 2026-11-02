@@ -54,6 +54,11 @@ class ServerState(str, Enum):
     LISTENING = "listening"
 
 
+class ListenRole(str, Enum):
+    AUTHORITY = "authority"
+    CLIENT = "client"
+
+
 class DisconnectCode(IntEnum):
     NONE = 0
     NORMAL = 1
@@ -95,6 +100,15 @@ class NetworkEvent:
     reason: str = ""
     sequence: int = 0
     disconnect_code: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ListenEvent:
+    """One event tagged with its isolated listen-host role."""
+
+    role: ListenRole
+    event: NetworkEvent
+    local_host: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -606,6 +620,11 @@ class Server:
     def run(self) -> None:
         """Run the paced headless simulation until :meth:`stop` is requested."""
 
+        self._run_loop()
+
+    def _run_loop(self, after_tick: Callable[[], None] | None = None) -> None:
+        """Internal paced owner used by dedicated and listen-server roles."""
+
         if self._running:
             raise RuntimeError("this Server is already running")
         if self.state is ServerState.STOPPED:
@@ -630,6 +649,8 @@ class Server:
                     and catch_up_steps < self._max_catch_up_steps
                 ):
                     self.step()
+                    if after_tick is not None:
+                        after_tick()
                     next_tick += self._scheduler.fixed_dt
                     catch_up_steps += 1
                     now = time.perf_counter()
@@ -638,11 +659,17 @@ class Server:
         finally:
             self._callback_active = True
             try:
-                if self.state is ServerState.LISTENING:
-                    self._native.stop(self._stop_reason)
-                    self._dispatch_events(self._native.poll(4096))
-                if self._scene is not None:
-                    self._scene._commit_deferred(self._scheduler.destroy_callback)
+                try:
+                    if self.state is ServerState.LISTENING:
+                        self._native.stop(self._stop_reason)
+                        self._dispatch_events(self._native.poll(4096))
+                        if after_tick is not None:
+                            after_tick()
+                finally:
+                    if self._scene is not None:
+                        self._scene._commit_deferred(
+                            self._scheduler.destroy_callback
+                        )
             finally:
                 self._callback_active = False
                 self._running = False
@@ -672,6 +699,294 @@ class Server:
 
     def _on_entity_destroyed(self, entity: object) -> None:
         self._scheduler.forget(entity)  # type: ignore[arg-type]
+
+
+class ListenServer:
+    """Compose an authoritative server and one isolated loopback client role.
+
+    The authority is the only role allowed to own a scene or execute gameplay
+    lifecycle callbacks. The local client uses the same real transport and
+    handshake as a remote client; matching numeric connection IDs across the
+    two role-local spaces have no shared identity meaning.
+    """
+
+    __slots__ = (
+        "_authority",
+        "_client",
+        "_authority_connection",
+        "_pending_events",
+        "_starting",
+        "_started",
+        "_startup_timeout",
+        "_local_address",
+        "_suppress_callback",
+        "on_event",
+    )
+
+    def __init__(
+        self,
+        *,
+        port: int = 7777,
+        max_players: int = 32,
+        tick_rate: float = 60.0,
+        bind_address: str = "0.0.0.0",
+        local_address: str = "127.0.0.1",
+        handshake_timeout: float = 5.0,
+        event_queue_capacity: int = 4096,
+        maximum_message_size: int = 64 * 1024,
+        protocol_version: int = 1,
+        schema_version: int = 1,
+        max_catch_up_steps: int = 5,
+        fail_fast: bool = True,
+        on_event: Callable[[ListenServer, ListenEvent], None] | None = None,
+    ) -> None:
+        if not isinstance(local_address, str) or not local_address:
+            raise ValueError("local_address must be a non-empty numeric address")
+        if on_event is not None and not callable(on_event):
+            raise TypeError("on_event must be callable")
+        self._authority_connection: ConnectionId | None = None
+        self._pending_events: list[ListenEvent] = []
+        self._starting = False
+        self._started = False
+        self._startup_timeout = float(handshake_timeout)
+        self._suppress_callback = False
+        self.on_event = on_event
+        self._authority = Server(
+            port=port,
+            max_players=max_players,
+            tick_rate=tick_rate,
+            bind_address=bind_address,
+            handshake_timeout=handshake_timeout,
+            event_queue_capacity=event_queue_capacity,
+            maximum_message_size=maximum_message_size,
+            protocol_version=protocol_version,
+            schema_version=schema_version,
+            max_catch_up_steps=max_catch_up_steps,
+            fail_fast=fail_fast,
+            on_connect=self._on_authority_connect,
+            on_disconnect=self._on_authority_disconnect,
+            on_message=self._on_authority_message,
+        )
+        self._client = Client(
+            timeout=handshake_timeout,
+            event_queue_capacity=event_queue_capacity,
+            maximum_message_size=maximum_message_size,
+            protocol_version=protocol_version,
+            schema_version=schema_version,
+            on_connect=self._on_client_connect,
+            on_disconnect=self._on_client_disconnect,
+        )
+        # Kept after native validation so an invalid numeric address reports
+        # through the same client contract during start().
+        self._local_address = local_address
+
+    @property
+    def authority(self) -> Server:
+        return self._authority
+
+    @property
+    def client(self) -> Client:
+        return self._client
+
+    @property
+    def authority_connection(self) -> ConnectionId | None:
+        return self._authority_connection
+
+    @property
+    def is_running(self) -> bool:
+        return self._authority.is_running
+
+    @property
+    def is_started(self) -> bool:
+        return self._started
+
+    @property
+    def port(self) -> int:
+        return self._authority.port
+
+    @property
+    def scene(self) -> Scene | None:
+        return self._authority.scene
+
+    @property
+    def tick_count(self) -> int:
+        return self._authority.tick_count
+
+    def load_scene(self, scene: Scene) -> None:
+        self._authority.load_scene(scene)
+
+    def unload_scene(self, *, clear: bool = False) -> Scene | None:
+        return self._authority.unload_scene(clear=clear)
+
+    def start(self) -> tuple[ListenEvent, ...]:
+        """Bind and fully establish the private host client before returning."""
+
+        if self._started or self._starting or self._authority.is_running:
+            raise NetworkError("listen server is already active")
+        self._pending_events.clear()
+        startup_events: list[ListenEvent] = []
+        self._starting = True
+        try:
+            self._authority.start()
+            self._client.connect(self._local_address, self._authority.port)
+            deadline = time.monotonic() + self._startup_timeout
+            while time.monotonic() < deadline:
+                startup_events.extend(self.poll())
+                if (
+                    self._authority_connection is not None
+                    and self._client.state is ClientState.CONNECTED
+                ):
+                    self._started = True
+                    return tuple(startup_events)
+                if self._client.state is ClientState.DISCONNECTED:
+                    break
+                time.sleep(0.001)
+            raise NetworkError("listen-server host connection did not establish")
+        except BaseException:
+            self._cleanup_failed_start()
+            raise
+        finally:
+            self._starting = False
+
+    def poll(self, maximum_events: int = 256) -> tuple[ListenEvent, ...]:
+        if self._authority.state is ServerState.LISTENING:
+            self._authority.poll(maximum_events)
+        self._consume_client_messages(self._client.poll(maximum_events))
+        return self._drain_pending()
+
+    def step(self) -> tuple[ListenEvent, ...]:
+        startup: tuple[ListenEvent, ...] = ()
+        if not self._started:
+            startup = self.start()
+        self._authority.step()
+        self._consume_client_messages(self._client.poll())
+        return startup + self._drain_pending()
+
+    def run(self) -> None:
+        """Run one authoritative simulation with the local client pumped."""
+
+        if not self._started:
+            self.start()
+        try:
+            self._authority._run_loop(self._after_run_tick)
+        finally:
+            deadline = time.monotonic() + 0.25
+            while (
+                self._client.state is not ClientState.DISCONNECTED
+                and time.monotonic() < deadline
+            ):
+                self._consume_client_messages(self._client.poll())
+                self._pending_events.clear()
+                time.sleep(0.001)
+            self._started = False
+
+    def stop(self, reason: str = "listen server stopped") -> tuple[ListenEvent, ...]:
+        """Stop both roles; while running this is a thread-safe request."""
+
+        if self._authority.is_running:
+            self._authority.stop(reason)
+            return ()
+        if self._client.connection is not None:
+            self._client.disconnect(reason)
+            self._consume_client_messages(self._client.poll())
+            deadline = time.monotonic() + 0.25
+            while (
+                self._authority_connection is not None
+                and self._authority.state is ServerState.LISTENING
+                and time.monotonic() < deadline
+            ):
+                self._authority.poll()
+                time.sleep(0.001)
+        if self._authority.state is ServerState.LISTENING:
+            self._authority.stop(reason)
+        self._started = False
+        return self._drain_pending()
+
+    def _record(
+        self,
+        role: ListenRole,
+        event: NetworkEvent,
+        *,
+        local_host: bool,
+    ) -> None:
+        tagged = ListenEvent(role, event, local_host)
+        self._pending_events.append(tagged)
+        if self.on_event is not None and not self._suppress_callback:
+            self.on_event(self, tagged)
+
+    def _on_authority_connect(
+        self, _server: Server, connection: ConnectionId
+    ) -> None:
+        if self._starting and self._authority_connection is None:
+            self._authority_connection = connection
+        event = NetworkEvent(EventType.CONNECTED, connection)
+        self._record(
+            ListenRole.AUTHORITY,
+            event,
+            local_host=connection == self._authority_connection,
+        )
+
+    def _on_authority_disconnect(
+        self, _server: Server, event: NetworkEvent
+    ) -> None:
+        local_host = event.connection == self._authority_connection
+        self._record(ListenRole.AUTHORITY, event, local_host=local_host)
+        if local_host:
+            self._authority_connection = None
+
+    def _on_authority_message(self, _server: Server, event: NetworkEvent) -> None:
+        self._record(
+            ListenRole.AUTHORITY,
+            event,
+            local_host=event.connection == self._authority_connection,
+        )
+
+    def _on_client_connect(self, client: Client) -> None:
+        connection = client.connection
+        if connection is not None:
+            self._record(
+                ListenRole.CLIENT,
+                NetworkEvent(EventType.CONNECTED, connection),
+                local_host=True,
+            )
+
+    def _on_client_disconnect(self, _client: Client, event: NetworkEvent) -> None:
+        self._record(ListenRole.CLIENT, event, local_host=True)
+        self._started = False
+
+    def _after_run_tick(self) -> None:
+        self._consume_client_messages(self._client.poll())
+        # During a blocking run events are synchronously observable through
+        # on_event; do not retain an unbounded history for a later poll.
+        self._pending_events.clear()
+
+    def _cleanup_failed_start(self) -> None:
+        self._suppress_callback = True
+        try:
+            try:
+                if self._client.connection is not None:
+                    self._client.disconnect("listen-server startup failed")
+                    self._consume_client_messages(self._client.poll())
+            finally:
+                if self._authority.state is ServerState.LISTENING:
+                    self._authority.stop("listen-server startup failed")
+        finally:
+            self._authority_connection = None
+            self._started = False
+            self._pending_events.clear()
+            self._suppress_callback = False
+
+    def _drain_pending(self) -> tuple[ListenEvent, ...]:
+        events = tuple(self._pending_events)
+        self._pending_events.clear()
+        return events
+
+    def _consume_client_messages(
+        self, events: tuple[NetworkEvent, ...]
+    ) -> None:
+        for event in events:
+            if event.type is EventType.MESSAGE:
+                self._record(ListenRole.CLIENT, event, local_host=True)
 
 
 class SimulatedEndpoint:
@@ -807,6 +1122,9 @@ __all__ = [
     "Delivery",
     "DisconnectCode",
     "EventType",
+    "ListenEvent",
+    "ListenRole",
+    "ListenServer",
     "NetworkEvent",
     "NetworkError",
     "NetworkBackendInfo",

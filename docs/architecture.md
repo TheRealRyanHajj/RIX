@@ -355,3 +355,12 @@ reasons with listener teardown. The Python `Server` composes this transport
 with `SimulationScheduler` and a `Scene`; it deliberately never creates
 `Engine`, `Input`, a platform window or a renderer. `run()` is a paced fixed-
 rate loop, while `step()` is an exact one-tick integration seam for tests.
+
+`ListenServer` is composition, not a third authority implementation. Its
+`authority` is the only scene/scheduler owner and its `client` is the same
+loopback transport used by a remote process. An internal per-tick pump runs the
+client only after the authority completes one tick. Tagged role events prevent
+coincidentally equal local connection numbers from becoming shared identity,
+and `local_host` distinguishes the private peer from later remote clients.
+This keeps listen-host callbacks from executing authoritative Python logic or
+physics twice.

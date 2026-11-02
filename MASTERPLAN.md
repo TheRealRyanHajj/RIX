@@ -311,7 +311,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **3.3** Implement protocol handshake: version/schema compatibility, limits, client/server role identification, disconnect reasons.
 - [x] **3.4** Implement client connect/disconnect, IP/port, timeouts, error handling, callbacks, network metrics.
 - [x] **3.5** Implement headless `Server` running simulation and Python server logic without SDL window or bgfx device.
-- [ ] **3.6** Implement listen server with isolated authoritative and client roles and no duplicated authority callbacks.
+- [x] **3.6** Implement listen server with isolated authoritative and client roles and no duplicated authority callbacks.
 - [ ] **3.7** Implement LAN discovery as opt-in, bounded and robust; document Windows firewall/local subnet behavior.
 - [ ] **3.8** Two-process LAN/local loopback sample, automated server/client integration tests, abrupt disconnect/port collision tests.
 

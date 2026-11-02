@@ -2822,3 +2822,125 @@ Phase 3.5: **DONE**. Immediate next task: Phase 3.6 — compose a listen server
 from isolated authoritative `Server` and local `Client` roles without duplicate
 authority callbacks or shared transport identity. No discovery or replication
 is claimed by this checkpoint.
+
+## 2026-11-01 — Phase 3.6 isolated listen-host composition (complete)
+
+### Bounded approach
+
+Build `easy3d.network.ListenServer` as explicit composition rather than a new
+socket backend: one Phase 3.5 authoritative `Server` owns the only scene,
+scheduler and fixed-update path, while one Phase 3.4 `Client` connects through
+the real loopback transport and owns only the local client role. Expose the two
+roles as separate typed properties and tag polled events with their role so an
+identical numeric value in each role's process-local ID space cannot imply a
+shared identity.
+
+Make startup synchronously establish the private loopback host before returning
+or advertising readiness, then let `step()` pump both roles and execute exactly
+one authoritative tick. Reuse the server's paced loop through an internal
+per-tick client pump so scene mutation guards remain active and the local role
+never executes authoritative scripts. `stop()` remains a thread-safe request
+while running. Do not add LAN discovery, rendering/Game integration, entity
+replication, host privileges or identity claims.
+
+Planned tests: exact one-per-role connect/message/disconnect delivery, one
+authoritative fixed-update per listen-host tick, no client-side scene owner,
+threaded/paced stop, an additional remote client, clean restart/failure cleanup,
+full Python regression and the existing native matrices. Document role and ID
+boundaries plus the no-host-advantage/non-duplication invariant before checking
+3.6.
+
+### Implemented
+
+- Added typed `easy3d.network.ListenServer` and root `easy3d.ListenServer` as
+  composition of the existing real `Server` and `Client`; no new socket mode or
+  in-process data shortcut was introduced. Startup binds the authority and
+  completes its private loopback handshake before returning readiness, with
+  cleanup of both roles on bind/address/callback failure.
+- Kept `authority` and `client` as separate typed owners and connection-ID
+  namespaces. `ListenEvent` tags every event with `ListenRole.AUTHORITY` or
+  `CLIENT` plus `local_host`; matching numeric IDs across roles are explicitly
+  not identity. A second remote client is tagged `local_host=False` and uses the
+  same authority listener.
+- Delegated the only scene, scheduler, physics and lifecycle ownership to the
+  authority. `step()` performs one authority tick and pumps the client afterward.
+  `run()` reuses the server's paced/mutation-guarded owner loop with an internal
+  post-tick client pump, so the client never executes authoritative scripts or
+  physics. Thread-safe stop requests and manual-step shutdown close both roles.
+- Added exact connect/message/disconnect role tests, host/remote distinction,
+  bidirectional host bytes, restart with new local generations, partial-start
+  cleanup, callback-failure cleanup and paced four-tick non-duplication proof.
+  The focused real-loopback suite passed 20 consecutive invocations.
+- Added `examples/05_listen_host` using only public API, ADR-0027, public API/
+  protocol/architecture/known-limit documentation and explicit nonclaims for
+  rendering attachment, discovery, identity, replication or host privilege.
+
+### Failures found and corrected
+
+- The first focused suite passed authority receipt of the host's input but
+  timed out waiting for the client-side reply. `Client` intentionally dispatches
+  only connect/disconnect callbacks; application messages are returned from
+  `poll()`. The composition now consumes returned client message events and tags
+  them through the same role stream. The focused suite then passed.
+- Review of partial startup found that a user `on_event` exception could fire
+  again during cleanup and prevent the remaining role from closing. Cleanup now
+  suppresses repeat user callbacks while draining/closing both native owners,
+  preserves the original exception, clears pending role events and has a
+  regression that deliberately raises on the first startup event.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests\python\test_listen_server.py -q
+....                                                                     [100%]
+4 passed in 0.43s
+
+# The focused command above was invoked 20 consecutive times after the final fix.
+# Every invocation passed 4/4; observed durations were 0.35–0.37s.
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 57%]
+.....................................................                    [100%]
+125 passed in 0.82s
+
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 0.89 sec
+
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 0.89 sec
+
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 0.72 sec
+
+# From the documented Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3927444
+sha256=708b39f21ad77d52087f7ea5f47442345d987a98043e1b64339dba3c2ba0c565
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe examples\05_listen_host\main.py --port 32500 --tick-rate 120
+client    host=True connected    id=1 payload=b''
+authority host=True connected    id=1 payload=b''
+authority host=True message      id=1 payload=b'local host input'
+client    host=True message      id=1 payload=b'authoritative host snapshot'
+authority host=True disconnected id=1 payload=b''
+client    host=True disconnected id=1 payload=b''
+listen host stopped after 12 authoritative ticks
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -m pip show -f easy3d
+# editable metadata plus easy3d/_easy3d.cp311-win_amd64.pyd; no private dependency artifacts
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+Phase 3.6: **DONE**. Immediate next task: Phase 3.7 — add explicit opt-in,
+bounded LAN discovery with defensive parsing and Windows firewall/subnet
+guidance. Direct IP remains the required fallback; no replication is claimed.

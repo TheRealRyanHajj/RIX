@@ -160,11 +160,27 @@ or `poll` caller, never from a GNS callback. `stop()` only signals while a run
 loop is active and is safe to request from another Python thread. No `Engine`,
 SDL window or bgfx renderer is constructed.
 
+## Implemented in Phase 3.6
+
+`ListenServer` does not add a wire mode or privileged in-process shortcut. It
+starts the Phase 3.5 authority, connects an ordinary Phase 3.4 client to its
+numeric loopback address, and completes the same Phase 3.3 handshake before
+startup returns. Bytes in either direction pass through GNS and the existing
+bounded queues. Additional remote clients use the same authority listener.
+
+Authority and local client events are tagged separately. Their opaque IDs are
+local to their respective transports and may coincidentally have the same
+64-bit value; no cross-role comparison creates identity or ownership. Only the
+authority object owns a `Scene` or advances the scheduler/physics. The client
+is pumped after each authoritative tick and cannot cause a second
+`fixed_update`, authority callback or physics step. The host receives no
+transport-level privilege beyond sharing a machine and loopback path.
+
 ## Not implemented yet
 
-There is no listen-host role, discovery, firewall automation, DNS, replication
-or RPC yet. Phase 3.8 supplies a supported two-process sample and abrupt-
-disconnect/port-collision integration. Transport encryption also does not
+There is no rendered-Game attachment, discovery, firewall automation, DNS,
+replication or RPC yet. Phase 3.8 supplies a supported two-process sample and
+abrupt-disconnect/port-collision integration. Transport encryption also does not
 establish account or player identity; authentication remains a separate
 extension boundary.
 

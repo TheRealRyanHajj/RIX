@@ -60,10 +60,11 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
-Phase 3.5 exposes a numeric direct-IP client and headless authoritative server
-with the Phase 3.3 handshake. There is not yet a listen-host role, DNS, LAN
-discovery, automatic firewall rule, player identity, replication, or supported
-two-process sample; those are Phase 3.6–4.x work. Transports advance only when
+Phase 3.6 exposes a numeric direct-IP client, headless authoritative server and
+isolated headless listen-host composition with the Phase 3.3 handshake. There
+is not yet rendered-`Game` attachment, DNS, LAN discovery, automatic firewall
+rule, player identity, replication, or a supported two-process sample; those
+are Phase 3.7–4.x work. Transports advance only when
 their owning thread polls (the server `run()` loop does this automatically), so
 a stalled owning loop also stalls callbacks and deadline enforcement.
 Exact protocol/schema equality is the only compatibility policy in wire format
@@ -80,6 +81,12 @@ Windows Firewall to prompt or block inbound traffic; Easy3D does not create or
 modify firewall rules. Phase 3.5 is validated over local IPv4 loopback, with
 native multi-client and Python client/server tests. Separate-process LAN and
 abrupt-process-loss validation remain Phase 3.8.
+
+The listen host's local client still traverses the OS loopback transport; it is
+not a zero-latency shared-memory shortcut. Its client and authority connection
+IDs are separate local namespaces even when their numeric values match. Phase
+3.6 does not attach that client to a rendered `Game`, assign a player identity,
+or grant host ownership/authorization.
 
 The supported Windows build uses MSVC. A diagnostic attempt with MinGW GCC
 15.1 reaches an upstream Protobuf `musttail` compile failure in

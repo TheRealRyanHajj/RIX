@@ -876,3 +876,38 @@ concurrent server calls are supported.
 - This is an authoritative dedicated role only. Listen hosts, discovery,
   player identity, replication and cross-process sample guarantees remain
   later milestones.
+
+## ADR-0027: Compose listen hosts from isolated authority and client roles
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+A listen host needs local client behavior and authoritative simulation in one
+process. Reusing the authority scene directly from the local client would run
+scripts/physics twice, create host-only callback paths and blur transport IDs
+with future player/network-object identity. A special in-process data path
+would also make host behavior differ from remote direct-IP clients.
+
+### Decision
+
+Compose `ListenServer` from the existing public `Server` and `Client`. Bind the
+authority first, then synchronously establish one ordinary loopback client
+before returning readiness. The authority alone owns the scene, scheduler and
+fixed tick. Pump the client after each completed authority tick. Tag all
+composed events with an explicit authority/client role and `local_host` flag;
+keep each child's opaque connection namespace intact even when numeric values
+match. Additional clients remain ordinary server peers and are tagged as
+non-host. Reuse the server's thread-safe stop request and clean up both roles on
+partial startup failure.
+
+### Consequences
+
+- Listen hosts exercise the same GNS queues and handshake as remote clients;
+  there is no privileged shared-memory protocol path.
+- Authoritative scripts and physics execute exactly once per host tick.
+- Role tags, not integer equality, determine which transport owns a connection
+  ID. This does not yet create player identity or network-object ownership.
+- Rendered `Game` attachment, discovery, replication and host prediction remain
+  later milestones.

@@ -596,5 +596,30 @@ replaced only while `run()` is inactive.
 `on_connect(server, connection)`, `on_message(server, event)` and
 `on_disconnect(server, event)` callbacks execute synchronously in event order
 on the `run`/`step`/`poll` caller. Callback exceptions propagate after the event
-is drained and are not replayed. No player identity, entity replication,
-listen-host client, DNS or discovery behavior is implied.
+is drained and are not replayed. The dedicated `Server` itself implies no local
+client, player identity, entity replication, DNS or discovery behavior.
+
+## Isolated listen host
+
+`easy3d.network.ListenServer(...)` (also `easy3d.ListenServer`) composes one
+authoritative `Server` with one real loopback `Client`. `start()` binds and
+completes the private host handshake before returning. Its returned
+`ListenEvent` values and optional `on_event(host, event)` callback tag every
+event with `ListenRole.AUTHORITY` or `ListenRole.CLIENT`; `local_host` is true
+for the private host peer and false for additional remote peers.
+
+`authority` and `client` remain separate typed objects. Only `authority` may
+own the scene, scheduler, physics and Python lifecycle. `authority_connection`
+is the authority-side opaque ID for the private client. It can have the same
+numeric value as `client.connection`, but equality across those two role-local
+spaces has no identity or ownership meaning. Use the role tag and the object
+that produced the ID.
+
+`step()` pumps both transports and executes exactly one authority tick.
+`run()` reuses the server's paced owner loop and pumps the client after each
+authority tick; it never executes the scene a second time. `stop()` is a
+thread-safe request while running and closes both roles when manually stepped.
+`poll()` services both transports without simulation. Additional direct-IP
+clients appear only as authority events with `local_host=False`. The local host
+receives no implicit privilege, player identity, entity replication, rendering
+or prediction behavior.
