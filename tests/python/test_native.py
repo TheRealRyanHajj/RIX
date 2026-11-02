@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from importlib.metadata import version
+
 import easy3d
 import pytest
 from easy3d import _easy3d
 
 
 def test_version_is_native_and_matches_package() -> None:
-    assert easy3d.engine_version() == easy3d.__version__ == "0.1.0"
+    assert easy3d.engine_version() == easy3d.__version__ == version("easy3d") == "0.1.0"
 
 
 @pytest.mark.parametrize(("left", "right", "expected"), [(1, 2, 3), (-4, 6, 2)])

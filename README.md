@@ -12,6 +12,8 @@ advanced shapes, joints, and CCD.
 The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
 Validation evidence and environment-specific limitations are recorded in
 [docs/progress.md](docs/progress.md) and [docs/known-issues.md](docs/known-issues.md).
+Release compatibility, migration and private wheel distribution are documented
+in [docs/release.md](docs/release.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Prerequisites
 

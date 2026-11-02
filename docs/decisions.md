@@ -1348,3 +1348,23 @@ installed pybind runtime with `_easy3d.pyi` using stubtest. Allowlist only the
 implementation metaclass and non-constructible generic-signature artifacts that
 pybind11 exposes to introspection. Run both gates from pytest so future binding
 changes cannot omit stubs unnoticed.
+
+## ADR-0050: Single-source release version and keep compatibility domains explicit
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Store the final numeric engine/package version once in root `VERSION`. Let the
+scikit-build-core regex provider create Python distribution metadata, let CMake
+create the native version header, and read the installed distribution metadata
+for `easy3d.__version__`. Test that Python metadata, the public package and the
+native core agree. This removes hand-synchronized version literals without
+making a VCS checkout or tag a runtime dependency.
+
+Keep engine release, application protocol, application schema, registry
+fingerprint and internal wire-format versions as separate exact boundaries.
+Do not imply native ABI stability: consumers install a complete ABI-tagged
+wheel and never mix native files across artifacts. Pre-1.0 patch releases
+preserve documented behavior; minor releases may break it only with migration
+notes. Private distribution uses immutable, hashed, versioned artifacts and
+requires an explicit owner action rather than an automated public upload.

@@ -1,4 +1,9 @@
-"""Easy3D Python package version."""
+"""Installed Easy3D distribution version."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("easy3d")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
 

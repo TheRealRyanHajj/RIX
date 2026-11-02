@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.26)
 
-project(Easy3D VERSION 0.1.0 LANGUAGES C CXX)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" easy3d_source_version LIMIT_COUNT 1)
+if(NOT easy3d_source_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "VERSION must contain exactly one MAJOR.MINOR.PATCH release version")
+endif()
+
+project(Easy3D VERSION "${easy3d_source_version}" LANGUAGES C CXX)
 
 include(CTest)
 include(FetchContent)

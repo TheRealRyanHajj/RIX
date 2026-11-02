@@ -7,7 +7,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "easy3d"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Private Windows-first Python/C++ 3D framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,12 @@ dev = [
     "pytest==9.2.0",
 ]
 
+[[tool.dynamic-metadata]]
+provider = "scikit_build_core.metadata.regex"
+field = "version"
+input = "VERSION"
+regex = '^(?P<value>[0-9]+\.[0-9]+\.[0-9]+)$'
+
 [tool.scikit-build]
 cmake.version = ">=3.26"
 ninja.version = ">=1.11"
@@ -40,6 +46,7 @@ wheel.packages = ["python/easy3d"]
 wheel.license-files = ["LICENSE", "LICENSES/THIRD_PARTY.md"]
 editable.mode = "redirect"
 sdist.include = [
+    "VERSION",
     "CMakeLists.txt",
     "cmake/**",
     "engine/**",

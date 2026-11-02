@@ -43,6 +43,7 @@ if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
 }
 
 New-Item -ItemType Directory -Force -Path $Wheelhouse, $SmokeRoot | Out-Null
+$ManifestLines = New-Object 'System.Collections.Generic.List[string]'
 Push-Location $RepositoryRoot
 
 try {
@@ -89,8 +90,13 @@ try {
         }
 
         $Hash = Get-Sha256 -Path $Wheel.FullName
+        $ManifestLines.Add("$Hash  $($Wheel.Name)")
         Write-Host "$($Wheel.Name) SHA256=$Hash"
     }
+
+    $Manifest = Join-Path $Wheelhouse "SHA256SUMS.txt"
+    [System.IO.File]::WriteAllLines($Manifest, $ManifestLines, [System.Text.Encoding]::ASCII)
+    Write-Host "Wrote $Manifest"
 }
 finally {
     Pop-Location

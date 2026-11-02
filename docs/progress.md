@@ -4882,3 +4882,69 @@ x64 host. The wheels remain private local artifacts and were not uploaded or
 published. Phase 6.6: **DONE**. Exact next task: Phase 6.7 — establish explicit
 versioning/compatibility/migration policy and private artifact distribution
 instructions.
+
+## 2026-11-01 — Phase 6.7 versioning, compatibility and private distribution
+
+Made root `VERSION` the single editable `MAJOR.MINOR.PATCH` release value.
+scikit-build-core's pinned regex metadata provider now derives wheel metadata
+from it, CMake validates and derives `PROJECT_VERSION`/the generated native
+header from it, and installed Python obtains `easy3d.__version__` from standard
+distribution metadata. The native regression test requires package metadata,
+the public Python value and `engine_version()` to agree; this eliminates three
+manually synchronized release literals.
+
+Added `CHANGELOG.md` with the initial `0.1.0` release and explicit no-predecessor
+migration note. Added `docs/release.md` with pre-1.0 Semantic Versioning rules,
+Python/OS/API/native-ABI compatibility, the distinct engine/protocol/schema/
+registry/wire-format domains, release gates, asset/persistence limits, private
+SMB or authenticated-index staging, immutable SHA-256 manifests, consumer
+installation and whole-wheel rollback. ADR-0050 records the single-source and
+separate-domain decision. The wheel script now creates `SHA256SUMS.txt` itself
+using the same .NET implementation that works inside the VS developer shell;
+it still performs no upload, tag, push or global modification.
+
+Failure and correction during native verification:
+
+- The first direct `cmake --preset windows-debug` detected that an old cache
+  stored the compiler through a different path spelling and automatically
+  regenerated the cache. During that one CMake process the preset's
+  `EASY3D_BUILD_PYTHON=OFF` value was lost, so configuration tried to find a
+  standalone pybind11 package and failed. Rerunning the unchanged, correct
+  preset after regeneration reapplied `EASY3D_BUILD_PYTHON:BOOL=OFF`; the clean
+  native build and all tests then passed. No fallback or hidden dependency was
+  added.
+
+Exact verification evidence:
+
+```text
+# VS 2026 x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e .
+Preparing editable metadata (pyproject.toml): finished with status 'done'
+Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4126757
+sha256=ad2e5b38004f27e2601ac345d0c7d1da51bec018aeffa300953fa5b1a829b59e
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -c "import easy3d; from importlib.metadata import version; print(easy3d.__version__, easy3d.engine_version(), version('easy3d'))"
+0.1.0 0.1.0 0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 33%]
+........................................................................ [ 66%]
+........................................................................ [100%]
+216 passed in 75.47s (0:01:15)
+
+cmake --preset windows-debug
+EASY3D_BUILD_PYTHON:BOOL=OFF
+cmake --build --preset windows-debug
+[1121/1122] Linking CXX executable Debug\easy3d_network_server_tests.exe
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 19
+Total Test time (real) = 3.79 sec
+```
+
+The policy describes only implemented exact-match rejection and tested wheel
+boundaries; it does not promise C++ ABI stability, cross-platform binaries,
+save compatibility or public package availability. Phase 6.7: **DONE**. Exact
+next task: Phase 6.8 — final regression, soak, source/wheel packaging audit and
+performance comparison against the recorded baselines.
