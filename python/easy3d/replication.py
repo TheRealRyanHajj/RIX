@@ -706,10 +706,35 @@ def _snapshot_from_frame(frame: bytes) -> TransformSnapshot:
     return TransformSnapshot(
         tick,
         sequence,
-        Vec3(values[:3]),
-        Quat(values[3:7]).normalized(),
-        Vec3(values[7:10]),
+        _wire_vec3(values[0], values[1], values[2]),
+        _wire_normalized_quat(values[3], values[4], values[5], values[6]),
+        _wire_vec3(values[7], values[8], values[9]),
     )
+
+
+def _wire_vec3(x: float, y: float, z: float) -> Vec3:
+    """Construct a vector after its wire components have already been validated."""
+
+    result = object.__new__(Vec3)
+    result._values = (x, y, z)
+    result._getter = None
+    result._setter = None
+    return result
+
+
+def _wire_normalized_quat(w: float, x: float, y: float, z: float) -> Quat:
+    """Normalize an already finite wire quaternion without public revalidation."""
+
+    length_squared = w * w + x * x + y * y + z * z
+    if length_squared <= 1.0e-24:
+        raise ValueError("cannot normalize a zero-length Quat")
+    inverse_length = 1.0 / math.sqrt(length_squared)
+    result = object.__new__(Quat)
+    result.w = w * inverse_length
+    result.x = x * inverse_length
+    result.y = y * inverse_length
+    result.z = z * inverse_length
+    return result
 
 
 def _transform_delta_frame(
@@ -746,23 +771,21 @@ def _transform_delta_frame(
     frame = _HEADER.pack(
         _MAGIC, _WIRE_VERSION, _TRANSFORM_DELTA, 0, len(payload)
     ) + payload
-    reconstructed_position = Vec3(
-        tuple(
-            baseline_position[index] + quantized[index] / 100.0
-            for index in range(3)
-        )
+    reconstructed_position = _wire_vec3(
+        baseline_position[0] + quantized[0] / 100.0,
+        baseline_position[1] + quantized[1] / 100.0,
+        baseline_position[2] + quantized[2] / 100.0,
     )
-    reconstructed_rotation = Quat(
-        tuple(
-            baseline_rotation[index] + quantized[index + 3] / 16000.0
-            for index in range(4)
-        )
-    ).normalized()
-    reconstructed_scale = Vec3(
-        tuple(
-            baseline_scale[index] + quantized[index + 7] / 1000.0
-            for index in range(3)
-        )
+    reconstructed_rotation = _wire_normalized_quat(
+        baseline_rotation[0] + quantized[3] / 16000.0,
+        baseline_rotation[1] + quantized[4] / 16000.0,
+        baseline_rotation[2] + quantized[5] / 16000.0,
+        baseline_rotation[3] + quantized[6] / 16000.0,
+    )
+    reconstructed_scale = _wire_vec3(
+        baseline_scale[0] + quantized[7] / 1000.0,
+        baseline_scale[1] + quantized[8] / 1000.0,
+        baseline_scale[2] + quantized[9] / 1000.0,
     )
     if any(component == 0.0 for component in reconstructed_scale):
         return None
@@ -1257,12 +1280,19 @@ class ServerReplication:
             for identifier, frame in frames.items()
         }
         # A synchronized fan-out commonly has many connections acknowledging
-        # the exact same immutable baseline object. Delta encoding and its
-        # quantized reconstruction are therefore identical. Reuse that work
-        # within this flush; object identity keeps divergent baselines safely
-        # separate even when they happen to carry the same sequence number.
+        # numerically identical baselines. Packet timing can leave those values
+        # in distinct immutable snapshot objects, so object identity would
+        # permanently fragment this per-flush cache. Sequence plus every
+        # component shares only bit-identical baselines and keeps divergent
+        # reconstruction paths separate.
         delta_cache: dict[
-            tuple[NetworkObjectId, int],
+            tuple[
+                NetworkObjectId,
+                int,
+                tuple[float, ...],
+                tuple[float, ...],
+                tuple[float, ...],
+            ],
             tuple[bytes, TransformSnapshot] | None,
         ] = {}
         tick_delta = (
@@ -1314,7 +1344,13 @@ class ServerReplication:
                 if baseline is None:
                     delta = None
                 else:
-                    cache_key = (item.id, id(baseline))
+                    cache_key = (
+                        item.id,
+                        baseline.sequence,
+                        tuple(baseline.position),
+                        tuple(baseline.rotation),
+                        tuple(baseline.scale),
+                    )
                     if cache_key not in delta_cache:
                         delta_cache[cache_key] = _transform_delta_frame(
                             item.id, current, baseline
@@ -2101,12 +2137,14 @@ class ClientReplication:
                 return
             if not self._registry.has_transform(replicated.prefab_id):
                 raise ValueError("transform update is not declared by the prefab schema")
-            position = Vec3(values[:3])
+            position = _wire_vec3(values[0], values[1], values[2])
             try:
-                rotation = Quat(values[3:7]).normalized()
+                rotation = _wire_normalized_quat(
+                    values[3], values[4], values[5], values[6]
+                )
             except ValueError as error:
                 raise ValueError("transform update contains a zero quaternion") from error
-            scale = Vec3(values[7:10])
+            scale = _wire_vec3(values[7], values[8], values[9])
             if any(component == 0.0 for component in scale):
                 raise ValueError("transform update contains a zero scale component")
             snapshot = TransformSnapshot(tick, sequence, position, rotation, scale)
@@ -2140,20 +2178,24 @@ class ClientReplication:
             base_position = tuple(baseline.position)
             base_rotation = tuple(baseline.rotation)
             base_scale = tuple(baseline.scale)
-            position = Vec3(
-                tuple(base_position[index] + values[index] / 100.0 for index in range(3))
+            position = _wire_vec3(
+                base_position[0] + values[0] / 100.0,
+                base_position[1] + values[1] / 100.0,
+                base_position[2] + values[2] / 100.0,
             )
             try:
-                rotation = Quat(
-                    tuple(
-                        base_rotation[index] + values[index + 3] / 16000.0
-                        for index in range(4)
-                    )
-                ).normalized()
+                rotation = _wire_normalized_quat(
+                    base_rotation[0] + values[3] / 16000.0,
+                    base_rotation[1] + values[4] / 16000.0,
+                    base_rotation[2] + values[5] / 16000.0,
+                    base_rotation[3] + values[6] / 16000.0,
+                )
             except ValueError as error:
                 raise ValueError("transform delta reconstructs a zero quaternion") from error
-            scale = Vec3(
-                tuple(base_scale[index] + values[index + 7] / 1000.0 for index in range(3))
+            scale = _wire_vec3(
+                base_scale[0] + values[7] / 1000.0,
+                base_scale[1] + values[8] / 1000.0,
+                base_scale[2] + values[9] / 1000.0,
             )
             if any(component == 0.0 for component in scale):
                 raise ValueError("transform delta reconstructs zero scale")

@@ -1368,3 +1368,22 @@ wheel and never mix native files across artifacts. Pre-1.0 patch releases
 preserve documented behavior; minor releases may break it only with migration
 notes. Private distribution uses immutable, hashed, versioned artifacts and
 requires an explicit owner action rather than an automated public upload.
+
+## ADR-0051: Cache transform deltas by value and bypass redundant wire revalidation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Key the server's per-flush delta cache by object ID, baseline sequence and all
+baseline transform components. Object identity is insufficient because packet
+timing can create distinct immutable snapshots with identical reconstruction
+state; component/sequence equality shares only byte-equivalent delta work and
+keeps divergent quantization histories separate.
+
+Construct transform math values through private replication-only helpers after
+the bounded wire decoder has already checked frame size, finite full-frame
+components or bounded integer deltas, and a validated baseline. Preserve
+normalization plus zero-quaternion/zero-scale rejection. Public `Vec3` and
+`Quat` constructors keep their complete type/finite contract. This targeted
+boundary removes measured duplicate validation from dense fan-out without
+weakening untrusted packet checks or changing the public math API.

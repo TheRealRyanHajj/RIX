@@ -4948,3 +4948,124 @@ boundaries; it does not promise C++ ABI stability, cross-platform binaries,
 save compatibility or public package availability. Phase 6.7: **DONE**. Exact
 next task: Phase 6.8 — final regression, soak, source/wheel packaging audit and
 performance comparison against the recorded baselines.
+
+## 2026-11-01 — Phase 6.8 final regression, packaging, soak and performance gate
+
+Completed the final tracked-workload gate on the recorded Windows 11 x64,
+Ryzen 5 5600G, NVIDIA D3D11 and MSVC 19.51 host. Debug, Release and explicitly
+graphics-disabled native trees passed. The editable Python suite passed, then
+the finalized wheels clean-installed and passed the complete suite on CPython
+3.11, 3.12 and 3.13. The PEP 517 sdist and all three wheels passed direct
+contents, ZIP integrity, metadata validation and SHA-256 manifest checks.
+
+The first enforced network capacity run correctly failed at 32 clients:
+median/p95/p99/max 92.980/123.318/132.676/202.321 ms and observation latency
+p95 62.088 ms exceeded the unchanged 100 ms p99 and 50 ms latency budgets.
+Two repeated isolated runs still failed. cProfile measured 30,285 repeated
+delta reconstructions and redundant public math validation on 66,592 client
+applications. Replacing the per-flush object-identity cache key with complete
+immutable baseline values, then using private wire-only finite/bounded math
+construction, reduced the final 32-client median/p99 to 49.899/88.847 ms and
+latency p95 to 34.021 ms. Correctness, zero deferrals and all original budgets
+were retained. Focused lifecycle/recovery/typing tests passed before the full
+regression. ADR-0051 and `docs/benchmarks.md` record the safety boundary and
+full before/after table.
+
+Exact regression and performance evidence:
+
+```text
+cmake --build --preset windows-debug
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 19
+Total Test time (real) = 3.79 sec
+
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 19
+Total Test time (real) = 4.02 sec
+
+cmake -S . -B build\windows-headless -G Ninja -DCMAKE_BUILD_TYPE=Debug -DEASY3D_ENABLE_GRAPHICS=OFF -DEASY3D_ENABLE_NETWORKING=ON -DEASY3D_BUILD_PYTHON=OFF -DEASY3D_BUILD_BENCHMARKS=ON -DBUILD_TESTING=ON
+cmake --build build\windows-headless --parallel 12
+ctest --test-dir build\windows-headless --output-on-failure
+100% tests passed, 0 tests failed out of 18
+Total Test time (real) = 3.19 sec
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 33%]
+........................................................................ [ 66%]
+........................................................................ [100%]
+216 passed in 63.17s (0:01:03)
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_transform.py tests/python/test_replication_scaling.py tests/python/test_replication_lifecycle.py tests/python/test_replication_resync.py tests/python/test_typing.py -q
+................                                                         [100%]
+16 passed in 13.66s
+
+build\venv311\Scripts\python.exe benchmarks\network_capacity.py --ticks 120 --warmup-ticks 20 --enforce-budget
+clients=8 correct=True tick_ms median/p95/p99/max=4.078/6.135/8.263/8.744 cpu=67.8% rss_peak=33.4MiB server=835.1KiB/s per_client=104.4KiB/s latency_p95=8.607ms deferred=0
+clients=16 correct=True tick_ms median/p95/p99/max=13.438/20.315/26.944/44.841 cpu=98.9% rss_peak=38.0MiB server=1173.1KiB/s per_client=73.3KiB/s latency_p95=16.972ms deferred=0
+clients=32 correct=True tick_ms median/p95/p99/max=49.899/70.131/88.847/111.698 cpu=107.5% rss_peak=49.6MiB server=1238.1KiB/s per_client=38.7KiB/s latency_p95=34.021ms deferred=0
+
+build\venv311\Scripts\python.exe benchmarks\network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse
+clients=4 cycles=10 profile=adverse sent/received/executed/limited=2560/2560/654/1906 disconnects=14 reconnects=10 shutdown_clients=4 elapsed=33.493s correct=True
+
+build\windows-release\Release\easy3d_core_benchmark.exe
+iterations=10000000 elapsed_seconds=0.0254537 final_value=5000000
+build\venv311\Scripts\python.exe benchmarks\native_add.py --iterations 1000000
+iterations=1000000 elapsed_seconds=0.363130 ns_per_call=363.1 final_value=500000
+```
+
+Packaging and final wheel-matrix evidence:
+
+```text
+build\venv311\Scripts\python.exe -m build --sdist --outdir build\dist
+Successfully built easy3d-0.1.0.tar.gz
+bytes=722814
+sha256=5fac47d53ad50627b568b8dae637d1f9e347d25bde408186e6537d407b9744f3
+# 246 entries; VERSION, pyproject.toml, CMakeLists.txt, LICENSE,
+# LICENSES/THIRD_PARTY.md, native bindings and Python sources present.
+
+scripts\build_wheel_matrix.ps1
+CPython 3.11.9: 216 passed in 64.39s (0:01:04)
+easy3d-0.1.0-cp311-cp311-win_amd64.whl
+bytes=4203660 sha256=779d278b578918fb9e5cc5dca81ff51784b5e93c23f9731db9b9117930181a61
+CPython 3.12.10: 216 passed in 41.82s
+easy3d-0.1.0-cp312-cp312-win_amd64.whl
+bytes=4207110 sha256=b1815aafb63958495213e54f92e00d9f2209e4e48dddc96f915c0b3b5b29f523
+CPython 3.13.2: 216 passed in 39.67s
+easy3d-0.1.0-cp313-cp313-win_amd64.whl
+bytes=4207128 sha256=d4caf92547e3fe06c16722a0f1480b310910028cce8ce1d5be5c88f35641f1bb
+Wrote build\wheelhouse\SHA256SUMS.txt
+# Recomputed manifest hashes matched; zip test passed; packaging metadata
+# validated; native module, stubs, py.typed, LICENSE and THIRD_PARTY present.
+```
+
+GUI-capable Windows lifecycle/example evidence:
+
+```text
+build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 10000 --seconds 10
+renderer=Direct3D 11 vendor=0x10de device=0x2482
+frames=2222 overall_fps=220.423 frame_ms median/p95/p99=3.939/5.676/10.304
+draw_calls=2 visible_instances=9318 culled_instances=682 instanced_draw_calls=1
+peak_working_set=139235328
+
+build\venv311\Scripts\python.exe tests\manual\window_lifecycle.py
+iteration=1 frames=13 running=False
+iteration=2 frames=29 running=False
+
+build\venv311\Scripts\python.exe examples\02_first_world\main.py --seconds 3
+first_world: PASS frames=423 draw_calls=6 visible=4 culled=0 fixed_ticks=139 update_calls=423 scene_closed=True
+
+build\venv311\Scripts\python.exe examples\07_coop_sandbox\main.py --clients 4
+sandbox complete: clients=4 players=4 interpolated=16 crate_destroyed=True rpc_executed=6
+build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode cooperative --clients 4
+arena complete: mode=cooperative clients=4 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=True eliminated_players=0
+build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode competitive --clients 4
+arena complete: mode=competitive clients=4 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=False eliminated_players=1
+```
+
+No sanitizer, `/analyze`, clang-tidy, RenderDoc capture, audio perception or
+human screenshot/appearance review was run; these remain **UNVERIFIED** and are
+listed in known issues. The D3D11 console/frame/lifecycle results are verified
+on this host only. No artifacts were uploaded or published. Phase 6.8:
+**DONE**. All MASTERPLAN implementation items 0.1–6.8 are checked; the private
+`0.1.0` checkpoint is complete.

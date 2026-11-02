@@ -1,8 +1,8 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–5 and the Phase 6 graphics-preset/native-HUD/audio/glTF
-milestones are validated for their documented workloads and limits.
+native core. Phases 0–6 are complete at the private `0.1.0` checkpoint and are
+validated for their documented workloads and limits.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt

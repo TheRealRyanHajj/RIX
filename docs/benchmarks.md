@@ -91,3 +91,62 @@ completed 10 reconnects, observed all 14 authority disconnects (10 rotating +
 This is local finite stress evidence, not a duration, WAN, or production-load
 guarantee.
 
+## Phase 6.8 final regression and optimization
+
+The final gate reused the recorded Windows 11/Ryzen 5 5600G/CPython 3.11 host
+and fixed Phase 5 budgets. A first full capacity run failed rather than being
+accepted or hidden:
+
+| Clients | median / p95 / p99 / max tick ms | CPU | peak RSS | latency p95 | Correct/deferred |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 7.564 / 11.784 / 16.214 / 20.751 | 89.0% | 34.4 MiB | 13.903 ms | yes / 0 |
+| 16 | 24.284 / 33.291 / 35.712 / 41.800 | 94.5% | 39.4 MiB | 15.774 ms | yes / 0 |
+| 32 | 92.980 / 123.318 / **132.676** / 202.321 | 98.6% | 58.1 MiB | **62.088 ms** | yes / 0 |
+
+The 32-client p99 and latency exceeded the unchanged 100/50 ms budgets.
+Repeated isolated runs still failed. A 60-tick cProfile sample reported
+20,175,538 calls in 14.861 seconds, including 5.853 seconds in server
+`flush_transforms`, 30,285 delta reconstructions and 6.806 seconds in client
+frame application.
+
+Two measured corrections were made:
+
+1. The per-flush server delta cache now keys on baseline sequence and every
+   immutable component rather than Python object identity. Packet timing can
+   produce separate snapshot objects with identical values; the former key
+   permanently fragmented reuse. The next profile fell to 15,423,568 calls and
+   2.771 seconds in `flush_transforms`.
+2. Internal transform wire decode now constructs `Vec3`/normalized `Quat`
+   values through private bounded helpers after frame length, finite values,
+   integer quantization and the prior baseline are already validated. Public
+   math constructors retain all type/finite validation. This removes redundant
+   iterable conversion and component validation for every received replica
+   while preserving zero-quaternion and zero-scale rejection.
+
+Final enforced capacity run, with every original budget unchanged:
+
+| Clients | median / p95 / p99 / max tick ms | CPU | peak RSS | authority rate | per-client rate | latency p95 | Correct/deferred |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 4.078 / 6.135 / 8.263 / 8.744 | 67.8% | 33.4 MiB | 835.1 KiB/s | 104.4 KiB/s | 8.607 ms | yes / 0 |
+| 16 | 13.438 / 20.315 / 26.944 / 44.841 | 98.9% | 38.0 MiB | 1173.1 KiB/s | 73.3 KiB/s | 16.972 ms | yes / 0 |
+| 32 | 49.899 / 70.131 / 88.847 / 111.698 | 107.5% | 49.6 MiB | 1238.1 KiB/s | 38.7 KiB/s | 34.021 ms | yes / 0 |
+
+The final Phase 5 adverse workload also passed in 33.493 seconds: 2,560/2,560
+reliable inputs received, 654 executed, 1,906 application-rate-limited, 10
+reconnects, 14 authority disconnect observations, 4 client shutdowns and
+correct final state. Different executed/limited counts from the earlier run are
+expected because the one-second rate-limit windows and jitter boundary are
+time-based; their sum and reliable delivery remain exact.
+
+The Release C++ loop benchmark completed 10,000,000 iterations in 0.025454
+seconds. One million Python-to-native `native_add` calls took 0.363130 seconds
+(363.1 ns/call) on this run.
+
+The GUI D3D11 10,000-cube workload ran for 10.081 seconds and produced 2,222
+frames (220.4 overall FPS). Its sampled frame median/p95/p99 were
+3.939/5.676/10.304 ms. The final frame submitted two draw calls: one instanced
+draw containing 9,318 visible cubes, with 682 culled. Working set was 28.8 MiB
+before creation, 32.1 MiB after creation, 83.2 MiB after the run and 132.8 MiB
+peak. These figures are workload/machine evidence, not a general FPS or memory
+guarantee; no human screenshot/appearance review accompanied the timed run.
+

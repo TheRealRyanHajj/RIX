@@ -353,3 +353,18 @@ frame or treat it as a background import service. It currently covers the
 PNG/JPEG, OBJ, glTF and GLB public asset paths. WAV validation remains on the
 game-local `Audio.load` API because decoded sounds belong to one native mixer.
 
+## Final validation has explicit tool and visual boundaries
+
+The `0.1.0` gate completed MSVC Debug/Release/headless builds, CTest, pytest,
+mypy/stubtest, clean CPython 3.11–3.13 wheel installs, package metadata/payload
+checks, a reconnect/loss soak and measured CPU/network/render workloads. No
+AddressSanitizer, MSVC `/analyze`, clang-tidy, RenderDoc capture, audio-listening
+test or human screenshot/appearance review was run in the final gate. Those are
+**UNVERIFIED**, not silently treated as passing. Console evidence confirms D3D11
+adapter selection, frame submission and clean teardown on the recorded NVIDIA
+host; it does not prove visual correctness on another adapter or backend.
+
+Only CPython 3.11, 3.12 and 3.13 Windows x64 wheels are built/tested.
+Free-threaded Python, Python 3.14+, x86, ARM64 and non-Windows artifacts remain
+unsupported. Wheels are private local artifacts and were not uploaded.
+

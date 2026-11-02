@@ -351,7 +351,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **6.5** Add asset error diagnostics, debug overlays, documentation, annotated API examples and type-stub/type-checking coverage.
 - [x] **6.6** Produce Windows Python 3.11+ wheel matrix only for interpreters actually tested; verify install from wheel on clean environment.
 - [x] **6.7** Establish versioning, compatibility policy, migration notes and private artifact distribution instructions.
-- [ ] **6.8** Run full regression, soak, packaging and performance tests; record performance before/after optimizations.
+- [x] **6.8** Run full regression, soak, packaging and performance tests; record performance before/after optimizations.
 
 **Exit gate:** a new developer can install from a private wheel, follow a quickstart, build a simple 3D game and a local multiplayer example, with no native compilation required on their machine.
 
