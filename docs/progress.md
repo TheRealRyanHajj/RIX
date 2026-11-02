@@ -3574,3 +3574,28 @@ build\venv311\Scripts\python.exe -m pytest -q
 Phase 4.4: **DONE**. Immediate next task: Phase 4.5 — game-context/script
 authority guards and listen-host double-execution prevention around the new
 replication/RPC surface. Replicated match state remains Phase 4.6.
+
+## 2026-11-01 — Phase 4.5 script authority context
+
+Added `ScriptRole` (`offline`, `server`, `client`), `server_only` and
+`client_only` lifecycle guards, plus `current_script_role()`. The scheduler
+enforces guards centrally and scopes/resets the context around every callback.
+Headless `Server` uses the server role; graphical offline `Game` retains the
+offline default. `ListenServer` still owns only the authoritative server
+scheduler and its transport-only local client has no scene/scheduler, so host
+callbacks cannot execute twice.
+
+```text
+build\venv311\Scripts\python.exe -m pytest -q tests/python/test_scheduler.py tests/python/test_server.py tests/python/test_listen_server.py
+.................                                                        [100%]
+17 passed in 0.49s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 46%]
+........................................................................ [ 92%]
+............                                                             [100%]
+156 passed in 18.44s
+```
+
+Phase 4.5: **DONE**. Immediate next task: Phase 4.6 — replicated match states
+and authority-only simulation timers with late-join correctness.

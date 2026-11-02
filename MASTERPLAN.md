@@ -323,7 +323,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **4.2** Implement typed `NetworkVar`, dirty tracking, serialization bounds and authority checks.
 - [x] **4.3** Implement `NetworkTransform`, snapshot tick/sequence, interpolation for remote actors and basic relevance filtering.
 - [x] **4.4** Implement RPC registration, direction/ownership authorization, rate limiting, reliable/unreliable channels and defensive parsing.
-- [ ] **4.5** Implement game-context/script-authority guards; prevent double execution on listen hosts.
+- [x] **4.5** Implement game-context/script-authority guards; prevent double execution on listen hosts.
 - [ ] **4.6** Implement replicated match states and server-only timers; late-join state correctness.
 - [ ] **4.7** Build 2–8 player co-op sandbox sample: objects spawned, moved, hit, destroyed, synchronized.
 - [ ] **4.8** Add integration tests for malicious/invalid RPC, ownership tampering, out-of-order updates, state resync, join/leave.

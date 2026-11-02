@@ -526,6 +526,11 @@ and rate/ownership policy with `PrefabRegistry.register_rpc(...)`. Clients use
 client handlers receive `(entity, *arguments)`. Ownership is authority-assigned
 with `set_owner` and is intentionally not client writable.
 
+Gameplay hooks can use `@server_only` or `@client_only`; unmarked hooks are
+shared. `current_script_role()` reports the scheduler role only during a
+callback. Listen hosts run one server scheduler—the local client transport does
+not own or advance an authority scene.
+
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 
 ```python

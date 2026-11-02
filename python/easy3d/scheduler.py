@@ -6,7 +6,9 @@ import math
 import sys
 import time
 import traceback
+from contextvars import ContextVar
 from dataclasses import dataclass
+from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
@@ -20,6 +22,37 @@ if TYPE_CHECKING:
 
 class ScriptCallbackError(RuntimeError):
     """A gameplay callback failed in fail-fast mode."""
+
+
+class ScriptRole(str, Enum):
+    OFFLINE = "offline"
+    SERVER = "server"
+    CLIENT = "client"
+
+
+_active_script_role: ContextVar[ScriptRole | None] = ContextVar(
+    "easy3d_active_script_role", default=None
+)
+
+
+def current_script_role() -> ScriptRole | None:
+    """Return the role of the active lifecycle callback, if any."""
+
+    return _active_script_role.get()
+
+
+def _role_guard(role: ScriptRole):
+    def decorate(callback):  # type: ignore[no-untyped-def]
+        if not callable(callback):
+            raise TypeError("script role guards require a callable")
+        setattr(callback, "__easy3d_script_roles__", frozenset((role,)))
+        return callback
+
+    return decorate
+
+
+server_only = _role_guard(ScriptRole.SERVER)
+client_only = _role_guard(ScriptRole.CLIENT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +106,7 @@ class SimulationScheduler:
         max_frame_seconds: float = 0.25,
         max_catch_up_steps: int = 5,
         fail_fast: bool = True,
+        role: ScriptRole = ScriptRole.OFFLINE,
     ) -> None:
         if not math.isfinite(fixed_hz) or fixed_hz <= 0:
             raise ValueError("fixed_hz must be finite and positive")
@@ -86,6 +120,9 @@ class SimulationScheduler:
         self.max_frame_seconds = float(max_frame_seconds)
         self.max_catch_up_steps = int(max_catch_up_steps)
         self.fail_fast = bool(fail_fast)
+        if not isinstance(role, ScriptRole):
+            raise TypeError("role must be an easy3d.ScriptRole")
+        self.role = role
         self._accumulator = 0.0
         self._fixed_ticks = 0
         self._overrun_count = 0
@@ -213,10 +250,14 @@ class SimulationScheduler:
         callback = getattr(entity, hook, None)
         if not callable(callback):
             return
+        allowed = getattr(callback, "__easy3d_script_roles__", None)
+        if allowed is not None and self.role not in allowed:
+            return
         key = self._key(entity)
         if key in self._failed and not force:
             return
         started = time.perf_counter()
+        token = _active_script_role.set(self.role)
         try:
             callback(*arguments)
         except BaseException as error:
@@ -231,6 +272,7 @@ class SimulationScheduler:
             print(message, file=sys.stderr)
             traceback.print_exception(error, file=sys.stderr)
         finally:
+            _active_script_role.reset(token)
             duration = time.perf_counter() - started
             self._profiles.setdefault(hook, _MutableCallbackStats()).add(duration)
 

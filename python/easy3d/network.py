@@ -429,7 +429,7 @@ class Server:
 
         # SimulationScheduler owns the authoritative fixed-step and validates
         # tick_rate/fail-fast behavior without importing the graphical Game.
-        from .scheduler import SimulationScheduler
+        from .scheduler import ScriptRole, SimulationScheduler
 
         self._native = _NetworkServer(
             bind_address,
@@ -446,6 +446,7 @@ class Server:
             fixed_hz=tick_rate,
             max_catch_up_steps=max_catch_up_steps,
             fail_fast=fail_fast,
+            role=ScriptRole.SERVER,
         )
         self._scene: Scene | None = None
         self._running = False

@@ -59,7 +59,15 @@ from .replication import (
     TransformSnapshot,
 )
 from .scene import Scene
-from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
+from .scheduler import (
+    CallbackStats,
+    SchedulerStats,
+    ScriptCallbackError,
+    ScriptRole,
+    client_only,
+    current_script_role,
+    server_only,
+)
 from .utilities import (
     ClockDomain,
     Cooldown,
@@ -136,6 +144,7 @@ __all__ = [
     "TransformSnapshot",
     "SchedulerStats",
     "ScriptCallbackError",
+    "ScriptRole",
     "Sphere",
     "State",
     "StateMachine",
@@ -156,5 +165,8 @@ __all__ = [
     "load_obj",
     "native_add",
     "network",
+    "client_only",
+    "current_script_role",
+    "server_only",
 ]
 

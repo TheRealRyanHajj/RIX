@@ -1097,3 +1097,15 @@ only from the existing client/server poll path.
 - Primitive positional arguments are intentionally narrow. Decorator sugar,
   richer value types, replicated ownership transfer and RPC response/future
   abstractions can build on this stable schema later.
+
+## ADR-0034: Scheduler-scoped script role guards
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Lifecycle authority is scheduler state, not an entity flag or transport-ID
+guess. Each scheduler has one explicit role and sets a context-local value only
+while invoking a callback. Method decorators declare server/client-only hooks;
+unmarked hooks remain shared and offline schedulers execute neither guarded
+role. Listen hosts retain one server scheduler and a transport-only local
+client, preventing accidental duplicate authority execution.
