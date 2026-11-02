@@ -4607,3 +4607,114 @@ cannot hear the endpoint, so perceptual audibility/quality remains explicitly
 **UNVERIFIED** pending a human headphone/speaker run. Phase 6.3: **DONE**. Exact
 next task: Phase 6.4 — define the import contract, then add glTF/GLB geometry,
 skeletons and animation clips without weakening the existing OBJ path.
+
+## 2026-11-01 — Phase 6.4 glTF/GLB import (in progress)
+
+Approach: pin header-only cgltf v1.15, keep it private to the native asset
+layer, and extend the existing immutable `ModelData` rather than adding a
+parallel renderer resource graph. Import triangle primitives from `.gltf` and
+`.glb`, bake default-scene node transforms for static/base-pose rendering,
+preserve bounded skeleton joints/inverse-bind matrices, and import LINEAR/STEP
+translation/rotation/scale channels as clips with deterministic pose sampling.
+The typed Python surface will expose model/skeleton/clip metadata and sampling;
+`Model(path)` will render the imported base pose through the existing native
+mesh/material lifetime. Embedded material images and runtime skinned-mesh
+deformation are explicit first-contract boundaries, not silent claims.
+
+Affected areas: CMake/dependency notices, native assets/model cache, bindings,
+typed Python assets, renderer material mapping, generated glTF/GLB tests, one
+example, ADR/API/limitations docs. Principal risks are hostile accessor bounds,
+node/normal transforms, joint hierarchy mapping, quaternion interpolation,
+GLB alignment, external-resource diagnostics and preserving every OBJ test.
+Planned verification: Debug/Release/headless CTest, focused asset/primitive
+pytest, full pytest, editable wheel/import, timed D3D11 base-pose example and
+malformed/missing-resource tests.
+
+Completed the bounded import contract with private cgltf commit
+`bbeb5b0b070ddacddac6852fb72143eb68454937`. The native loader accepts `.gltf`
+and `.glb`, validates required extensions/accessors/default scene, bounds both
+declared and actual external buffers, bakes node transforms and inverse-
+transpose normals, generates missing normals, maps authored material factors,
+and routes external base-color images through the existing cache. `ModelCache`,
+`Model`, and triangle-mesh colliders now share OBJ/glTF/GLB assets. One bounded
+skin and LINEAR/STEP TRS clips are retained as Easy3D-owned data with native
+sampling; Python exposes typed copied metadata and local-pose sampling. ADR-0048
+and the API/architecture/limitations documents state that rendering is static
+base pose and does not claim GPU skinning, morphs or embedded-image rendering.
+
+Failures and corrections:
+
+- An ordinary PowerShell editable install selected MinGW from global `PATH` and
+  protobuf 29.3 failed at `generated_message_tctable_lite.cc` with `cannot
+  tail-call: callee required more stack slots than the caller`. The failed tree
+  is preserved at
+  `build/scikit-build/cp311-cp311-win_amd64-mingw-failed-20261101211502`.
+  Re-running from the supported Visual Studio x64 developer environment selected
+  MSVC and succeeded; README/known issues now make this prerequisite explicit.
+- The first Release rebuild inherited a cross-compiler-invalidated cache and
+  regenerated with `EASY3D_BUILD_PYTHON` unset, causing `find_package(pybind11)`
+  to fail. Explicitly reapplying `cmake --preset windows-release` restored the
+  declared `EASY3D_BUILD_PYTHON=OFF` configuration; the clean build and tests
+  then passed.
+- The first example run used an empty HUD label, which the validated UI API
+  correctly rejected. Initializing it with `glTF base pose` fixed the example
+  without weakening HUD validation.
+
+Exact final verification evidence:
+
+```text
+cmake --build build/windows-debug --config Debug --parallel 4
+# exit code 0; easy3d_core and easy3d_gltf_tests linked
+ctest --test-dir build/windows-debug -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 19
+Total Test time (real) = 4.17 sec
+
+cmake --preset windows-release
+cmake --build --preset windows-release --parallel 12
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 19
+Total Test time (real) = 4.34 sec
+
+cmake --build build/windows-headless --config Debug --parallel 12
+ctest --test-dir build/windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 18
+Total Test time (real) = 2.57 sec
+
+# From the Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4123832
+sha256=f15f2f6f92e2634a3a6383b509224052e0609b8965b6073ed080083c52d8dff0
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
+0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_gltf.py tests/python/test_models.py tests/python/test_primitives.py -q
+.........                                                                [100%]
+9 passed in 0.47s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 33%]
+........................................................................ [ 67%]
+....................................................................     [100%]
+212 passed in 31.85s
+
+build\venv311\Scripts\python.exe examples/11_gltf/main.py --seconds 3
+Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
+gltf_example: PASS frames=396 triangles=1 joints=2 clips=1
+Easy3D audio: SDL3 default playback, 48000 Hz stereo float
+
+build\venv311\Scripts\python.exe -m compileall -q python examples/11_gltf tests/python/test_gltf.py
+# exit code 0, no output
+git diff --check
+# exit code 0; only Git LF-to-CRLF working-copy notices
+```
+
+The timed run proves D3D11 creation, native base-pose submission, clip sampling,
+audio/window lifecycle and clean exit on this GUI-capable Windows/NVIDIA host.
+No screenshot or human visual inspection was completed, so appearance and
+animation deformation remain explicitly **UNVERIFIED**; deformation is not an
+implemented feature. Phase 6.4: **DONE**. Exact next task: Phase 6.5 — improve
+asset diagnostics/debug overlays and enforce documented public typing coverage.

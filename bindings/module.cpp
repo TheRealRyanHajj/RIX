@@ -442,7 +442,10 @@ PYBIND11_MODULE(_easy3d, module) {
                                                            material.diffuse_color.g,
                                                            material.diffuse_color.b,
                                                            material.diffuse_color.a),
-                                            texture));
+                                            texture,
+                                            material.metallic,
+                                            material.roughness,
+                                            material.emission));
         }
         return py::make_tuple(model->source_path.string(),
                               model->triangle_count(),
@@ -453,6 +456,64 @@ PYBIND11_MODULE(_easy3d, module) {
     module.def("_load_obj_info",
                [model_info](const std::string& path) {
                    return model_info(easy3d::load_obj(path));
+               },
+               py::arg("path"));
+    module.def("_load_gltf_info",
+               [model_info](const std::string& path) {
+                   const auto model = easy3d::load_gltf(path);
+                   py::object skeleton = py::none();
+                   if (model->skeleton.has_value()) {
+                       py::list joints;
+                       for (const easy3d::SkeletonJoint& joint :
+                            model->skeleton->joints) {
+                           py::tuple inverse_bind(16);
+                           for (std::size_t index = 0;
+                                index < joint.inverse_bind.values.size();
+                                ++index) {
+                               inverse_bind[index] = joint.inverse_bind.values[index];
+                           }
+                           joints.append(py::make_tuple(
+                               joint.name,
+                               joint.parent,
+                               py::make_tuple(joint.local_bind.position.x,
+                                              joint.local_bind.position.y,
+                                              joint.local_bind.position.z),
+                               py::make_tuple(joint.local_bind.rotation.w,
+                                              joint.local_bind.rotation.x,
+                                              joint.local_bind.rotation.y,
+                                              joint.local_bind.rotation.z),
+                               py::make_tuple(joint.local_bind.scale.x,
+                                              joint.local_bind.scale.y,
+                                              joint.local_bind.scale.z),
+                               inverse_bind));
+                       }
+                       skeleton = py::make_tuple(model->skeleton->name, joints);
+                   }
+                   py::list animations;
+                   for (const easy3d::AnimationClip& clip : model->animations) {
+                       py::list channels;
+                       for (const easy3d::AnimationChannel& channel : clip.channels) {
+                           const char* target = "translation";
+                           if (channel.target == easy3d::AnimationTarget::Rotation) {
+                               target = "rotation";
+                           } else if (channel.target ==
+                                      easy3d::AnimationTarget::Scale) {
+                               target = "scale";
+                           }
+                           channels.append(py::make_tuple(
+                               channel.joint_index,
+                               target,
+                               channel.interpolation ==
+                                       easy3d::AnimationInterpolation::Linear
+                                   ? "linear"
+                                   : "step",
+                               channel.times,
+                               channel.values));
+                       }
+                       animations.append(
+                           py::make_tuple(clip.name, clip.duration, channels));
+                   }
+                   return py::make_tuple(model_info(model), skeleton, animations);
                },
                py::arg("path"));
     py::class_<easy3d::ModelCache>(module, "_ModelCache")
@@ -1180,8 +1241,9 @@ PYBIND11_MODULE(_easy3d, module) {
                      component.vertices.push_back({point[0], point[1], point[2]});
                  }
                  if (mesh_path.has_value()) {
+                     easy3d::ModelCache model_cache;
                      const std::shared_ptr<const easy3d::ModelData> model =
-                         easy3d::load_obj(*mesh_path);
+                         model_cache.load(*mesh_path);
                      component.vertices.clear();
                      component.indices.clear();
                      for (const easy3d::ModelPart& part : model->parts) {

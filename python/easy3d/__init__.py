@@ -11,13 +11,20 @@ from ._easy3d import (
     native_add,
 )
 from .assets import (
+    AnimationChannelInfo,
+    AnimationClipInfo,
+    GltfInfo,
     ImageInfo,
     ModelCache,
     ModelInfo,
     ModelMaterialInfo,
     ModelPartInfo,
+    JointPose,
+    SkeletonInfo,
+    SkeletonJointInfo,
     TextureCache,
     load_image,
+    load_gltf,
     load_obj,
 )
 from .audio import Audio, AudioSource, Sound
@@ -113,6 +120,8 @@ from .utilities import (
 from .ui import Anchor, Button, HUD, Panel, Sprite, Stack, Text, UIElement
 
 __all__ = [
+    "AnimationChannelInfo",
+    "AnimationClipInfo",
     "Audio",
     "AudioSource",
     "Anchor",
@@ -147,6 +156,7 @@ __all__ = [
     "EventBus",
     "Game",
     "GraphicsPreset",
+    "GltfInfo",
     "InvalidEntityError",
     "ImageInfo",
     "Input",
@@ -154,6 +164,7 @@ __all__ = [
     "LightComponent",
     "LanDiscoveryAnnouncer",
     "LanDiscoveryBrowser",
+    "JointPose",
     "LAN_NETWORK_CONDITION",
     "ListenServer",
     "MissingAssetError",
@@ -206,6 +217,8 @@ __all__ = [
     "SchedulerStats",
     "ScriptCallbackError",
     "ScriptRole",
+    "SkeletonInfo",
+    "SkeletonJointInfo",
     "Sphere",
     "SpatialInterest",
     "Sound",
@@ -226,6 +239,7 @@ __all__ = [
     "physics",
     "replication",
     "load_image",
+    "load_gltf",
     "load_obj",
     "native_add",
     "network",

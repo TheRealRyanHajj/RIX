@@ -347,7 +347,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **6.1** Add optional lighting upgrades, shadows, PBR/material variants, postprocessing and AA with capability fallbacks and presets.
 - [x] **6.2** Add basic 2D sprites, text, HUD, anchoring/layout and clickable buttons; support overlays above 3D.
 - [x] **6.3** Add audio playback and basic positional audio (choose a lightweight backend through an ADR).
-- [ ] **6.4** Introduce glTF/GLB loader, animation skeleton and animation clips once import needs are defined.
+- [x] **6.4** Introduce glTF/GLB loader, animation skeleton and animation clips once import needs are defined.
 - [ ] **6.5** Add asset error diagnostics, debug overlays, documentation, annotated API examples and type-stub/type-checking coverage.
 - [ ] **6.6** Produce Windows Python 3.11+ wheel matrix only for interpreters actually tested; verify install from wheel on clean environment.
 - [ ] **6.7** Establish versioning, compatibility policy, migration notes and private artifact distribution instructions.

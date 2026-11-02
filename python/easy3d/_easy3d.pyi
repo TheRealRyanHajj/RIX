@@ -128,11 +128,44 @@ _NativeModelInfo = tuple[
     str,
     int,
     list[tuple[str, int, int, int, int]],
-    list[tuple[str, tuple[float, float, float, float], str | None]],
+    list[
+        tuple[
+            str,
+            tuple[float, float, float, float],
+            str | None,
+            float,
+            float,
+            float,
+        ]
+    ],
     list[str],
 ]
 
 def _load_obj_info(path: str) -> _NativeModelInfo: ...
+_NativeSkeletonInfo = tuple[
+    str,
+    list[
+        tuple[
+            str,
+            int,
+            tuple[float, float, float],
+            tuple[float, float, float, float],
+            tuple[float, float, float],
+            tuple[float, ...],
+        ]
+    ],
+]
+_NativeAnimationChannel = tuple[
+    int,
+    str,
+    str,
+    list[float],
+    list[tuple[float, float, float, float]],
+]
+_NativeAnimationInfo = tuple[str, float, list[_NativeAnimationChannel]]
+def _load_gltf_info(
+    path: str,
+) -> tuple[_NativeModelInfo, _NativeSkeletonInfo | None, list[_NativeAnimationInfo]]: ...
 
 class _ModelCache:
     def __init__(self) -> None: ...

@@ -1603,6 +1603,11 @@ private:
                     material.color.b * source.diffuse_color.b,
                     material.color.a * source.diffuse_color.a,
                 };
+                if (source.authored_surface) {
+                    material.metallic = source.metallic;
+                    material.roughness = source.roughness;
+                    material.emission = source.emission;
+                }
                 std::optional<TextureLifetimeManager::Handle> texture;
                 if (source.diffuse_texture.has_value()) {
                     const auto image = scene_textures_.load(*source.diffuse_texture);

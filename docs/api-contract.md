@@ -631,6 +631,53 @@ multiple texture layers) are parsed by the dependency where possible but not
 represented or claimed by Easy3D. Smoothing-group normal generation is not yet
 implemented: provide normals for smooth shading, otherwise output is flat.
 
+## glTF/GLB model and animation assets
+
+```python
+from easy3d.assets import ModelCache, load_gltf
+
+asset = load_gltf("assets/character.glb")
+print(asset.triangle_count)
+if asset.skeleton and asset.animations:
+    local_pose = asset.animations[0].sample(asset.skeleton, 0.5, loop=True)
+
+shared_model = ModelCache().load("assets/character.glb")
+```
+
+`load_gltf` accepts glTF 2.0 `.gltf` and binary `.glb`. It imports the default
+scene's triangle primitives, positions, normalized normals (or generated flat
+normals), first UV/color set, unsigned indices and node transforms. The loader
+bakes node transforms into base-pose geometry while preserving Easy3D's
+right-handed, +Y-up convention. PBR metallic/roughness base color, metallic,
+roughness and emissive factors map to the engine material approximation;
+external PNG/JPEG base-color images are supported through the normal texture
+path. `Model` and triangle-mesh colliders accept these files through the same
+shared `ModelCache` path as OBJ.
+
+`GltfInfo` contains the ordinary immutable model fields alongside its skeletal
+metadata.
+`GltfInfo.skeleton` is `None` or one bounded hierarchy of `SkeletonJointInfo`
+values with parent index, local bind transform and column-major inverse-bind
+matrix. Each `AnimationClipInfo` owns translation, quaternion rotation and
+scale channels using `linear` or `step` interpolation. `sample` accepts a
+finite non-negative time and returns one local `JointPose` per joint, either
+looping by clip duration or clamping at its end. Quaternion interpolation uses
+the normalized shortest path. Sampling does not mutate a scene or model.
+
+The import boundary is deliberately strict: required extensions, non-triangle
+primitives, sparse/invalid accessors, multiple skins, joint matrix transforms,
+non-joint intermediary hierarchy nodes, morph weights and CUBICSPLINE channels
+are errors. The container, total declared buffers, and actual external buffers
+are each bounded to 512 MiB; vertex, joint, clip, channel and key counts also
+have native limits. Buffer/image URIs must be data URIs where supported or local
+filesystem paths; network and `file:` URIs are rejected.
+
+The current renderer draws the imported static base pose. It does not perform
+GPU skin deformation or morph animation. Embedded material images and alpha
+modes are parsed but not rendered (a warning is retained in model metadata);
+use an external PNG/JPEG for the current textured path. See
+`examples/11_gltf/main.py` for a generated, self-contained annotated example.
+
 ## Network transport foundation
 
 `easy3d.network.NetworkTransport` is a runtime-checkable Python protocol for a

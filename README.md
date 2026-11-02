@@ -1,8 +1,8 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–5 and the Phase 6 graphics-preset/native-HUD/audio milestones
-are validated for their documented workloads and limits.
+native core. Phases 0–5 and the Phase 6 graphics-preset/native-HUD/audio/glTF
+milestones are validated for their documented workloads and limits.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -52,6 +52,10 @@ ctest --preset windows-debug --output-on-failure
 
 The presets use Ninja Multi-Config and therefore require `cl.exe` to be on
 `PATH`. They do not install or alter global software.
+
+Do not run the editable build from a shell that selects MinGW. Verify
+`Get-Command cl.exe` resolves inside Visual Studio's x64 developer environment
+before running pip; MSVC is the supported Windows compiler.
 
 ## Interactive graphics smoke test
 
@@ -702,6 +706,22 @@ The initial importer triangulates faces, accepts positions/normals/UVs and
 vertex colors, generates flat normals when absent, splits parts by
 shape/material, and supports MTL diffuse color, dissolve, and `map_Kd`. See the
 API contract for explicit MTL/path limitations.
+
+glTF 2.0 `.gltf` and `.glb` assets use the same cache/model/collider path and
+add typed skeleton plus animation-clip metadata:
+
+```python
+from easy3d.assets import load_gltf
+
+asset = load_gltf("assets/character.glb")
+pose = asset.animations[0].sample(asset.skeleton, 0.5) if asset.skeleton else ()
+```
+
+The current D3D11 renderer draws static base-pose geometry; the sampled pose is
+available to tools/gameplay but GPU skin deformation is not claimed. Run
+`python examples/11_gltf/main.py --seconds 3` for a finite generated-asset
+window test. The supported subset and rejection limits are listed in the API
+contract and known-issues document.
 
 ## Benchmarks
 

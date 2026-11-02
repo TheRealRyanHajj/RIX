@@ -56,6 +56,15 @@ unset(easy3d_saved_skip_install_rules)
 file(WRITE "${tinyobjloader_BINARY_DIR}/cmake_install.cmake"
     "# tinyobjloader is statically linked and not installed.\n")
 
+# cgltf 1.15. Header-only glTF 2.0 parsing remains private to assets.
+FetchContent_Declare(
+    cgltf
+    GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
+    GIT_TAG bbeb5b0b070ddacddac6852fb72143eb68454937
+    GIT_SHALLOW FALSE
+)
+FetchContent_MakeAvailable(cgltf)
+
 # Jolt Physics 5.6.0. The native integration remains private behind Easy3D's
 # world/body handles and is built as a static, CPU-only library.
 set(JPH_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -202,6 +211,7 @@ endif()
 set(easy3d_core_sources
     engine/src/audio/audio.cpp
     engine/src/assets/image.cpp
+    engine/src/assets/gltf.cpp
     engine/src/assets/model.cpp
     engine/src/core/engine.cpp
     engine/src/input/input.cpp
@@ -345,6 +355,7 @@ target_include_directories(easy3d_core
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/engine/src"
+        "${cgltf_SOURCE_DIR}"
 )
 target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader Jolt)
 
@@ -427,6 +438,11 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_model_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_model_tests PRIVATE Easy3D::core)
     add_test(NAME easy3d.model COMMAND easy3d_model_tests)
+
+    add_executable(easy3d_gltf_tests tests/cpp/test_gltf.cpp)
+    target_compile_features(easy3d_gltf_tests PRIVATE cxx_std_20)
+    target_link_libraries(easy3d_gltf_tests PRIVATE Easy3D::core)
+    add_test(NAME easy3d.gltf COMMAND easy3d_gltf_tests)
 
     add_executable(easy3d_render_component_tests tests/cpp/test_render_components.cpp)
     target_compile_features(easy3d_render_component_tests PRIVATE cxx_std_20)

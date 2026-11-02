@@ -18,6 +18,7 @@ applicable notices.
 | Roboto Regular font data (bundled by bgfx) | bgfx pin above | Apache-2.0 | Built-in ASCII HUD text |
 | GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Private native math implementation |
 | tinyobjloader | `2945a967c5303b2c8c14174117c45f3302591150` (`v2.0.0rc13`) | MIT | OBJ/MTL parsing |
+| cgltf | `bbeb5b0b070ddacddac6852fb72143eb68454937` (`v1.15`) | MIT | glTF 2.0/GLB parsing |
 | Jolt Physics | `e77f175595e64cb44218cc9d9d56fc365ad0e36a` (`v5.6.0`) | MIT ([text](JoltPhysics.txt)) | Native rigid-body simulation |
 | GameNetworkingSockets | `d534c19aa760df3fb75fd20db13ba1932b8a5463` (`v1.6.1`) | BSD-3-Clause | Private reliable/unreliable transport backend |
 | Protocol Buffers | `b407e8416e3893036aee5af9a12bd9b6a0e2b2e6` (`v29.3`, C++ `5.29.3`) | BSD-3-Clause | GNS message generation/runtime |

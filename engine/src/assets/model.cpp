@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -57,6 +58,30 @@ struct PartBuilder final {
     if (lowercase(path.extension().string()) != ".obj") {
         throw AssetError("unsupported model format '" + path.extension().string() +
                          "' for asset: " + path.string() + " (supported: .obj)");
+    }
+    std::filesystem::path canonical = std::filesystem::weakly_canonical(path, error);
+    if (error) {
+        throw AssetError("failed to resolve model asset path '" + path.string() +
+                         "': " + error.message());
+    }
+    return canonical;
+}
+
+[[nodiscard]] std::filesystem::path checked_model_path(
+    const std::filesystem::path& path) {
+    if (path.empty()) {
+        throw MissingAssetError("model asset path is empty");
+    }
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+        throw MissingAssetError("model asset does not exist or is not a file: " +
+                                path.string());
+    }
+    const std::string extension = lowercase(path.extension().string());
+    if (extension != ".obj" && extension != ".gltf" && extension != ".glb") {
+        throw AssetError("unsupported model format '" + path.extension().string() +
+                         "' for asset: " + path.string() +
+                         " (supported: .obj, .gltf, .glb)");
     }
     std::filesystem::path canonical = std::filesystem::weakly_canonical(path, error);
     if (error) {
@@ -239,6 +264,23 @@ void ModelData::validate() const {
         }
         part.mesh.validate();
     }
+    for (const ModelMaterial& material : materials) {
+        if (!std::isfinite(material.metallic) || material.metallic < 0.0F ||
+            material.metallic > 1.0F || !std::isfinite(material.roughness) ||
+            material.roughness < 0.04F || material.roughness > 1.0F ||
+            !std::isfinite(material.emission) || material.emission < 0.0F ||
+            material.emission > 100.0F) {
+            throw AssetError("model material surface values are invalid");
+        }
+    }
+    if (skeleton.has_value()) {
+        skeleton->validate();
+        for (const AnimationClip& animation : animations) {
+            animation.validate(skeleton->joints.size());
+        }
+    } else if (!animations.empty()) {
+        throw AssetError("model animations require a skeleton");
+    }
 }
 
 std::size_t ModelData::triangle_count() const noexcept {
@@ -341,14 +383,16 @@ std::shared_ptr<const ModelData> load_obj(const std::filesystem::path& path) {
 }
 
 std::shared_ptr<const ModelData> ModelCache::load(const std::filesystem::path& path) {
-    const std::filesystem::path canonical = checked_obj_path(path);
+    const std::filesystem::path canonical = checked_model_path(path);
     const std::string key = model_cache_key(canonical);
     std::scoped_lock lock(mutex_);
     const auto found = models_.find(key);
     if (found != models_.end()) {
         return found->second;
     }
-    std::shared_ptr<const ModelData> model = load_obj(canonical);
+    const std::string extension = lowercase(canonical.extension().string());
+    std::shared_ptr<const ModelData> model =
+        extension == ".obj" ? load_obj(canonical) : load_gltf(canonical);
     models_.emplace(key, model);
     return model;
 }

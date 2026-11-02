@@ -217,6 +217,23 @@ missing normals become per-triangle flat normals. OBJ V is converted to the
 engine's top-left UV convention. This model cache is graphics-independent so a
 headless process can validate geometry without linking image decoders or bgfx.
 
+The private cgltf parser follows the same conversion boundary for `.gltf` and
+`.glb`. The loader validates the container, required extensions, declared and
+actual external buffer bounds, accessors and scene graph before producing only
+Easy3D-owned values. Default-scene node transforms are baked into base-pose mesh
+vertices and normals. Metallic/roughness/base-color/emission factors enter the
+existing material path; external base-color PNG/JPEG files reuse `TextureCache`.
+The renderer and mesh collider therefore consume glTF through `ModelCache`
+without retaining cgltf pointers or buffer ownership.
+
+A model may also own one validated `Skeleton` and bounded animation clips.
+Joints store parent indices, local bind TRS and inverse-bind matrices. Native
+sampling begins from bind pose, then applies LINEAR or STEP translation,
+shortest-path quaternion rotation and scale channels with explicit loop/clamp
+time policy. Python receives copied typed metadata and sampled local poses. The
+current renderer intentionally submits only static base-pose geometry; it does
+not upload joint palettes or claim runtime skin deformation.
+
 ## Scene activation and construction contexts
 
 There is no implicit process-global scene. `Entity(scene=scene)` is explicit,

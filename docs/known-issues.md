@@ -317,3 +317,24 @@ upstream CMake project requests compatibility with CMake versions older than
 configure. Easy3D does not suppress or patch vendored warnings; a future reviewed
 GLM pin update should re-evaluate them.
 
+## glTF rendering is base-pose only
+
+The glTF/GLB importer exposes validated skeletons, clips and native local-pose
+sampling, but the renderer does not yet upload joint palettes or deform skinned
+vertices. It renders scene-transformed base-pose geometry. Morph targets,
+CUBICSPLINE interpolation, multiple skins, matrix-authored joint transforms and
+required extensions are rejected rather than approximated. Embedded material
+images and alpha modes are not rendered; use external PNG/JPEG base-color maps
+and opaque materials for the supported path. The importer currently accepts one
+skin with at most 256 joints and local relative buffer/image paths or data URIs,
+not network resources.
+
+## Windows editable builds require an MSVC developer environment
+
+If `C:\mingw64\bin` precedes Visual Studio on `PATH`, a plain PowerShell
+`pip install -e '.[dev]'` can make CMake select MinGW. That toolchain is not
+supported and protobuf 29.3 fails its required tail-call compilation. Run setup
+from Visual Studio's x64 Developer PowerShell/Command Prompt and confirm
+`cl.exe` is discoverable before invoking pip. The documented MSVC path succeeds;
+the project does not modify global `PATH` or silently substitute compilers.
+

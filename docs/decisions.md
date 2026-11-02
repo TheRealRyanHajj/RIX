@@ -1308,3 +1308,24 @@ and equal-power pan relative to the active camera. Treat device availability as
 optional: a playback failure logs and disables audio but must not prevent the
 window from running. Streaming codecs, authored buses/effects and HRTF remain a
 future separately specified milestone rather than hidden transitive features.
+
+## ADR-0048: Convert a bounded cgltf subset into Easy3D-owned model and pose data
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Keep cgltf 1.15 as a private, immutable-pinned, header-only parser and convert
+validated glTF 2.0/GLB input immediately into the existing Easy3D-owned mesh and
+material representation. Bake scene-node transforms into static base-pose
+geometry so the current renderer and collider paths need no dependency types or
+new resource lifetime. Preflight container, declared-buffer and actual external-
+buffer sizes before allocation; reject required extensions and unsupported
+animation constructs with path-bearing `AssetError` diagnostics.
+
+Represent at most one skin as a bounded joint hierarchy with local bind TRS and
+inverse-bind matrices. Represent translation, quaternion rotation and scale
+channels as bounded LINEAR/STEP clips and sample them deterministically in the
+native core. Expose typed immutable Python metadata and pose sampling, while
+explicitly leaving GPU skin deformation, morph targets, cubic splines, multiple
+skins and embedded material-image rendering outside this milestone. This makes
+the imported contract useful and testable without implying a skinned renderer.
