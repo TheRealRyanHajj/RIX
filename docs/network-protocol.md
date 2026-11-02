@@ -281,10 +281,29 @@ field state remain visible. There is no acknowledgement/baseline recovery,
 spatial interest grid, extrapolation, prediction or reconciliation in this
 format revision.
 
+## Implemented in Phase 4.4
+
+RPC call type `7` uses the `E3DR` envelope and a bounded payload beginning with
+uint64 network-object ID, uint16 RPC ID, nonzero uint64 caller invocation
+sequence and uint8 argument count. Each positional argument then contains uint8
+declared primitive type, uint32 byte length and exact bytes. Calls have at most
+16 arguments and a 60 KiB total payload. Types and value validation are the
+same as type-5 fields; no callable/class/module name or Python object is sent.
+
+The frozen prefab fingerprint includes RPC ID/name, direction, delivery,
+ownership requirement, rate limit and argument type/bounds. Client-to-server
+calls require a known object, matching direction/schema, a sequence newer than
+that connection's last call and optional exact owner connection. The authority
+drops calls beyond the registered one-second limit without execution. Unknown,
+malformed, wrong-direction, replayed or ownership-tampered calls close the
+offending connection. Server-to-client calls receive the inverse validation.
+Reliable/unreliable is selected by schema and does not change authority.
+
 ## Not implemented yet
 
-There is no rendered-Game attachment, firewall automation, DNS, ownership or
-RPC yet. LAN discovery is IPv4/local-subnet only.
+There is no rendered-Game attachment, firewall automation, DNS, replicated
+ownership transfer or resynchronization yet. LAN discovery is IPv4/local-subnet
+only.
 Transport encryption also does not
 establish account or player identity; authentication remains a separate
 extension boundary.

@@ -102,7 +102,8 @@ are not persisted across server restart. Destroy replicated entities through
 `ServerReplication.despawn()`; externally destroying a mapped authority entity
 does not synthesize a network despawn. Prefab factories must be deterministic
 about entity type but no component values or transforms are serialized yet.
-There is no client ownership, RPC or resync protocol.
+Ownership is authority-local for RPC validation and is not yet replicated to
+clients. There is no ownership transfer request or resync protocol.
 
 Phase 4.2 adds authoritative `NetworkVar` values, but callers must explicitly
 call `ServerReplication.flush()`; it is not scheduler-integrated yet. Values are
@@ -117,6 +118,14 @@ does not hide lifecycle or `NetworkVar` state. Interpolation clamps outside the
 bounded history and does not extrapolate, predict or reconcile. Unreliable
 queue backpressure is counted and skipped rather than disconnecting the peer;
 future baseline recovery/bandwidth scheduling belongs to Phase 5.
+
+Phase 4.4 RPC arguments are limited to the Phase 4.2 primitive wire types and
+positional values; vectors, enums, collections and keyword arguments are not
+yet schema types. Rate limiting uses a one-second authority-local monotonic
+window and drops excess calls without handler execution. Registered handlers
+must still validate gameplay conditions such as distance, cooldown, match state
+and target visibility. Ownership assignment is server-only and is cleared when
+its connection disconnects; it is not yet sent as replica state.
 
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection

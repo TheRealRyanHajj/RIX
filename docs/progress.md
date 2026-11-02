@@ -3499,3 +3499,78 @@ Phase 4.3: **DONE**. Immediate next task: Phase 4.4 — explicit RPC schema,
 direction/ownership authorization, rate limiting, delivery selection and
 defensive bounded parsing. Prediction, reconciliation and spatial interest
 management remain later work.
+
+## 2026-11-01 — Phase 4.4 bounded authorized RPCs (active)
+
+### Bounded approach
+
+Extend the frozen prefab fingerprint with explicit nonzero uint16 RPC IDs,
+unique safe names, one allowed direction, a finite positional argument schema,
+delivery policy, ownership requirement and server rate limit. Reuse the exact
+bounded primitive codecs from `NetworkVar`; do not serialize Python objects,
+keyword dictionaries or class names.
+
+Add one type-7 call frame with object ID, RPC ID, caller-monotonic invocation
+sequence, declared argument count and typed length-prefixed values. Cap argument
+count, each value, total frame and per-poll execution. Client-to-server frames
+must reference a live known object and matching direction; enforce optional
+owner connection equality before execution and a per-connection/object/RPC
+one-second sliding rate window. Malformed, wrong-direction, unknown-schema,
+duplicate-sequence and ownership-tampered calls disconnect; rate excess is
+dropped and counted without executing user code.
+
+Expose explicit authority calls to one/all clients and client calls to the
+server, selecting reliable or unreliable transport from frozen schema. Dispatch
+registered handlers only on the existing owner poll thread and preserve normal
+application messages. Test exact encoding, every primitive argument, both
+directions/delivery modes, ownership denial, rate limiting, duplicate/malformed
+input and real loopback dispatch. Do not grant ownership through RPC, expose
+arbitrary callable lookup, add prediction, or claim gameplay-condition
+validation beyond the registered handler.
+
+### Implemented and verified
+
+- Added canonical per-prefab `RpcSpec` registration with stable uint16 ID,
+  safe name, direction, up to 16 bounded primitive positional arguments,
+  reliable/unreliable delivery, ownership policy and 1–1000 calls/second rate.
+  The full definition participates in the frozen prefab fingerprint; handlers
+  never appear on the wire.
+- Added bounded type-7 frames with object/RPC IDs, caller-monotonic uint64
+  invocation sequence, declared argument count and typed length-prefixed values.
+  Exact bool, int64, finite float64, safe UTF-8 and copied bytes codecs are
+  shared with `NetworkVar`; the total payload is capped at 60 KiB.
+- Added `ClientReplication.call_server`, `ServerReplication.call_client` and
+  `broadcast_rpc`, all selecting delivery from schema. Server and client
+  dispatch occurs synchronously through the existing poll owner.
+- Added authority-only `set_owner`/`owner`; assignments require an established
+  connection and clear on disconnect. Client-to-server receive validates live
+  object, schema, direction, invocation sequence and optional exact owner before
+  a one-second per-connection/object/RPC rate window and handler execution.
+- Malformed, unknown, wrong-direction, duplicate/replayed and ownership-tampered
+  calls disconnect without running a handler. Rate excess is dropped and
+  reported through immutable `RpcStats`.
+- Real GNS loopback tests cover all primitive arguments, reliable client calls,
+  unreliable targeted authority notification, direction rejection, rate
+  suppression, second-client ownership tampering and replay disconnect.
+
+```text
+build\venv311\Scripts\python.exe -m pytest -q tests/python/test_network_rpc.py tests/python/test_network_transform.py tests/python/test_network_vars.py tests/python/test_replication_lifecycle.py
+..............                                                           [100%]
+14 passed in 0.61s
+
+# test_network_rpc.py was invoked 20 consecutive times.
+20/20 RPC iterations passed (3 passed per run)
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 46%]
+........................................................................ [ 92%]
+...........                                                              [100%]
+155 passed in 18.68s
+
+# Native code did not change after the Phase 4.3 matrices in this same session:
+# headless 16/16, Debug 17/17, Release 17/17.
+```
+
+Phase 4.4: **DONE**. Immediate next task: Phase 4.5 — game-context/script
+authority guards and listen-host double-execution prevention around the new
+replication/RPC surface. Replicated match state remains Phase 4.6.

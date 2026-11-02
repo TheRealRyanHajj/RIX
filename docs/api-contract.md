@@ -722,6 +722,31 @@ replaces that tick. `transform_snapshots(id)` exposes the immutable sample
 sequence and `interpolate_transforms(render_tick)` clamps outside history,
 linearly interpolates position and same-sign scale, steps mirrored scale sign
 changes to avoid an invalid zero scale, and normalized-shortest-path
-interpolates rotation before applying only to client replica entities. The optional server
+interpolates rotation before applying only to client replica entities. The
+optional server
 `relevance_filter(connection, object)` suppresses transform frames only; it does
 not despawn the object or hide its lifecycle/NetworkVar state.
+
+`PrefabRegistry.register_rpc(prefab, rpc_id, name, direction, arguments,
+handler, reliable=..., rate_limit=..., require_owner=...)` adds a stable RPC to
+the frozen fingerprint. `arguments` is a tuple of `(NetworkValueType,
+max_bytes)` pairs with at most 16 entries. Supported values are the exact
+bounded primitive `NetworkVar` codecs. Client-to-server handlers receive
+`(authority_entity, sender_connection, *arguments)`; server-to-client handlers
+receive `(client_entity, *arguments)`. Handler lookup is registry-only.
+
+After initial synchronization, `ClientReplication.call_server` validates the
+local direction/schema and queues the declared delivery. The authority requires
+a known live object, newer per-connection invocation sequence, matching
+direction, and—when configured—`ServerReplication.owner(id) == sender`. It then
+enforces the registered per-second sliding limit before calling the handler on
+the server poll thread. `set_owner` accepts established connections only and
+clears ownership on disconnect. Excess calls are counted and dropped;
+malformed, replayed, wrong-direction or ownership-tampered calls disconnect the
+sender.
+
+`ServerReplication.call_client` and `broadcast_rpc` perform the inverse schema
+check and clients reject malformed, replayed or client-to-server calls from the
+authority channel. `RpcStats` reports received/executed/rate-limited counts.
+Reliable delivery does not confer authority. Game-specific validation remains
+the registered handler's responsibility.

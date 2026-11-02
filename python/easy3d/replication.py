@@ -9,6 +9,7 @@ from enum import Enum
 import hashlib
 import math
 import struct
+import time
 import unicodedata
 from weakref import WeakKeyDictionary
 
@@ -35,6 +36,7 @@ _DESPAWN = 3
 _END = 4
 _VALUE = 5
 _TRANSFORM = 6
+_RPC = 7
 _HEADER = struct.Struct("<4sHBBI")
 _BEGIN_PAYLOAD = struct.Struct("<QII16s")
 _SPAWN_PAYLOAD = struct.Struct("<QI")
@@ -46,6 +48,10 @@ _MAX_VALUE_BYTES = 60 * 1024
 _TRANSFORM_PAYLOAD = struct.Struct("<QQQ10f")
 _MAX_TRANSFORM_SAMPLES = 256
 _MAX_FLOAT32 = 3.4028234663852886e38
+_RPC_PREFIX = struct.Struct("<QHQB")
+_RPC_ARGUMENT_PREFIX = struct.Struct("<BI")
+_MAX_RPC_ARGUMENTS = 16
+_MAX_RPC_BYTES = 60 * 1024
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -85,6 +91,11 @@ class NetworkValueType(str, Enum):
     BYTES = "bytes"
 
 
+class RpcDirection(str, Enum):
+    CLIENT_TO_SERVER = "client_to_server"
+    SERVER_TO_CLIENT = "server_to_client"
+
+
 @dataclass(frozen=True, slots=True)
 class NetworkVarSpec:
     id: int
@@ -92,6 +103,31 @@ class NetworkVarSpec:
     type: NetworkValueType
     default: object
     max_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class RpcArgumentSpec:
+    type: NetworkValueType
+    max_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class RpcSpec:
+    id: int
+    name: str
+    direction: RpcDirection
+    arguments: tuple[RpcArgumentSpec, ...]
+    delivery: Delivery
+    rate_limit: int
+    require_owner: bool
+    handler: Callable[..., None]
+
+
+@dataclass(frozen=True, slots=True)
+class RpcStats:
+    received: int
+    executed: int
+    rate_limited: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +287,7 @@ class PrefabRegistry:
         "_fields",
         "_frozen",
         "_names",
+        "_rpcs",
         "_schema_version",
         "_transforms",
     )
@@ -268,6 +305,7 @@ class PrefabRegistry:
         self._capacity = capacity
         self._entries: dict[PrefabId, PrefabRegistration] = {}
         self._fields: dict[PrefabId, dict[int, NetworkVarSpec]] = {}
+        self._rpcs: dict[PrefabId, dict[int, RpcSpec]] = {}
         self._transforms: dict[PrefabId, NetworkTransform] = {}
         self._names: set[str] = set()
         self._frozen = False
@@ -309,6 +347,29 @@ class PrefabRegistry:
                 digest.update(struct.pack("<I", len(default)))
                 digest.update(default)
             digest.update(b"\x01" if registration.id in self._transforms else b"\x00")
+            for spec in self.rpcs(registration.id):
+                rpc_name = spec.name.encode("utf-8")
+                digest.update(
+                    struct.pack(
+                        "<HBBBBH",
+                        spec.id,
+                        list(RpcDirection).index(spec.direction) + 1,
+                        1 if spec.delivery is Delivery.RELIABLE else 2,
+                        1 if spec.require_owner else 0,
+                        len(spec.arguments),
+                        spec.rate_limit,
+                    )
+                )
+                digest.update(struct.pack("<H", len(rpc_name)))
+                digest.update(rpc_name)
+                for argument in spec.arguments:
+                    digest.update(
+                        struct.pack(
+                            "<BH",
+                            list(NetworkValueType).index(argument.type) + 1,
+                            argument.max_bytes,
+                        )
+                    )
         return digest.digest()
 
     def register(
@@ -338,6 +399,7 @@ class PrefabRegistry:
         registration = PrefabRegistration(identifier, name, factory)
         self._entries[identifier] = registration
         self._fields[identifier] = {}
+        self._rpcs[identifier] = {}
         self._names.add(name)
         return registration
 
@@ -406,6 +468,103 @@ class PrefabRegistry:
         registration = self.resolve(prefab_id)
         return registration.id in self._transforms
 
+    def register_rpc(
+        self,
+        prefab_id: PrefabId | int,
+        rpc_id: int,
+        name: str,
+        direction: RpcDirection | str,
+        arguments: tuple[tuple[NetworkValueType | str, int], ...],
+        handler: Callable[..., None],
+        *,
+        reliable: bool = True,
+        rate_limit: int = 10,
+        require_owner: bool = False,
+    ) -> RpcSpec:
+        if self._frozen:
+            raise RuntimeError("prefab registry is frozen")
+        registration = self.resolve(prefab_id)
+        if isinstance(rpc_id, bool) or not isinstance(rpc_id, int):
+            raise TypeError("rpc_id must be an integer")
+        if not 1 <= rpc_id <= 65535:
+            raise ValueError("rpc_id must be a nonzero uint16")
+        if not isinstance(name, str):
+            raise TypeError("RPC name must be a string")
+        encoded_name = name.encode("utf-8")
+        if (
+            not encoded_name
+            or len(encoded_name) > 64
+            or any(unicodedata.category(char).startswith("C") for char in name)
+        ):
+            raise ValueError("RPC name must be 1-64 safe UTF-8 bytes")
+        try:
+            rpc_direction = (
+                direction if isinstance(direction, RpcDirection) else RpcDirection(direction)
+            )
+        except ValueError as error:
+            raise ValueError("unsupported RPC direction") from error
+        if not isinstance(arguments, tuple) or len(arguments) > _MAX_RPC_ARGUMENTS:
+            raise ValueError("RPC arguments must be a tuple with at most 16 entries")
+        argument_specs: list[RpcArgumentSpec] = []
+        for declaration in arguments:
+            if not isinstance(declaration, tuple) or len(declaration) != 2:
+                raise TypeError("each RPC argument must be a (type, max_bytes) tuple")
+            value_type, max_bytes = declaration
+            try:
+                kind = (
+                    value_type
+                    if isinstance(value_type, NetworkValueType)
+                    else NetworkValueType(value_type)
+                )
+            except ValueError as error:
+                raise ValueError("unsupported RPC argument type") from error
+            if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
+                raise TypeError("RPC argument max_bytes must be an integer")
+            if not 1 <= max_bytes <= _MAX_RPC_BYTES:
+                raise ValueError("RPC argument max_bytes is outside the supported bound")
+            argument_specs.append(RpcArgumentSpec(kind, max_bytes))
+        if not callable(handler):
+            raise TypeError("RPC handler must be callable")
+        if not isinstance(reliable, bool) or not isinstance(require_owner, bool):
+            raise TypeError("reliable and require_owner must be bool")
+        if isinstance(rate_limit, bool) or not isinstance(rate_limit, int):
+            raise TypeError("rate_limit must be an integer")
+        if not 1 <= rate_limit <= 1000:
+            raise ValueError("rate_limit must be in [1, 1000]")
+        if rpc_direction is RpcDirection.SERVER_TO_CLIENT and require_owner:
+            raise ValueError("server-to-client RPCs cannot require client ownership")
+        entries = self._rpcs[registration.id]
+        if rpc_id in entries or any(item.name == name for item in entries.values()):
+            raise ValueError("RPC ID and name must both be unique per prefab")
+        if len(entries) >= 256:
+            raise NetworkError("prefab RPC capacity is exhausted")
+        spec = RpcSpec(
+            rpc_id,
+            name,
+            rpc_direction,
+            tuple(argument_specs),
+            Delivery.RELIABLE if reliable else Delivery.UNRELIABLE,
+            rate_limit,
+            require_owner,
+            handler,
+        )
+        entries[rpc_id] = spec
+        return spec
+
+    def rpcs(self, prefab_id: PrefabId | int) -> tuple[RpcSpec, ...]:
+        registration = self.resolve(prefab_id)
+        return tuple(
+            self._rpcs[registration.id][key]
+            for key in sorted(self._rpcs[registration.id])
+        )
+
+    def rpc(self, prefab_id: PrefabId | int, rpc_id: int) -> RpcSpec:
+        registration = self.resolve(prefab_id)
+        try:
+            return self._rpcs[registration.id][rpc_id]
+        except KeyError as error:
+            raise KeyError("unknown prefab RPC") from error
+
     def freeze(self) -> None:
         if not self._entries:
             raise RuntimeError("cannot freeze an empty prefab registry")
@@ -473,18 +632,82 @@ def _transform_frame(
     return _HEADER.pack(_MAGIC, _WIRE_VERSION, _TRANSFORM, 0, len(payload)) + payload
 
 
+def _rpc_value_spec(index: int, argument: RpcArgumentSpec) -> NetworkVarSpec:
+    return NetworkVarSpec(index + 1, f"arg{index}", argument.type, b"", argument.max_bytes)
+
+
+def _rpc_frame(
+    object_id: NetworkObjectId,
+    spec: RpcSpec,
+    sequence: int,
+    arguments: tuple[object, ...],
+) -> bytes:
+    if len(arguments) != len(spec.arguments):
+        raise TypeError("RPC argument count does not match its schema")
+    payload = bytearray(
+        _RPC_PREFIX.pack(object_id.value, spec.id, sequence, len(arguments))
+    )
+    for index, (argument_spec, value) in enumerate(
+        zip(spec.arguments, arguments, strict=True)
+    ):
+        data = _encode_value(_rpc_value_spec(index, argument_spec), value)
+        type_code = list(NetworkValueType).index(argument_spec.type) + 1
+        payload.extend(_RPC_ARGUMENT_PREFIX.pack(type_code, len(data)))
+        payload.extend(data)
+        if len(payload) > _MAX_RPC_BYTES:
+            raise ValueError("RPC frame exceeds its total byte bound")
+    return _HEADER.pack(_MAGIC, _WIRE_VERSION, _RPC, 0, len(payload)) + payload
+
+
+def _decode_rpc_payload(spec: RpcSpec, payload: bytes) -> tuple[int, tuple[object, ...]]:
+    if len(payload) < _RPC_PREFIX.size:
+        raise ValueError("invalid RPC payload size")
+    _object_id, rpc_id, sequence, count = _RPC_PREFIX.unpack_from(payload)
+    if rpc_id != spec.id or sequence == 0 or count != len(spec.arguments):
+        raise ValueError("RPC prefix does not match its schema")
+    offset = _RPC_PREFIX.size
+    values: list[object] = []
+    for index, argument in enumerate(spec.arguments):
+        if offset + _RPC_ARGUMENT_PREFIX.size > len(payload):
+            raise ValueError("truncated RPC argument prefix")
+        type_code, size = _RPC_ARGUMENT_PREFIX.unpack_from(payload, offset)
+        offset += _RPC_ARGUMENT_PREFIX.size
+        declared = list(NetworkValueType).index(argument.type) + 1
+        if type_code != declared or size > argument.max_bytes or offset + size > len(payload):
+            raise ValueError("RPC argument does not match its schema")
+        values.append(
+            _decode_value(
+                _rpc_value_spec(index, argument), payload[offset : offset + size]
+            )
+        )
+        offset += size
+    if offset != len(payload):
+        raise ValueError("RPC payload has trailing bytes")
+    return sequence, tuple(values)
+
+
 def _decode(frame: bytes) -> tuple[int, bytes]:
     if len(frame) < _HEADER.size or len(frame) > _HEADER.size + _VALUE_PREFIX.size + _MAX_VALUE_BYTES:
         raise ValueError("invalid replication frame size")
     magic, version, message_type, flags, size = _HEADER.unpack_from(frame)
     if magic != _MAGIC or version != _WIRE_VERSION or flags != 0:
         raise ValueError("invalid replication frame envelope")
-    if message_type not in (_BEGIN, _SPAWN, _DESPAWN, _END, _VALUE, _TRANSFORM):
+    if message_type not in (
+        _BEGIN,
+        _SPAWN,
+        _DESPAWN,
+        _END,
+        _VALUE,
+        _TRANSFORM,
+        _RPC,
+    ):
         raise ValueError("unknown replication frame type")
-    if message_type not in (_VALUE, _TRANSFORM) and len(frame) > _MAX_FRAME_SIZE:
+    if message_type not in (_VALUE, _TRANSFORM, _RPC) and len(frame) > _MAX_FRAME_SIZE:
         raise ValueError("lifecycle frame exceeds its fixed bound")
     if message_type == _TRANSFORM and len(frame) != _HEADER.size + _TRANSFORM_PAYLOAD.size:
         raise ValueError("invalid transform frame size")
+    if message_type == _RPC and len(frame) > _HEADER.size + _MAX_RPC_BYTES:
+        raise ValueError("RPC frame exceeds its total byte bound")
     if size != len(frame) - _HEADER.size:
         raise ValueError("invalid replication payload length")
     return message_type, frame[_HEADER.size :]
@@ -502,6 +725,7 @@ class ServerReplication:
         "_max_transform_sends",
         "_next_id",
         "_objects",
+        "_owners",
         "_old_connect",
         "_old_disconnect",
         "_old_message",
@@ -511,6 +735,12 @@ class ServerReplication:
         "_last_transform_flush",
         "_last_transform_tick",
         "_relevance_filter",
+        "_rpc_executed",
+        "_rpc_last_sequences",
+        "_rpc_rate_limited",
+        "_rpc_received",
+        "_rpc_sequence",
+        "_rpc_windows",
         "_transform_sequence",
         "_variables",
         "__weakref__",
@@ -549,11 +779,20 @@ class ServerReplication:
         self._max_objects = max_objects
         self._max_transform_sends = max_transform_sends
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
+        self._owners: dict[NetworkObjectId, ConnectionId | None] = {}
         self._next_id = 1
         self._snapshot_epoch = 0
         self._transform_sequence = 0
         self._last_transform_tick: int | None = None
         self._relevance_filter = relevance_filter
+        self._rpc_sequence = 0
+        self._rpc_last_sequences: dict[ConnectionId, int] = {}
+        self._rpc_windows: dict[
+            tuple[ConnectionId, NetworkObjectId, int], deque[float]
+        ] = {}
+        self._rpc_received = 0
+        self._rpc_executed = 0
+        self._rpc_rate_limited = 0
         self._last_transform_flush = TransformFlushStats(0, 0, 0, 0, 0)
         self._variables: dict[tuple[NetworkObjectId, int], NetworkVar] = {}
         self._closed = False
@@ -572,6 +811,12 @@ class ServerReplication:
     @property
     def last_transform_flush(self) -> TransformFlushStats:
         return self._last_transform_flush
+
+    @property
+    def rpc_stats(self) -> RpcStats:
+        return RpcStats(
+            self._rpc_received, self._rpc_executed, self._rpc_rate_limited
+        )
 
     def set_relevance_filter(
         self,
@@ -601,6 +846,7 @@ class ServerReplication:
         self._next_id += 1
         replicated = ReplicatedObject(identifier, registration.id, entity)
         self._objects[identifier] = replicated
+        self._owners[identifier] = None
         for spec in self._registry.variables(registration.id):
             self._variables[(identifier, spec.id)] = NetworkVar(spec, authority=True)
         self._broadcast(
@@ -622,6 +868,9 @@ class ServerReplication:
         except KeyError as error:
             raise KeyError(f"unknown network object ID {identifier.value}") from error
         self._broadcast(_frame(_DESPAWN, _DESPAWN_PAYLOAD.pack(identifier.value)))
+        self._owners.pop(identifier, None)
+        for key in [key for key in self._rpc_windows if key[1] == identifier]:
+            del self._rpc_windows[key]
         for key in [key for key in self._variables if key[0] == identifier]:
             del self._variables[key]
         if replicated.entity.is_alive:
@@ -640,6 +889,77 @@ class ServerReplication:
             return self._variables[(identifier, field_id)]
         except KeyError as error:
             raise KeyError("unknown network object field") from error
+
+    def set_owner(
+        self,
+        object_id: NetworkObjectId | int,
+        connection: ConnectionId | None,
+    ) -> None:
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        if identifier not in self._objects:
+            raise KeyError(f"unknown network object ID {identifier.value}")
+        if connection is not None:
+            if not isinstance(connection, ConnectionId):
+                raise TypeError("connection must be an easy3d.network.ConnectionId")
+            if connection not in self._server.connections:
+                raise ValueError("owner connection is not established")
+        self._owners[identifier] = connection
+
+    def owner(self, object_id: NetworkObjectId | int) -> ConnectionId | None:
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        try:
+            return self._owners[identifier]
+        except KeyError as error:
+            raise KeyError(f"unknown network object ID {identifier.value}") from error
+
+    def call_client(
+        self,
+        connection: ConnectionId,
+        object_id: NetworkObjectId | int,
+        rpc_id: int,
+        *arguments: object,
+    ) -> SendStatus:
+        if connection not in self._server.connections:
+            return SendStatus.INVALID_CONNECTION
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        try:
+            replicated = self._objects[identifier]
+        except KeyError as error:
+            raise KeyError(f"unknown network object ID {identifier.value}") from error
+        spec = self._registry.rpc(replicated.prefab_id, rpc_id)
+        if spec.direction is not RpcDirection.SERVER_TO_CLIENT:
+            raise PermissionError("RPC direction does not allow server-to-client calls")
+        if self._rpc_sequence == 2**64 - 1:
+            raise NetworkError("RPC invocation sequence space is exhausted")
+        self._rpc_sequence += 1
+        return self._server.send(
+            connection,
+            _rpc_frame(identifier, spec, self._rpc_sequence, arguments),
+            delivery=spec.delivery,
+        )
+
+    def broadcast_rpc(
+        self,
+        object_id: NetworkObjectId | int,
+        rpc_id: int,
+        *arguments: object,
+    ) -> dict[ConnectionId, SendStatus]:
+        return {
+            connection: self.call_client(connection, object_id, rpc_id, *arguments)
+            for connection in self._server.connections
+        }
 
     def flush(self) -> int:
         count = 0
@@ -718,6 +1038,7 @@ class ServerReplication:
                 if replicated.entity.is_alive:
                     replicated.entity.destroy()
             self._objects.clear()
+            self._owners.clear()
             self._variables.clear()
         self._closed = True
 
@@ -727,15 +1048,61 @@ class ServerReplication:
             self._old_connect(server, connection)
 
     def _on_disconnect(self, server: Server, event: NetworkEvent) -> None:
+        for identifier, owner in tuple(self._owners.items()):
+            if owner == event.connection:
+                self._owners[identifier] = None
+        self._rpc_last_sequences.pop(event.connection, None)
+        for key in [key for key in self._rpc_windows if key[0] == event.connection]:
+            del self._rpc_windows[key]
         if self._old_disconnect is not None:
             self._old_disconnect(server, event)
 
     def _on_message(self, server: Server, event: NetworkEvent) -> None:
         if event.payload.startswith(_MAGIC):
-            server.disconnect(event.connection, "client-authored replication is forbidden")
+            try:
+                message_type, payload = _decode(event.payload)
+                if message_type != _RPC:
+                    raise PermissionError("client-authored replication is forbidden")
+                self._receive_rpc(event.connection, payload)
+            except (KeyError, PermissionError, TypeError, ValueError) as error:
+                server.disconnect(event.connection, f"invalid RPC: {error}")
             return
         if self._old_message is not None:
             self._old_message(server, event)
+
+    def _receive_rpc(self, connection: ConnectionId, payload: bytes) -> None:
+        if len(payload) < _RPC_PREFIX.size:
+            raise ValueError("truncated RPC prefix")
+        object_value, rpc_id, sequence, _count = _RPC_PREFIX.unpack_from(payload)
+        identifier = NetworkObjectId(object_value)
+        try:
+            replicated = self._objects[identifier]
+        except KeyError as error:
+            raise ValueError("RPC references an unknown object") from error
+        spec = self._registry.rpc(replicated.prefab_id, rpc_id)
+        if spec.direction is not RpcDirection.CLIENT_TO_SERVER:
+            raise PermissionError("RPC direction does not allow client-to-server calls")
+        if spec.require_owner and self._owners[identifier] != connection:
+            raise PermissionError("RPC sender does not own the object")
+        last_sequence = self._rpc_last_sequences.get(connection, 0)
+        if sequence <= last_sequence:
+            raise ValueError("RPC invocation sequence is stale or duplicated")
+        decoded_sequence, arguments = _decode_rpc_payload(spec, payload)
+        if decoded_sequence != sequence:
+            raise ValueError("RPC sequence decoding mismatch")
+        self._rpc_last_sequences[connection] = sequence
+        self._rpc_received += 1
+        key = (connection, identifier, spec.id)
+        window = self._rpc_windows.setdefault(key, deque())
+        now = time.monotonic()
+        while window and window[0] <= now - 1.0:
+            window.popleft()
+        if len(window) >= spec.rate_limit:
+            self._rpc_rate_limited += 1
+            return
+        window.append(now)
+        spec.handler(replicated.entity, connection, *arguments)
+        self._rpc_executed += 1
 
     def _send_snapshot(self, connection: ConnectionId) -> None:
         if self._snapshot_epoch == 2**64 - 1:
@@ -865,6 +1232,10 @@ class ClientReplication:
         "_received_count",
         "_received_transforms",
         "_registry",
+        "_rpc_executed",
+        "_rpc_last_sequence",
+        "_rpc_received",
+        "_rpc_sequence",
         "_scene",
         "_snapshot_epoch",
         "_snapshot_fields",
@@ -921,6 +1292,10 @@ class ClientReplication:
         self._unknown_transforms = 0
         self._history_evictions = 0
         self._interpolated = 0
+        self._rpc_sequence = 0
+        self._rpc_last_sequence = 0
+        self._rpc_received = 0
+        self._rpc_executed = 0
 
     @property
     def objects(self) -> tuple[ReplicatedObject, ...]:
@@ -940,6 +1315,10 @@ class ClientReplication:
             self._interpolated,
         )
 
+    @property
+    def rpc_stats(self) -> RpcStats:
+        return RpcStats(self._rpc_received, self._rpc_executed, 0)
+
     def poll(self, maximum_events: int = 256) -> tuple[NetworkEvent, ...]:
         application: list[NetworkEvent] = []
         for event in self._client.poll(maximum_events):
@@ -949,7 +1328,13 @@ class ClientReplication:
             elif event.type is EventType.MESSAGE and event.payload.startswith(_MAGIC):
                 try:
                     self._apply(event.payload)
-                except (KeyError, TypeError, ValueError, RuntimeError) as error:
+                except (
+                    KeyError,
+                    PermissionError,
+                    TypeError,
+                    ValueError,
+                    RuntimeError,
+                ) as error:
                     if self._client.connection is not None:
                         self._client.disconnect("invalid replication lifecycle frame")
                     self.clear()
@@ -970,6 +1355,34 @@ class ClientReplication:
             return self._variables[(identifier, field_id)]
         except KeyError as error:
             raise KeyError("unknown network object field") from error
+
+    def call_server(
+        self,
+        object_id: NetworkObjectId | int,
+        rpc_id: int,
+        *arguments: object,
+    ) -> SendStatus:
+        if not self._synchronized or self._client.connection is None:
+            return SendStatus.INVALID_CONNECTION
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        try:
+            replicated = self._objects[identifier]
+        except KeyError as error:
+            raise KeyError(f"unknown network object ID {identifier.value}") from error
+        spec = self._registry.rpc(replicated.prefab_id, rpc_id)
+        if spec.direction is not RpcDirection.CLIENT_TO_SERVER:
+            raise PermissionError("RPC direction does not allow client-to-server calls")
+        if self._rpc_sequence == 2**64 - 1:
+            raise NetworkError("RPC invocation sequence space is exhausted")
+        self._rpc_sequence += 1
+        return self._client.send(
+            _rpc_frame(identifier, spec, self._rpc_sequence, arguments),
+            delivery=spec.delivery,
+        )
 
     def transform_snapshots(
         self, object_id: NetworkObjectId | int
@@ -1021,6 +1434,7 @@ class ClientReplication:
         self._expected_count = 0
         self._received_count = 0
         self._synchronized = False
+        self._rpc_last_sequence = 0
 
     def _apply(self, frame: bytes) -> None:
         message_type, payload = _decode(frame)
@@ -1149,6 +1563,28 @@ class ClientReplication:
                 self._history_evictions += 1
             history.append(snapshot)
             return
+        if message_type == _RPC:
+            if not self._synchronized:
+                raise ValueError("RPC arrived before the initial snapshot completed")
+            if len(payload) < _RPC_PREFIX.size:
+                raise ValueError("truncated RPC prefix")
+            object_value, rpc_id, sequence, _count = _RPC_PREFIX.unpack_from(payload)
+            identifier = NetworkObjectId(object_value)
+            try:
+                replicated = self._objects[identifier]
+            except KeyError as error:
+                raise ValueError("RPC references an unknown object") from error
+            spec = self._registry.rpc(replicated.prefab_id, rpc_id)
+            if spec.direction is not RpcDirection.SERVER_TO_CLIENT:
+                raise PermissionError("RPC direction does not allow server-to-client calls")
+            if sequence <= self._rpc_last_sequence:
+                raise ValueError("RPC invocation sequence is stale or duplicated")
+            decoded_sequence, arguments = _decode_rpc_payload(spec, payload)
+            self._rpc_last_sequence = decoded_sequence
+            self._rpc_received += 1
+            spec.handler(replicated.entity, *arguments)
+            self._rpc_executed += 1
+            return
         if len(payload) != _END_PAYLOAD.size or self._snapshot_epoch is None:
             raise ValueError("invalid snapshot-end state or size")
         (epoch,) = _END_PAYLOAD.unpack(payload)
@@ -1177,6 +1613,10 @@ __all__ = [
     "PrefabRegistration",
     "PrefabRegistry",
     "ReplicatedObject",
+    "RpcArgumentSpec",
+    "RpcDirection",
+    "RpcSpec",
+    "RpcStats",
     "ServerReplication",
     "TransformFlushStats",
     "TransformReplicationStats",

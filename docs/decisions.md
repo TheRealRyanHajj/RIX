@@ -1064,3 +1064,36 @@ than disconnecting on replaceable queue pressure.
 - The predicate is a policy seam, not spatial interest management or a scale
   claim. Prediction, reconciliation, baseline ACK/resync and bandwidth priority
   remain Phase 5 work.
+
+## ADR-0033: Frozen directional RPC schema with server ownership gate
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Remote calls must not become arbitrary Python dispatch or transfer gameplay
+authority merely because transport delivery is reliable. Stable cross-process
+registration, bounded arguments, replay defense, ownership enforcement and
+rate policy must be decided before user handlers run.
+
+### Decision
+
+Fingerprint explicit per-prefab RPC IDs/names, one direction, delivery,
+primitive positional argument bounds, optional owner requirement and one-second
+rate limit. Send only object/RPC IDs, a caller-monotonic sequence and typed
+length-prefixed values. Resolve handlers exclusively from the frozen registry.
+Disconnect malformed, unknown, wrong-direction, replayed and ownership-tampered
+calls. Drop rate excess with counters. Keep owner assignment authority-local,
+require an established connection, and clear it on disconnect. Execute handlers
+only from the existing client/server poll path.
+
+### Consequences
+
+- Reliable delivery is an ordering/delivery choice, never an authorization
+  grant; unreliable RPCs still pass the same schema and authority checks.
+- Handler code remains responsible for gameplay predicates such as distance,
+  cooldown, match phase and target visibility.
+- Primitive positional arguments are intentionally narrow. Decorator sugar,
+  richer value types, replicated ownership transfer and RPC response/future
+  abstractions can build on this stable schema later.

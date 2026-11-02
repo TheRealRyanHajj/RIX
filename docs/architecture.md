@@ -419,3 +419,13 @@ quaternions at an explicit render tick. A per-connection predicate provides the
 first relevance seam; it suppresses transform bandwidth only, leaving reliable
 lifecycle and variables coherent. This stage deliberately has no extrapolation,
 client prediction, ownership, reconciliation or spatial index.
+
+RPCs extend the same frozen prefab fingerprint with stable IDs, direction,
+positional primitive bounds, delivery, ownership and rate policy. A call frame
+names only a known network object and RPC ID; it cannot name/import a Python
+callable. The authority validates object/schema/direction, caller-monotonic
+sequence and optional owner connection before rate accounting and handler
+dispatch on the existing poll thread. Client dispatch validates the inverse
+direction and authority sequence. Reliable/unreliable selection changes
+delivery only, never authority. Application handlers remain responsible for
+scene/game-condition validation beyond the engine's schema and ownership gate.
