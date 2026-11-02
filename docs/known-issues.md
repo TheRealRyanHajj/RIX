@@ -168,14 +168,19 @@ defaults, not a proven 32-player capacity budget. `SpatialInterest` filters
 transform updates only: objects remain spawned with reliable fields and hold
 their last received pose outside the radius. Deltas are lossy at 1 cm position,
 1/16000 quaternion-component and 0.001 scale resolution; larger deltas fall back
-to full float32. ACKs and recovery requests consume reliable bandwidth, and no
-cross-object packet aggregation is implemented yet.
+to full float32. Transform ACKs are coalesced into bounded unreliable batches
+because later ACK state supersedes loss; reliable recovery requests remain
+unbatched. Transform updates themselves are still one application message per
+object/connection.
 
 The Phase 5.5 arenas are finite headless loopback rule/integration samples.
 They do not provide rendered weapons, hitboxes/lag compensation, teams beyond
 an integer field, respawn, matchmaking, accounts, persistence, anti-cheat or
 Internet hosting. Their 2/4/8-client passes are correctness evidence, not the
-32-client capacity gate; that belongs to Phase 5.6.
+32-client capacity workload. Phase 5.6 measures a separate dense all-to-all
+headless workload in one process; see `docs/benchmarks.md`. Its aggregate tick
+includes all local client polling and does not claim a 60 Hz 32-player game,
+external-network quality, rendered-client cost, or dedicated-server-only cost.
 
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection

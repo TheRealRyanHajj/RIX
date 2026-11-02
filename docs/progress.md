@@ -4159,3 +4159,76 @@ build\venv311\Scripts\python.exe -m pytest -q
 No native source changed in Phase 5.5. Phase 5.5: **DONE**. Exact next task:
 Phase 5.6 — 8/16/32 simulated clients, measured tick/CPU/RAM/bandwidth/latency
 and correctness with optimization only from observed bottlenecks.
+
+## 2026-11-01 — Phase 5.6 measured 8/16/32-client capacity gate
+
+Added `benchmarks/network_capacity.py`, a finite real-GNS loopback workload
+with 8, 16 and 32 independent clients, one authority-owned moving transform
+and integer field per client, dense all-to-all transform fan-out, periodic
+reliable field updates, complete baseline establishment and final all-replica
+validation. It records aggregate loop median/p95/p99/max, process CPU and
+working set, authority/client application bytes, sentinel observation latency,
+queued/deferred transforms and correctness. `--enforce-budget` applies limits
+set only after the first correct baseline; `docs/benchmarks.md` records the
+machine, workload, exact limits, results and non-claims.
+
+The first 32-client baseline was correct with no deferrals but measured
+47.014/59.397/68.719 ms median/p95/p99, 133.5% process CPU, 100.4 MiB peak RSS
+and 35.851 ms observation p95. Profiling identified repeated delta
+reconstruction, repeated quaternion-length calculation and per-object reliable
+ACK sends. Delta work is now reused only for the exact same immutable baseline
+object, quaternion normalization computes length once, and clients coalesce the
+newest ACK for up to 256 objects into bounded unreliable type-12 batches. Loss
+of replaceable ACK state leaves an older safe baseline; later ACKs restore
+efficiency, while baseline recovery remains reliable. Benchmark latency
+instrumentation now samples one stable object per client but final correctness
+still checks every object/field on every client.
+
+Failures found and corrected:
+
+- The first focused run failed in `_rss_bytes()` with
+  `OSError: GetProcessMemoryInfo failed` because ctypes used a default 32-bit
+  return type for a 64-bit Windows process handle. Explicit Win32 argument and
+  return signatures fixed it; the focused suite passed.
+- The first focused regression command named nonexistent files
+  `test_math.py`, `test_replication_transforms.py` and
+  `test_replication_budget.py`; pytest returned `ERROR: file or directory not
+  found: tests/python/test_math.py`. The command was corrected to the actual
+  filenames and passed 14/14, then 15/15 after budget tests were added.
+- A cProfile run intentionally instrumenting the dense 32-client workload made
+  the final drain exceed its 10-second operational timeout. The profile was
+  still readable and identified the hot paths; this was not recorded as a
+  capacity pass.
+
+Recorded machine: Windows 11 Home 10.0.26200 x64, AMD Ryzen 5 5600G (6 cores,
+12 logical processors, reported 3901 MHz maximum), 34,227,388,416 bytes RAM,
+CPython 3.11 x64. Final exact capacity gate output:
+
+```text
+build\venv311\Scripts\python.exe benchmarks\network_capacity.py --ticks 120 --warmup-ticks 20 --enforce-budget
+clients=8 correct=True tick_ms median/p95/p99/max=4.271/6.044/6.845/7.398 cpu=78.7% rss_peak=32.3MiB server=840.9KiB/s per_client=105.1KiB/s latency_p95=8.570ms deferred=0
+clients=16 correct=True tick_ms median/p95/p99/max=13.875/17.090/17.685/20.074 cpu=103.6% rss_peak=40.2MiB server=1153.8KiB/s per_client=72.1KiB/s latency_p95=9.528ms deferred=0
+clients=32 correct=True tick_ms median/p95/p99/max=49.270/64.640/66.447/77.815 cpu=112.9% rss_peak=55.1MiB server=1288.2KiB/s per_client=40.3KiB/s latency_p95=29.067ms deferred=0
+# exit code 0
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_capacity.py tests/python/test_replication_scaling.py tests/python/test_network_transform.py tests/python/test_math_transform.py -q
+...............                                                          [100%]
+15 passed in 0.52s
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_replication_scaling.py tests/python/test_network_capacity.py -q
+......                                                                   [100%]
+6 passed in 0.45s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 36%]
+........................................................................ [ 72%]
+........................................................                 [100%]
+200 passed in 21.59s
+```
+
+Application byte counters exclude UDP/IP/encryption overhead. The aggregate
+tick includes authority plus every in-process client poll; the 32×32 workload
+meets its declared p99 100 ms, latency p95 50 ms, 200% CPU, 128 MiB RSS,
+80 KiB/tick and zero-deferral gates, but does not claim 60 Hz, external-network
+quality or dedicated-server-only cost. Phase 5.6: **DONE**. Exact next task:
+Phase 5.7 — reconnect/disconnect, input-spam, packet-loss and shutdown soak.

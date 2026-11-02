@@ -309,9 +309,15 @@ class Quat:
         return math.sqrt(self.length_squared)
 
     def normalized(self) -> Quat:
-        if self.length <= 1.0e-12:
+        length = self.length
+        if length <= 1.0e-12:
             raise ValueError("cannot normalize a zero-length Quat")
-        return Quat(self.w / self.length, self.x / self.length, self.y / self.length, self.z / self.length)
+        return Quat(
+            self.w / length,
+            self.x / length,
+            self.y / length,
+            self.z / length,
+        )
 
     def conjugate(self) -> Quat:
         return Quat(self.w, -self.x, -self.y, -self.z)

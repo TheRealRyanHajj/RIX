@@ -320,7 +320,7 @@ contains no entity IDs or state.
 ## Implemented in Phase 5.4
 
 Wire version 2 adds transform ACK type `9`, delta type `10` and baseline request
-type `11`. ACK is reliable and carries object ID plus received transform
+type `11`. A single ACK carries object ID plus received transform
 sequence. A delta is 52 payload/64 total bytes: object ID, new sequence, tick,
 ACKed baseline sequence, then ten signed int16 differences. Position units are
 centimeters, quaternion-component units are 1/16000 and scale units are 1/1000.
@@ -338,6 +338,15 @@ Per-connection token budgets, priority callbacks and spatial-radius observers
 are authority-local scheduling policy and are not serialized. They affect only
 unreliable transform frames. Reliable lifecycle, values and RPCs bypass this
 replaceable-stream budget.
+
+Phase 5.6 adds bounded ACK-batch type `12`: a uint16 count from 1 through 256
+followed by exactly that many type-9 object-ID/sequence pairs. Clients retain
+only the newest pending sequence per object, send one or more batches after a
+poll, and use unreliable delivery because later ACK state supersedes loss. The
+authority continues to accept the single type-9 control, validates every batch
+entry against declared live transforms and never advances from an ACK naming a
+future or absent sent snapshot. Lost ACKs therefore cost compression
+efficiency until a later ACK; they cannot invent an authority baseline.
 
 ## Not implemented yet
 

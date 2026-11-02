@@ -656,6 +656,17 @@ The benchmark validates that every requested cube is either visible or culled
 and that multiple visible compatible cubes use instancing. Results are
 hardware/workload measurements, not general capacity guarantees.
 
+Run the finite 8/16/32-client real-loopback capacity gate with:
+
+```powershell
+python benchmarks/network_capacity.py --ticks 120 --warmup-ticks 20 --enforce-budget
+```
+
+It measures the documented dense all-to-all sample, validates every final
+replica, and enforces post-baseline CPU/RSS/tick/latency/byte budgets. See
+[`docs/benchmarks.md`](docs/benchmarks.md) for the exact machine, workload,
+results and limitations.
+
 ## Scope and license
 
 Advanced lighting, broader asset pipelines, and multiplayer systems remain

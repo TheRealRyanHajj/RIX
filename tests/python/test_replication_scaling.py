@@ -34,6 +34,26 @@ def _pump(server: Server, mirror: replication.ClientReplication, predicate) -> N
     assert predicate()
 
 
+def test_transform_ack_batches_are_bounded_and_exactly_framed() -> None:
+    identifier = replication.NetworkObjectId(1)
+    with pytest.raises(ValueError, match="count"):
+        replication._transform_ack_batch_frame(())
+    with pytest.raises(ValueError, match="count"):
+        replication._transform_ack_batch_frame(
+            tuple((identifier, sequence) for sequence in range(257))
+        )
+
+    frame = replication._transform_ack_batch_frame(
+        ((identifier, 3), (replication.NetworkObjectId(2), 4))
+    )
+    message_type, payload = replication._decode(frame)
+    assert message_type == replication._TRANSFORM_ACK_BATCH
+    assert len(payload) == (
+        replication._TRANSFORM_ACK_BATCH_PREFIX.size
+        + 2 * replication._TRANSFORM_ACK_PAYLOAD.size
+    )
+
+
 def test_acknowledged_transform_deltas_recover_a_missing_baseline() -> None:
     server = _server()
     server.load_scene(Scene("delta authority"))

@@ -337,7 +337,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 - [x] **5.3** Add lag/jitter/loss simulator and test at representative network conditions; document failure behavior.
 - [x] **5.4** Implement bandwidth budgets, entity prioritization, spatial interest and delta-baseline recovery.
 - [x] **5.5** Build cooperative and competitive arena samples with authoritative damage/scoring and match states.
-- [ ] **5.6** Build bots/simulated clients for 8, 16, 32 connections; measure tick cost, CPU/RAM, bandwidth, latency, correctness; optimize measured bottlenecks.
+- [x] **5.6** Build bots/simulated clients for 8, 16, 32 connections; measure tick cost, CPU/RAM, bandwidth, latency, correctness; optimize measured bottlenecks.
 - [ ] **5.7** Soak test reconnects/disconnects, input spam, packet loss and server shutdown.
 
 **Exit gate:** documented sample workload with 32 simulated connections operates within declared CPU/memory/bandwidth budgets on a recorded test machine; no unsupported performance claims. Client prediction and authority demonstrate clear behavior under latency.

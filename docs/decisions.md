@@ -1217,3 +1217,22 @@ playing phase, live/allowed target, distance, team and remaining health before
 changing damage/score or ending the match. Cooperative and competitive samples
 share this authority rule but remain finite headless integration scenarios, not
 combat/anti-cheat or capacity claims.
+
+## ADR-0043: Capacity is a declared workload; transform ACK state is replaceable
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Measure 8/16/32 real loopback connections in one process with one moving object
+per client and dense all-to-all transform fan-out. Record aggregate loop cost,
+process CPU/RSS, application bytes, observation latency and final all-replica
+correctness, then set explicit gates from the first correct baseline. Do not
+present the aggregate loop as a dedicated-server-only or 60 Hz result.
+
+Optimize the measured control-path bottleneck by retaining only the newest
+pending transform ACK per object and coalescing up to 256 entries in one bounded
+type-12 datagram. ACK batches are unreliable and replaceable: loss preserves an
+older safe baseline and a later ACK restores delta efficiency. Baseline
+recovery remains reliable. Cache delta construction only when connections
+reference the identical immutable baseline object, so divergent histories
+cannot be merged merely because their sequence numbers match.

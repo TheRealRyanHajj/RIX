@@ -41,6 +41,7 @@ _RESYNC = 8
 _TRANSFORM_ACK = 9
 _TRANSFORM_DELTA = 10
 _BASELINE_REQUEST = 11
+_TRANSFORM_ACK_BATCH = 12
 _HEADER = struct.Struct("<4sHBBI")
 _BEGIN_PAYLOAD = struct.Struct("<QII16s")
 _SPAWN_PAYLOAD = struct.Struct("<QI")
@@ -52,6 +53,8 @@ _MAX_VALUE_BYTES = 60 * 1024
 _TRANSFORM_PAYLOAD = struct.Struct("<QQQ10f")
 _TRANSFORM_DELTA_PAYLOAD = struct.Struct("<QQQQ10h")
 _TRANSFORM_ACK_PAYLOAD = struct.Struct("<QQ")
+_TRANSFORM_ACK_BATCH_PREFIX = struct.Struct("<H")
+_MAX_TRANSFORM_ACK_BATCH = 256
 _BASELINE_REQUEST_PAYLOAD = struct.Struct("<QQ")
 _MAX_TRANSFORM_SAMPLES = 256
 _MAX_FLOAT32 = 3.4028234663852886e38
@@ -776,6 +779,20 @@ def _transform_ack_frame(object_id: NetworkObjectId, sequence: int) -> bytes:
     return _frame(_TRANSFORM_ACK, _TRANSFORM_ACK_PAYLOAD.pack(object_id.value, sequence))
 
 
+def _transform_ack_batch_frame(
+    acknowledgements: tuple[tuple[NetworkObjectId, int], ...],
+) -> bytes:
+    if not 1 <= len(acknowledgements) <= _MAX_TRANSFORM_ACK_BATCH:
+        raise ValueError("transform ACK batch count is out of bounds")
+    payload = _TRANSFORM_ACK_BATCH_PREFIX.pack(len(acknowledgements)) + b"".join(
+        _TRANSFORM_ACK_PAYLOAD.pack(identifier.value, sequence)
+        for identifier, sequence in acknowledgements
+    )
+    return _HEADER.pack(
+        _MAGIC, _WIRE_VERSION, _TRANSFORM_ACK_BATCH, 0, len(payload)
+    ) + payload
+
+
 def _baseline_request_frame(sequence: int, object_id: NetworkObjectId) -> bytes:
     return _frame(
         _BASELINE_REQUEST,
@@ -863,9 +880,16 @@ def _decode(frame: bytes) -> tuple[int, bytes]:
         _TRANSFORM_ACK,
         _TRANSFORM_DELTA,
         _BASELINE_REQUEST,
+        _TRANSFORM_ACK_BATCH,
     ):
         raise ValueError("unknown replication frame type")
-    if message_type not in (_VALUE, _TRANSFORM, _TRANSFORM_DELTA, _RPC) and len(frame) > _MAX_FRAME_SIZE:
+    if message_type not in (
+        _VALUE,
+        _TRANSFORM,
+        _TRANSFORM_DELTA,
+        _RPC,
+        _TRANSFORM_ACK_BATCH,
+    ) and len(frame) > _MAX_FRAME_SIZE:
         raise ValueError("lifecycle frame exceeds its fixed bound")
     if message_type == _TRANSFORM and len(frame) != _HEADER.size + _TRANSFORM_PAYLOAD.size:
         raise ValueError("invalid transform frame size")
@@ -873,6 +897,12 @@ def _decode(frame: bytes) -> tuple[int, bytes]:
         raise ValueError("invalid transform delta frame size")
     if message_type == _RPC and len(frame) > _HEADER.size + _MAX_RPC_BYTES:
         raise ValueError("RPC frame exceeds its total byte bound")
+    if message_type == _TRANSFORM_ACK_BATCH and len(frame) > (
+        _HEADER.size
+        + _TRANSFORM_ACK_BATCH_PREFIX.size
+        + _MAX_TRANSFORM_ACK_BATCH * _TRANSFORM_ACK_PAYLOAD.size
+    ):
+        raise ValueError("transform ACK batch exceeds its fixed bound")
     if size != len(frame) - _HEADER.size:
         raise ValueError("invalid replication payload length")
     return message_type, frame[_HEADER.size :]
@@ -1226,6 +1256,15 @@ class ServerReplication:
             identifier: _snapshot_from_frame(frame)
             for identifier, frame in frames.items()
         }
+        # A synchronized fan-out commonly has many connections acknowledging
+        # the exact same immutable baseline object. Delta encoding and its
+        # quantized reconstruction are therefore identical. Reuse that work
+        # within this flush; object identity keeps divergent baselines safely
+        # separate even when they happen to carry the same sequence number.
+        delta_cache: dict[
+            tuple[NetworkObjectId, int],
+            tuple[bytes, TransformSnapshot] | None,
+        ] = {}
         tick_delta = (
             1
             if self._last_transform_tick is None
@@ -1272,11 +1311,15 @@ class ServerReplication:
             for _priority, item in relevant:
                 current = snapshots[item.id]
                 baseline = self._transform_baselines.get((connection, item.id))
-                delta = (
-                    None
-                    if baseline is None
-                    else _transform_delta_frame(item.id, current, baseline)
-                )
+                if baseline is None:
+                    delta = None
+                else:
+                    cache_key = (item.id, id(baseline))
+                    if cache_key not in delta_cache:
+                        delta_cache[cache_key] = _transform_delta_frame(
+                            item.id, current, baseline
+                        )
+                    delta = delta_cache[cache_key]
                 is_delta = delta is not None
                 transmitted = current
                 if delta is None:
@@ -1379,6 +1422,8 @@ class ServerReplication:
                     self._receive_resync(event.connection, payload)
                 elif message_type == _TRANSFORM_ACK:
                     self._receive_transform_ack(event.connection, payload)
+                elif message_type == _TRANSFORM_ACK_BATCH:
+                    self._receive_transform_ack_batch(event.connection, payload)
                 elif message_type == _BASELINE_REQUEST:
                     self._receive_baseline_request(event.connection, payload)
                 else:
@@ -1419,6 +1464,29 @@ class ServerReplication:
         if len(payload) != _TRANSFORM_ACK_PAYLOAD.size:
             raise ValueError("invalid transform ACK size")
         object_value, sequence = _TRANSFORM_ACK_PAYLOAD.unpack(payload)
+        self._apply_transform_ack(connection, object_value, sequence)
+
+    def _receive_transform_ack_batch(
+        self, connection: ConnectionId, payload: bytes
+    ) -> None:
+        if connection not in self._ready_connections:
+            raise PermissionError("transform ACK arrived before snapshot readiness")
+        if len(payload) < _TRANSFORM_ACK_BATCH_PREFIX.size:
+            raise ValueError("invalid transform ACK batch size")
+        (count,) = _TRANSFORM_ACK_BATCH_PREFIX.unpack_from(payload)
+        if not 1 <= count <= _MAX_TRANSFORM_ACK_BATCH or len(payload) != (
+            _TRANSFORM_ACK_BATCH_PREFIX.size + count * _TRANSFORM_ACK_PAYLOAD.size
+        ):
+            raise ValueError("invalid transform ACK batch bounds")
+        offset = _TRANSFORM_ACK_BATCH_PREFIX.size
+        for _ in range(count):
+            object_value, sequence = _TRANSFORM_ACK_PAYLOAD.unpack_from(payload, offset)
+            offset += _TRANSFORM_ACK_PAYLOAD.size
+            self._apply_transform_ack(connection, object_value, sequence)
+
+    def _apply_transform_ack(
+        self, connection: ConnectionId, object_value: int, sequence: int
+    ) -> None:
         identifier = NetworkObjectId(object_value)
         replicated = self._objects.get(identifier)
         if replicated is None or not self._registry.has_transform(replicated.prefab_id):
@@ -1623,6 +1691,7 @@ class ClientReplication:
         "_full_transforms",
         "_delta_transforms",
         "_transform_acks_sent",
+        "_pending_transform_acks",
         "_baseline_requests",
         "_baseline_request_sequence",
         "_max_objects",
@@ -1696,6 +1765,7 @@ class ClientReplication:
         self._full_transforms = 0
         self._delta_transforms = 0
         self._transform_acks_sent = 0
+        self._pending_transform_acks: dict[NetworkObjectId, int] = {}
         self._baseline_requests = 0
         self._baseline_request_sequence = 0
         self._rpc_sequence = 0
@@ -1756,6 +1826,7 @@ class ClientReplication:
                     raise NetworkError(f"invalid replication lifecycle frame: {error}") from error
             else:
                 application.append(event)
+        self._flush_transform_acks()
         return tuple(application)
 
     def variable(
@@ -1856,6 +1927,7 @@ class ClientReplication:
         self._objects.clear()
         self._variables.clear()
         self._transform_history.clear()
+        self._pending_transform_acks.clear()
         self._snapshot_epoch = None
         self._snapshot_fields.clear()
         self._expected_count = 0
@@ -1881,13 +1953,29 @@ class ClientReplication:
             if len(history) == self._max_transform_samples:
                 self._history_evictions += 1
             history.append(snapshot)
-        status = self._client.send(
-            _transform_ack_frame(identifier, snapshot.sequence),
-            delivery=Delivery.RELIABLE,
-        )
-        if status is SendStatus.QUEUED:
-            self._transform_acks_sent += 1
+        self._pending_transform_acks[identifier] = snapshot.sequence
         return True
+
+    def _flush_transform_acks(self) -> None:
+        """Coalesce replaceable per-object ACK state into bounded datagrams."""
+
+        if not self._pending_transform_acks or self._client.connection is None:
+            return
+        pending = tuple(sorted(self._pending_transform_acks.items()))
+        for offset in range(0, len(pending), _MAX_TRANSFORM_ACK_BATCH):
+            chunk = pending[offset : offset + _MAX_TRANSFORM_ACK_BATCH]
+            status = self._client.send(
+                _transform_ack_batch_frame(chunk),
+                # Later ACKs supersede lost ACKs; reliable retransmission would
+                # only add stale control traffic to a replaceable state stream.
+                delivery=Delivery.UNRELIABLE,
+            )
+            if status is not SendStatus.QUEUED:
+                break
+            self._transform_acks_sent += len(chunk)
+            for identifier, sequence in chunk:
+                if self._pending_transform_acks.get(identifier) == sequence:
+                    del self._pending_transform_acks[identifier]
 
     def _request_transform_baseline(self, identifier: NetworkObjectId) -> None:
         if self._baseline_request_sequence == 2**64 - 1:
