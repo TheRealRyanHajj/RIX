@@ -194,6 +194,35 @@ mutate the active scene in their callback. `RendererStats.ui_elements` and
 `.ui_draw_calls` expose the last native overlay submission. Run
 `python examples/09_hud/main.py` for the complete resizable example.
 
+## Diagnostics and typing
+
+Validate supported assets without parsing exception strings:
+
+```python
+from easy3d import diagnose_asset
+
+report = diagnose_asset("assets/character.glb")
+if not report.ok:
+    print(report.error_type, report.error_message)
+else:
+    print(report.summary, report.warnings)
+```
+
+`AssetDiagnostic` reports the detected kind, resolved path, counts/dimensions,
+importer warnings, and the exact captured Easy3D exception type/message. The
+check is synchronous and uses the real importer/decoder, so a successful report
+is meaningful and can warm native caches.
+
+Attach `DebugOverlay(game, scene=scene)` before `game.run()` to show smoothed
+FPS, frame time, entity/culling/draw/UI counts, scheduler overruns, callback
+maximum, dropped simulation time, and actually active graphics features through
+the native HUD. Run `python examples/12_diagnostics/main.py --seconds 3` for an
+annotated finite example.
+
+The wheel contains `py.typed` and the native extension stub. Developer tests run
+both strict mypy consumer coverage and `mypy.stubtest` runtime/stub parity; run
+them directly with `python -m mypy` and the command recorded in the API contract.
+
 ## Native WAV and positional audio
 
 Each `Game` owns an `Audio` cache and native mixer. Load uncompressed 16-bit

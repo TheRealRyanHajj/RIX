@@ -4718,3 +4718,90 @@ No screenshot or human visual inspection was completed, so appearance and
 animation deformation remain explicitly **UNVERIFIED**; deformation is not an
 implemented feature. Phase 6.4: **DONE**. Exact next task: Phase 6.5 — improve
 asset diagnostics/debug overlays and enforce documented public typing coverage.
+
+## 2026-11-01 — Phase 6.5 diagnostics, documentation and executable typing contract
+
+Added frozen `AssetDiagnostic` reports and `diagnose_asset()` for the production
+PNG/JPEG, OBJ, glTF and GLB paths. Success reports retain resolved paths,
+dimensions/counts and importer warnings; content/path failures retain the exact
+native exception type and complete message without forcing tools to parse
+console output. Unknown formats produce a structured failure while non-path
+arguments remain programming errors. Validation deliberately uses the real
+synchronous loader rather than a weaker parallel parser.
+
+Added `DebugOverlay`, a normal scheduler-owned entity backed by one native HUD
+panel and label. At a bounded interval it presents smoothed callback FPS, last
+frame time, entity/fixed-tick/draw/instance/culling/UI counts, maximum script
+callback, scheduler overruns/dropped time and the graphics features actually
+active on the adapter. It adds no thread, renderer handle or hidden mutation
+path and supports explicit show/hide. `examples/12_diagnostics/main.py` is an
+annotated finite demonstration of both successful/failing asset reports and the
+live overlay. README, API contract, architecture, limitations and ADR-0049 now
+document the complete contract and its snapshot/synchronous boundaries.
+
+Pinned mypy 1.18.2 in the developer extra, retained the `py.typed` marker, added
+a strict representative public-API consumer fixture and made the default pytest
+suite execute both mypy and stubtest. Stubtest initially found ten real missing
+`_NativeScene` declarations for character-controller/constraint methods plus
+the native enum metadata; all were added precisely. The remaining allowlist is
+limited to pybind11's implementation metaclass and its generic runtime signature
+for two values intentionally non-constructible in typed Python.
+
+Failures and corrections:
+
+- The first strict implementation check inferred `model` as `ModelInfo` in one
+  branch and rejected later `GltfInfo` assignment/fields. Declaring the intended
+  union and retaining a narrowed `gltf` value fixed all three errors.
+- The first stubtest without `--ignore-missing-stub` reported the ten native
+  methods and five enum members missing from `_easy3d.pyi`. Adding their real
+  signatures made full runtime/stub parity pass; no missing API was allowlisted.
+
+Exact verification evidence:
+
+```text
+# Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4124620
+sha256=41586a125a9a00e0b93b967fef189f9cd937409df0c415c238e419a17ac32aa6
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_diagnostics.py tests/python/test_typing.py -q
+....                                                                     [100%]
+4 passed in 5.56s
+
+build\venv311\Scripts\python.exe -m mypy
+Success: no issues found in 2 source files
+
+build\venv311\Scripts\python.exe -m mypy.stubtest easy3d._easy3d --allowlist tests/typecheck/stubtest_allowlist.txt
+Success: no issues found in 1 module
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 33%]
+........................................................................ [ 66%]
+........................................................................ [100%]
+216 passed in 41.42s
+
+ctest --test-dir build/windows-debug -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 19
+Total Test time (real) = 1.28 sec
+
+build\venv311\Scripts\python.exe examples/12_diagnostics/main.py --seconds 3
+Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
+asset: ok=True kind=obj 1 triangles in 1 parts
+asset: ok=False type=MissingAssetError message=...missing.glb
+diagnostics_example: PASS frames=373 entities=5
+Easy3D audio: SDL3 default playback, 48000 Hz stereo float
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples
+# exit code 0, no output
+git diff --check
+# exit code 0; only Git LF-to-CRLF working-copy notices
+```
+
+The timed D3D11 run proves native overlay submission and clean lifecycle on the
+recorded Windows/NVIDIA host, but no screenshot/human appearance inspection was
+performed; visual layout remains **UNVERIFIED**. Phase 6.5: **DONE**. Exact next
+task: Phase 6.6 — build and clean-install wheels only for locally available,
+independently tested CPython 3.11+ interpreters.

@@ -39,6 +39,7 @@ from .components import (
 )
 from . import debug, discovery, network, physics, replication
 from .discovery import LanDiscoveryAnnouncer, LanDiscoveryBrowser
+from .diagnostics import AssetDiagnostic, AssetKind, DebugOverlay, diagnose_asset
 from .entity import Entity
 from ._version import __version__
 from .game import Game, GraphicsPreset, RendererStats
@@ -136,6 +137,8 @@ __all__ = [
     "BackendImpairment",
     "EngineError",
     "AssetError",
+    "AssetDiagnostic",
+    "AssetKind",
     "Camera",
     "CallbackStats",
     "CharacterController",
@@ -144,6 +147,7 @@ __all__ = [
     "ClientMatchState",
     "ClientReplication",
     "DeltaBaselineStats",
+    "DebugOverlay",
     "Collider",
     "CollisionEvent",
     "Constraint",
@@ -235,6 +239,7 @@ __all__ = [
     "engine_version",
     "impair_backend",
     "debug",
+    "diagnose_asset",
     "discovery",
     "physics",
     "replication",

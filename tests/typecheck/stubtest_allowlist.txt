@@ -1,0 +1,7 @@
+# pybind11 runtime classes use pybind11_type; ordinary class stubs intentionally
+# hide that implementation-only metaclass from consumers.
+easy3d\._easy3d\.(Engine|EntityHandle|_ModelCache|_NativeInput|_NativeScene|_NetworkClient|_NetworkServer|_NetworkSimulator|_TextureCache|_TextureColorSpace)
+
+# These two non-constructible pybind values expose only pybind11's generic
+# runtime signature. Keeping them non-constructible in the stub is deliberate.
+easy3d\._easy3d\.(EntityHandle|_NativeInput)\.__init__

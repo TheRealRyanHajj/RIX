@@ -265,6 +265,54 @@ keyboard/controller focus or navigation is implied. `Scene.clear()`,
 wrappers predictably. `RendererStats.ui_elements` and `ui_draw_calls` report the
 last submitted overlay.
 
+## Asset reports, runtime diagnostics, and typing
+
+```python
+from easy3d import DebugOverlay, diagnose_asset
+
+report = diagnose_asset("assets/level.glb")
+if report.ok:
+    print(report.summary, report.triangle_count, report.warnings)
+else:
+    print(report.error_type, report.error_message)
+
+overlay = DebugOverlay(game, scene=scene, refresh_interval=0.25)
+```
+
+`diagnose_asset(path)` recognizes PNG/JPEG, OBJ, glTF and GLB and invokes the
+same synchronous decoder/importer as runtime loading. It returns a frozen
+`AssetDiagnostic` rather than raising for an asset failure. Successful image
+reports contain width/height. Successful model reports contain triangle, part,
+material and, for glTF, joint/clip counts plus importer warnings. Failure
+reports preserve the resolved candidate path, detected kind, concrete
+`AssetError` subclass name and complete message. Passing a non-path value is a
+programming error and still raises `TypeError`; unknown extensions return a
+structured unsupported-format report. Diagnostics do not recursively discover
+assets beyond what the importer itself resolves, and they are not asynchronous.
+
+`DebugOverlay` is an ordinary script entity plus two native HUD elements. It
+samples immutable `Game.renderer_stats`/`scheduler_stats` snapshots at a
+configurable positive interval and displays smoothed FPS, last frame time,
+entities, draw/instance/culling/UI counts, fixed ticks, maximum observed script
+callback, overruns, dropped time and active graphics features. `show()` and
+`hide()` toggle both retained elements. It does not create a profiler thread,
+GPU query, network monitor, log sink or hidden scene mutation path. Construct it
+before running the scene, as shown by `examples/12_diagnostics/main.py`.
+
+Easy3D ships a `py.typed` marker and an explicit `_easy3d.pyi`. Representative
+documented public usage is checked under strict mypy with:
+
+```powershell
+python -m mypy
+python -m mypy.stubtest easy3d._easy3d `
+  --allowlist tests/typecheck/stubtest_allowlist.txt
+```
+
+The narrow stubtest allowlist covers only pybind11's implementation metaclass
+and generic introspection signatures for native values that remain intentionally
+non-constructible in typed Python. Missing methods and runtime/stub signature
+drift are not ignored. Both commands run inside the default pytest suite.
+
 ## Audio assets and voices
 
 `Game.audio.load(path)` accepts RIFF/WAVE files readable by Python's standard

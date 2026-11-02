@@ -110,6 +110,13 @@ class _NetworkSimulator:
 class _TextureColorSpace:
     LINEAR: Final[_TextureColorSpace]
     SRGB: Final[_TextureColorSpace]
+    __members__: Final[dict[str, _TextureColorSpace]]
+    @property
+    def name(self) -> str: ...
+    @property
+    def value(self) -> int: ...
+    def __int__(self) -> int: ...
+    def __index__(self) -> int: ...
 
 def _load_image_info(
     path: str, color_space: _TextureColorSpace
@@ -435,6 +442,24 @@ class _NativeScene:
         position: tuple[float, float, float],
         rotation: tuple[float, float, float, float],
     ) -> None: ...
+    def add_character_controller_component(
+        self,
+        handle: EntityHandle,
+        mode: str,
+        radius: float,
+        height: float,
+        speed: float,
+        acceleration: float,
+        air_control: float,
+        jump_speed: float,
+        max_slope_degrees: float,
+        step_height: float,
+    ) -> None: ...
+    def has_character_controller_component(self, handle: EntityHandle) -> bool: ...
+    def character_controller_component_info(
+        self, handle: EntityHandle
+    ) -> tuple[str, float, float, float, float, float, float, float, float]: ...
+    def remove_character_controller_component(self, handle: EntityHandle) -> None: ...
     def set_character_input(
         self,
         handle: EntityHandle,
@@ -451,6 +476,15 @@ class _NativeScene:
         jump: bool = False,
     ) -> None: ...
     def character_input_sequence(self, handle: EntityHandle) -> int: ...
+    def character_state(
+        self, handle: EntityHandle
+    ) -> tuple[
+        tuple[float, float, float],
+        tuple[float, float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+        bool,
+    ]: ...
     def correct_character(
         self,
         handle: EntityHandle,
@@ -466,6 +500,26 @@ class _NativeScene:
         jump: bool,
         delta_seconds: float,
     ) -> None: ...
+    def teleport_character(
+        self,
+        handle: EntityHandle,
+        position: tuple[float, float, float],
+        heading_degrees: float = 0,
+    ) -> None: ...
+    def add_fixed_constraint(
+        self, first: EntityHandle, second: EntityHandle
+    ) -> object: ...
+    def add_distance_constraint(
+        self,
+        first: EntityHandle,
+        second: EntityHandle,
+        first_anchor: tuple[float, float, float],
+        second_anchor: tuple[float, float, float],
+        minimum_distance: float = -1,
+        maximum_distance: float = -1,
+    ) -> object: ...
+    def remove_constraint(self, handle: object) -> None: ...
+    def has_constraint(self, handle: object) -> bool: ...
     def physics_raycast_all(
         self,
         origin: tuple[float, float, float],

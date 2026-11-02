@@ -164,6 +164,25 @@ are scaled from logical units to framebuffer pixels before entering `Input`.
 Dispatch occurs inside the frame mutation boundary before scheduler phases and
 chooses only the topmost enabled visible button on the press edge.
 
+## Diagnostics and type-contract gates
+
+Structured asset diagnosis deliberately calls the production synchronous
+importer/decoder, then converts its immutable metadata or caught `AssetError`
+into a frozen Python report. It adds no second parser and does not infer success
+from file extension. Runtime diagnostics similarly compose existing boundaries:
+`DebugOverlay` is a normal scheduler-owned entity retaining one native panel
+and text item, and it samples only atomic renderer plus immutable scheduler
+snapshots at a bounded interval. No renderer handle or profiling callback is
+exposed to Python.
+
+The public typing contract has two layers. Typed Python modules plus `py.typed`
+describe the friendly API, while `_easy3d.pyi` describes the private extension
+boundary used by those modules. Strict consumer compilation validates documented
+composition. Stubtest compares the installed runtime module to the extension
+stub and permits only pybind11 metaclass/introspection artifacts through a
+reviewed allowlist. Pytest executes both gates so native binding growth requires
+corresponding stub growth.
+
 ## Native audio ownership and callback boundary
 
 `Engine` owns one platform-neutral `AudioSystem` even in graphics-disabled

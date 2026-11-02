@@ -338,3 +338,18 @@ from Visual Studio's x64 Developer PowerShell/Command Prompt and confirm
 `cl.exe` is discoverable before invoking pip. The documented MSVC path succeeds;
 the project does not modify global `PATH` or silently substitute compilers.
 
+## Diagnostics are snapshots, not a full profiler or asset pipeline
+
+`DebugOverlay` reads the latest completed renderer snapshot and scheduler
+counters on the gameplay thread. Its FPS value is an exponential moving average
+of callback deltas, not a GPU timestamp; callback maximums do not include native
+render/physics/network work. The overlay uses the built-in printable-ASCII HUD
+and fixed pixel dimensions, so the existing Unicode, DPI, wrapping and clipping
+limitations apply.
+
+`diagnose_asset` is synchronous and invokes the real image/model importer. It
+can allocate/decode a valid asset and may warm native caches; do not call it per
+frame or treat it as a background import service. It currently covers the
+PNG/JPEG, OBJ, glTF and GLB public asset paths. WAV validation remains on the
+game-local `Audio.load` API because decoded sounds belong to one native mixer.
+

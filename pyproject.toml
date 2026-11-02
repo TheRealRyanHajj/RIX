@@ -26,6 +26,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
+    "mypy==1.18.2",
     "pytest==9.2.0",
 ]
 
@@ -48,4 +49,11 @@ sdist.include = [
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
 testpaths = ["tests/python"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+follow_imports = "silent"
+warn_unreachable = true
+files = ["python/easy3d/diagnostics.py", "tests/typecheck/public_api.py"]
 

@@ -1329,3 +1329,22 @@ native core. Expose typed immutable Python metadata and pose sampling, while
 explicitly leaving GPU skin deformation, morph targets, cubic splines, multiple
 skins and embedded material-image rendering outside this milestone. This makes
 the imported contract useful and testable without implying a skinned renderer.
+
+## ADR-0049: Compose diagnostics from production snapshots and gate both typing layers
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Do not add a parallel asset validator or profiler subsystem. Structured asset
+reports call the production synchronous loader and preserve caught native error
+type/message plus successful metadata. The runtime overlay is a normal script
+entity retaining existing native HUD elements and reading atomic renderer plus
+immutable scheduler snapshots at a bounded interval. This keeps diagnostics on
+the same validation, ownership and thread boundaries as the systems they report.
+
+Treat typing as an executable contract. Pin mypy in the developer extra, compile
+a representative documented consumer under strict settings, and compare the
+installed pybind runtime with `_easy3d.pyi` using stubtest. Allowlist only the
+implementation metaclass and non-constructible generic-signature artifacts that
+pybind11 exposes to introspection. Run both gates from pytest so future binding
+changes cannot omit stubs unnoticed.
