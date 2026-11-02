@@ -5,12 +5,15 @@ from __future__ import annotations
 import math
 import threading
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 from ._easy3d import Engine
 from .input import Input
 from .scene import Scene
 from .scheduler import SchedulerStats, SimulationScheduler
+
+
+GraphicsPreset = Literal["low", "medium", "high", "ultra"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +24,11 @@ class RendererStats:
     visible_instances: int = 0
     culled_instances: int = 0
     instanced_draw_calls: int = 0
+    enhanced_lighting: bool = False
+    shadows: bool = False
+    postprocessing: bool = False
+    fxaa: bool = False
+    shadow_resolution: int = 0
 
 
 class Game:
@@ -43,6 +51,7 @@ class Game:
         max_frame_seconds: float = 0.25,
         max_catch_up_steps: int = 5,
         fail_fast: bool = True,
+        graphics_preset: GraphicsPreset = "medium",
     ) -> None:
         if not isinstance(title, str) or not title:
             raise ValueError("title must be a non-empty string")
@@ -62,8 +71,19 @@ class Game:
             raise TypeError("fps_limit must be a number")
         if not math.isfinite(fps_limit) or fps_limit < 0:
             raise ValueError("fps_limit must be zero (unlimited) or positive")
+        if graphics_preset not in ("low", "medium", "high", "ultra"):
+            raise ValueError(
+                "graphics_preset must be 'low', 'medium', 'high', or 'ultra'"
+            )
 
-        self._engine = Engine(title, width, height, bool(vsync), float(fps_limit))
+        self._engine = Engine(
+            title,
+            width,
+            height,
+            bool(vsync),
+            float(fps_limit),
+            graphics_preset,
+        )
         self._input = Input(self._engine.input)
         self._scheduler = SimulationScheduler(
             fixed_hz=fixed_hz,
@@ -100,6 +120,12 @@ class Game:
         """Return an atomic snapshot of the most recently completed frame."""
 
         return RendererStats(*self._engine.renderer_stats)
+
+    @property
+    def graphics_preset(self) -> GraphicsPreset:
+        """Requested renderer preset; unsupported runtime features fall back."""
+
+        return self._engine.graphics_preset  # type: ignore[return-value]
 
     @property
     def scheduler_stats(self) -> SchedulerStats:

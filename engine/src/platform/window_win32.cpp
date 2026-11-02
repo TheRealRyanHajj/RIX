@@ -239,6 +239,7 @@ void run_window_loop(const EngineConfig& config,
                                     static_cast<std::uint32_t>(std::max(pixel_width, 1)),
                                     static_cast<std::uint32_t>(std::max(pixel_height, 1)),
                                     config.vsync,
+                                    config.graphics_preset,
                                     config.geometry_diagnostic,
                                     scene);
 

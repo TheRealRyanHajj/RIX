@@ -33,7 +33,7 @@ from . import debug, discovery, network, physics, replication
 from .discovery import LanDiscoveryAnnouncer, LanDiscoveryBrowser
 from .entity import Entity
 from ._version import __version__
-from .game import Game, RendererStats
+from .game import Game, GraphicsPreset, RendererStats
 from .input import ActionState, Binding, Input, PointerState
 from .lights import Light
 from .math import Quat, Vec2, Vec3
@@ -134,6 +134,7 @@ __all__ = [
     "Easing",
     "EventBus",
     "Game",
+    "GraphicsPreset",
     "InvalidEntityError",
     "ImageInfo",
     "Input",

@@ -203,6 +203,34 @@ a coherent, immutable `RendererStats` snapshot from the latest completed frame
 and is safe to sample from a monitoring thread while `Game.run()` has released
 the GIL.
 
+### Graphics presets and material surface controls
+
+`Game(..., graphics_preset=)` accepts exactly `"low"`, `"medium"`, `"high"`,
+or `"ultra"` and defaults to `"medium"`. `Game.graphics_preset` reports that
+requested immutable value. The presets resolve as follows:
+
+| Preset | Enhanced lighting | HDR/tone map | FXAA | Directional shadow map |
+| --- | --- | --- | --- | --- |
+| `low` | no | no | no | no |
+| `medium` | yes | yes | yes | no |
+| `high` | yes | yes | yes | 2048 x 2048 |
+| `ultra` | yes | yes | yes | 4096 x 4096 |
+
+The runtime may disable postprocessing/FXAA if the adapter lacks the required
+RGBA16F color or D24S8 depth render targets. It may disable shadows if the
+R32F/D24S8 targets or requested texture size are unsupported. The corresponding
+`RendererStats` booleans and `shadow_resolution` report active features, not
+merely the preset request. `draw_calls` includes shadow and postprocess passes.
+
+`MeshRenderer.metallic` is finite in `[0,1]`, `roughness` is finite in
+`[0.04,1]`, and `emission` is finite in `[0,100]`; setters raise `ValueError`
+outside those bounds. `casts_shadows` and `receives_shadows` require booleans.
+The lighting model is a compact direct-light metallic/roughness approximation,
+not a full glTF PBR implementation. The first active directional light supplies
+one camera-centered orthographic shadow map with 3x3 PCF. Cascades, point/spot
+light shadows, image-based lighting and alpha-tested shadow casters are not in
+this contract.
+
 ## Input and remappable actions
 
 Each `Game` owns one `game.input` object. Physical control identifiers are

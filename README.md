@@ -147,6 +147,24 @@ The renderer conservatively culls transformed mesh bounds and hardware-instances
 matching shared meshes/materials/textures when their scale is uniform. Read the
 latest completed frame through `game.renderer_stats`.
 
+## Graphics quality presets
+
+Select a capability-checked renderer profile with
+`Game(graphics_preset="low" | "medium" | "high" | "ultra")`. `medium` is the
+default. Low preserves the original direct-lighting path. Medium adds the
+metallic/roughness lighting variant, an HDR intermediate target, tone mapping,
+gamma correction and FXAA. High adds a 2048-pixel directional shadow map;
+Ultra raises it to 4096 pixels. Unsupported render-target formats or texture
+sizes fall back at startup instead of preventing window creation.
+
+`MeshRenderer` exposes `metallic`, `roughness`, `emission`, `casts_shadows` and
+`receives_shadows`. These are deliberately small material controls rather than
+a full authored PBR workflow: this release has no image-based lighting,
+environment probes, cascaded shadows or point-light shadows. Inspect
+`game.renderer_stats.enhanced_lighting`, `.postprocessing`, `.fxaa`, `.shadows`
+and `.shadow_resolution` to distinguish requested settings from features that
+are active on the current adapter.
+
 ## Input and action maps
 
 Keyboard, mouse, and the primary SDL gamepad feed a thread-safe snapshot owned

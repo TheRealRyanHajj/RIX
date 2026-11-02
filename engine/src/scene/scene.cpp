@@ -467,6 +467,26 @@ void World::set_render_lit(const EntityHandle handle, const bool lit) {
     slot.render_component->material.lit = lit;
 }
 
+void World::set_render_surface(const EntityHandle handle,
+                               const float metallic,
+                               const float roughness,
+                               const float emission,
+                               const bool casts_shadows,
+                               const bool receives_shadows) {
+    Slot& slot = require_slot(handle);
+    if (!slot.render_component.has_value()) {
+        throw EngineError("entity does not have a render component");
+    }
+    Material replacement = slot.render_component->material;
+    replacement.metallic = metallic;
+    replacement.roughness = roughness;
+    replacement.emission = emission;
+    replacement.casts_shadows = casts_shadows;
+    replacement.receives_shadows = receives_shadows;
+    replacement.validate();
+    slot.render_component->material = replacement;
+}
+
 void World::remove_render_component(const EntityHandle handle) {
     Slot& slot = require_slot(handle);
     if (!slot.render_component.has_value()) {
@@ -783,6 +803,20 @@ void Scene::set_render_color(const EntityHandle handle, const Color color) {
 
 void Scene::set_render_lit(const EntityHandle handle, const bool lit) {
     world_.set_render_lit(handle, lit);
+}
+
+void Scene::set_render_surface(const EntityHandle handle,
+                               const float metallic,
+                               const float roughness,
+                               const float emission,
+                               const bool casts_shadows,
+                               const bool receives_shadows) {
+    world_.set_render_surface(handle,
+                              metallic,
+                              roughness,
+                              emission,
+                              casts_shadows,
+                              receives_shadows);
 }
 
 void Scene::remove_render_component(const EntityHandle handle) {

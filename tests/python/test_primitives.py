@@ -21,6 +21,20 @@ def test_primitive_entities_and_component_lookup() -> None:
 
     renderer = cube.get_component(MeshRenderer)
     assert isinstance(renderer, MeshRenderer)
+    assert renderer.metallic == 0.0
+    assert renderer.roughness == 0.5
+    renderer.metallic = 0.8
+    renderer.roughness = 0.2
+    renderer.emission = 1.5
+    renderer.casts_shadows = False
+    renderer.receives_shadows = False
+    assert renderer.metallic == pytest.approx(0.8)
+    assert renderer.roughness == pytest.approx(0.2)
+    assert renderer.emission == pytest.approx(1.5)
+    assert not renderer.casts_shadows
+    assert not renderer.receives_shadows
+    with pytest.raises(ValueError, match="metallic"):
+        renderer.metallic = 1.1
     assert renderer.kind == "cube"
     assert renderer.color == pytest.approx((0.2, 0.4, 0.6, 1.0))
     assert renderer.asset is None

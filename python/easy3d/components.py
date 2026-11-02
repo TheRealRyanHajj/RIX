@@ -78,11 +78,19 @@ class MeshRenderer:
 
     def _info(
         self,
-    ) -> tuple[str, tuple[float, float, float, float], str | None, bool]:
-        kind, color, asset, lit = self._entity.scene._native.render_component_info(
-            self._entity._handle
-        )
-        return kind, tuple(color), asset, lit
+    ) -> tuple[
+        str,
+        tuple[float, float, float, float],
+        str | None,
+        bool,
+        float,
+        float,
+        float,
+        bool,
+        bool,
+    ]:
+        info = self._entity.scene._native.render_component_info(self._entity._handle)
+        return (info[0], tuple(info[1]), *info[2:])  # type: ignore[return-value]
 
     @property
     def kind(self) -> RenderKind:
@@ -114,6 +122,70 @@ class MeshRenderer:
             raise TypeError("lit must be a bool")
         self._entity.scene._require_mutable()
         self._entity.scene._native.set_render_lit(self._entity._handle, value)
+
+    def _set_surface(
+        self,
+        *,
+        metallic: float | None = None,
+        roughness: float | None = None,
+        emission: float | None = None,
+        casts_shadows: bool | None = None,
+        receives_shadows: bool | None = None,
+    ) -> None:
+        info = self._info()
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_render_surface(
+            self._entity._handle,
+            info[4] if metallic is None else metallic,
+            info[5] if roughness is None else roughness,
+            info[6] if emission is None else emission,
+            info[7] if casts_shadows is None else casts_shadows,
+            info[8] if receives_shadows is None else receives_shadows,
+        )
+
+    @property
+    def metallic(self) -> float:
+        return self._info()[4]
+
+    @metallic.setter
+    def metallic(self, value: float) -> None:
+        self._set_surface(metallic=value)
+
+    @property
+    def roughness(self) -> float:
+        return self._info()[5]
+
+    @roughness.setter
+    def roughness(self, value: float) -> None:
+        self._set_surface(roughness=value)
+
+    @property
+    def emission(self) -> float:
+        return self._info()[6]
+
+    @emission.setter
+    def emission(self, value: float) -> None:
+        self._set_surface(emission=value)
+
+    @property
+    def casts_shadows(self) -> bool:
+        return self._info()[7]
+
+    @casts_shadows.setter
+    def casts_shadows(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("casts_shadows must be a bool")
+        self._set_surface(casts_shadows=value)
+
+    @property
+    def receives_shadows(self) -> bool:
+        return self._info()[8]
+
+    @receives_shadows.setter
+    def receives_shadows(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("receives_shadows must be a bool")
+        self._set_surface(receives_shadows=value)
 
     def remove(self) -> None:
         self._entity.scene._require_mutable()

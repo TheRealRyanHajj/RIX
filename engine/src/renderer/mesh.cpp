@@ -110,6 +110,15 @@ std::size_t MeshData::triangle_count() const noexcept {
 
 void Material::validate() const {
     (void)color.rgba8();
+    if (!std::isfinite(metallic) || metallic < 0.0F || metallic > 1.0F) {
+        throw std::invalid_argument("material metallic must be in [0, 1]");
+    }
+    if (!std::isfinite(roughness) || roughness < 0.04F || roughness > 1.0F) {
+        throw std::invalid_argument("material roughness must be in [0.04, 1]");
+    }
+    if (!std::isfinite(emission) || emission < 0.0F || emission > 100.0F) {
+        throw std::invalid_argument("material emission must be in [0, 100]");
+    }
 }
 
 void DebugLine::validate() const {

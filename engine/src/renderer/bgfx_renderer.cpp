@@ -13,10 +13,15 @@
 
 #include "fs_solid_color.sc.bin.h"
 #include "fs_textured.sc.bin.h"
+#include "fs_postprocess.sc.bin.h"
+#include "fs_shadow.sc.bin.h"
 #include "vs_solid_color.sc.bin.h"
 #include "vs_solid_color_instanced.sc.bin.h"
 #include "vs_textured.sc.bin.h"
 #include "vs_textured_instanced.sc.bin.h"
+#include "vs_postprocess.sc.bin.h"
+#include "vs_shadow.sc.bin.h"
+#include "vs_shadow_instanced.sc.bin.h"
 
 #include <algorithm>
 #include <array>
@@ -37,13 +42,20 @@
 namespace easy3d::renderer {
 namespace {
 
-constexpr bgfx::ViewId main_view = 0;
+constexpr bgfx::ViewId shadow_view = 0;
+constexpr bgfx::ViewId main_view = 1;
+constexpr bgfx::ViewId postprocess_view = 2;
 
 struct GpuVertex final {
     float position[3];
     float normal[3];
     float uv[2];
     std::uint32_t color;
+};
+
+struct PostprocessVertex final {
+    float position[3];
+    float uv[2];
 };
 
 class GpuMesh final {
@@ -339,6 +351,11 @@ struct SceneBatch final {
     bool instancing_eligible{true};
 };
 
+struct ShadowBatch final {
+    MeshLifetimeManager::Handle mesh;
+    std::vector<glm::mat4> transforms;
+};
+
 struct LightingState final {
     std::array<float, 4> ambient{0.25F, 0.25F, 0.25F, 1.0F};
     std::array<float, 4> directional_direction{0.45F, -1.0F, 0.25F, 0.0F};
@@ -386,6 +403,7 @@ public:
                     const std::uint32_t width,
                     const std::uint32_t height,
                     const bool vsync,
+                    const GraphicsPreset graphics_preset,
                     const bool geometry_diagnostic,
                     const Scene* const scene) {
         // Keep device and swap-chain work on the SDL/window thread. Calling
@@ -400,6 +418,8 @@ public:
         init.swapChain.height = std::max(height, 1U);
         swap_chain_ = init.swapChain;
         reset_flags_ = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+        graphics_preset_ = graphics_preset;
+        graphics_features_ = graphics_features(graphics_preset);
         init.reset = reset_flags_;
 
         if (!bgfx::init(init)) {
@@ -423,19 +443,33 @@ public:
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
                 .end();
+            postprocess_layout_.begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+                .end();
             mesh_resources_ = std::make_unique<MeshLifetimeManager>(layout_);
             texture_resources_ = std::make_unique<TextureLifetimeManager>();
             scene_ = scene;
             create_programs();
+            create_postprocess_target();
+            create_shadow_target();
             if (geometry_diagnostic) {
                 create_geometry_diagnostic();
             }
+            std::cout << "Easy3D graphics: enhanced-lighting="
+                      << (graphics_features_.enhanced_lighting ? "on" : "off")
+                      << ", postprocessing=" << (postprocess_active_ ? "on" : "fallback-off")
+                      << ", fxaa="
+                      << (postprocess_active_ && graphics_features_.fxaa ? "on" : "off")
+                      << ", shadows=" << (shadow_active_ ? "on" : "fallback-off")
+                      << std::endl;
 
             const bgfx::Caps* caps = bgfx::getCaps();
             std::ostringstream message;
             message << "Easy3D renderer: " << bgfx::getRendererName(bgfx::getRendererType())
                     << ", vendor=0x" << std::hex << std::setw(4) << std::setfill('0')
-                    << caps->vendorId << ", device=0x" << std::setw(4) << caps->deviceId;
+                    << caps->vendorId << ", device=0x" << std::setw(4) << caps->deviceId
+                    << std::dec << ", preset=" << graphics_preset_name(graphics_preset_);
             std::cout << message.str() << std::dec << std::endl;
             if (geometry_diagnostic) {
                 std::cout << "Easy3D geometry: GPU meshes=" << mesh_resources_->size()
@@ -455,6 +489,8 @@ public:
             return;
         }
         draw_items_.clear();
+        destroy_postprocess_target();
+        destroy_shadow_target();
         if (texture_resources_) {
             texture_resources_->reset();
             texture_resources_.reset();
@@ -466,6 +502,18 @@ public:
         if (bgfx::isValid(textured_instanced_program_)) {
             bgfx::destroy(textured_instanced_program_);
             textured_instanced_program_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(postprocess_program_)) {
+            bgfx::destroy(postprocess_program_);
+            postprocess_program_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(shadow_instanced_program_)) {
+            bgfx::destroy(shadow_instanced_program_);
+            shadow_instanced_program_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(shadow_program_)) {
+            bgfx::destroy(shadow_program_);
+            shadow_program_ = BGFX_INVALID_HANDLE;
         }
         if (bgfx::isValid(solid_instanced_program_)) {
             bgfx::destroy(solid_instanced_program_);
@@ -503,9 +551,41 @@ public:
             bgfx::destroy(directional_color_);
             directional_color_ = BGFX_INVALID_HANDLE;
         }
+        if (bgfx::isValid(camera_position_)) {
+            bgfx::destroy(camera_position_);
+            camera_position_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(render_params_)) {
+            bgfx::destroy(render_params_);
+            render_params_ = BGFX_INVALID_HANDLE;
+        }
         if (bgfx::isValid(texture_sampler_)) {
             bgfx::destroy(texture_sampler_);
             texture_sampler_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(postprocess_sampler_)) {
+            bgfx::destroy(postprocess_sampler_);
+            postprocess_sampler_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(postprocess_params_)) {
+            bgfx::destroy(postprocess_params_);
+            postprocess_params_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(shadow_sampler_)) {
+            bgfx::destroy(shadow_sampler_);
+            shadow_sampler_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(shadow_matrix_uniform_)) {
+            bgfx::destroy(shadow_matrix_uniform_);
+            shadow_matrix_uniform_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(shadow_params_)) {
+            bgfx::destroy(shadow_params_);
+            shadow_params_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(fallback_shadow_texture_)) {
+            bgfx::destroy(fallback_shadow_texture_);
+            fallback_shadow_texture_ = BGFX_INVALID_HANDLE;
         }
         // Submit one final frame so queued resource releases are observed
         // before the renderer and its D3D11 device are destroyed.
@@ -520,14 +600,23 @@ public:
         swap_chain_.width = width_;
         swap_chain_.height = height_;
         bgfx::reset(reset_flags_, &swap_chain_);
+        create_postprocess_target();
         update_view_rect();
     }
 
     void present() {
         stats_ = {};
+        stats_.enhanced_lighting = graphics_features_.enhanced_lighting;
+        stats_.shadows = shadow_active_;
+        stats_.postprocessing = postprocess_active_;
+        stats_.fxaa = postprocess_active_ && graphics_features_.fxaa;
+        stats_.shadow_resolution = shadow_active_ ? shadow_resolution_ : 0;
         bgfx::touch(main_view);
         if (!draw_items_.empty() || scene_ != nullptr) {
             submit_geometry();
+        }
+        if (postprocess_active_) {
+            submit_postprocess();
         }
         bgfx::frame();
     }
@@ -584,6 +673,24 @@ private:
             fs_textured_dxbc,
             static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
             "instanced textured");
+        postprocess_program_ = make_program(
+            vs_postprocess_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_postprocess_dxbc)),
+            fs_postprocess_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_postprocess_dxbc)),
+            "postprocess");
+        shadow_program_ = make_program(
+            vs_shadow_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_shadow_dxbc)),
+            fs_shadow_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_shadow_dxbc)),
+            "shadow");
+        shadow_instanced_program_ = make_program(
+            vs_shadow_instanced_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_shadow_instanced_dxbc)),
+            fs_shadow_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_shadow_dxbc)),
+            "instanced shadow");
         material_color_ = bgfx::createUniform("u_materialColor", bgfx::UniformType::Vec4);
         material_params_ = bgfx::createUniform("u_materialParams", bgfx::UniformType::Vec4);
         normal_matrix_ = bgfx::createUniform("u_normalMatrix", bgfx::UniformType::Vec4, 3);
@@ -592,13 +699,191 @@ private:
             bgfx::createUniform("u_directionalLight", bgfx::UniformType::Vec4);
         directional_color_ =
             bgfx::createUniform("u_directionalColor", bgfx::UniformType::Vec4);
+        camera_position_ =
+            bgfx::createUniform("u_cameraPosition", bgfx::UniformType::Vec4);
+        render_params_ = bgfx::createUniform("u_renderParams", bgfx::UniformType::Vec4);
         texture_sampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+        postprocess_sampler_ =
+            bgfx::createUniform("s_sceneColor", bgfx::UniformType::Sampler);
+        postprocess_params_ =
+            bgfx::createUniform("u_postParams", bgfx::UniformType::Vec4);
+        shadow_sampler_ = bgfx::createUniform("s_shadowMap", bgfx::UniformType::Sampler);
+        shadow_matrix_uniform_ =
+            bgfx::createUniform("u_shadowMatrix", bgfx::UniformType::Mat4);
+        shadow_params_ = bgfx::createUniform("u_shadowParams", bgfx::UniformType::Vec4);
         if (!bgfx::isValid(material_color_) || !bgfx::isValid(material_params_) ||
             !bgfx::isValid(normal_matrix_) || !bgfx::isValid(ambient_light_) ||
             !bgfx::isValid(directional_light_) || !bgfx::isValid(directional_color_) ||
-            !bgfx::isValid(texture_sampler_)) {
+            !bgfx::isValid(camera_position_) || !bgfx::isValid(render_params_) ||
+            !bgfx::isValid(texture_sampler_) || !bgfx::isValid(postprocess_sampler_) ||
+            !bgfx::isValid(postprocess_params_) || !bgfx::isValid(shadow_sampler_) ||
+            !bgfx::isValid(shadow_matrix_uniform_) || !bgfx::isValid(shadow_params_)) {
             throw EngineError("bgfx failed to create Easy3D material uniforms");
         }
+    }
+
+    void destroy_postprocess_target() noexcept {
+        if (bgfx::isValid(scene_framebuffer_)) {
+            bgfx::destroy(scene_framebuffer_);
+        }
+        scene_framebuffer_ = BGFX_INVALID_HANDLE;
+        scene_color_ = BGFX_INVALID_HANDLE;
+        postprocess_active_ = false;
+        bgfx::setViewFrameBuffer(main_view, BGFX_INVALID_HANDLE);
+    }
+
+    void create_postprocess_target() {
+        destroy_postprocess_target();
+        if (!graphics_features_.postprocessing) {
+            return;
+        }
+        constexpr std::uint64_t color_flags =
+            BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+        constexpr std::uint64_t depth_flags = BGFX_TEXTURE_RT;
+        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA16F, color_flags) ||
+            !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D24S8, depth_flags)) {
+            return;
+        }
+        const bgfx::TextureHandle color = bgfx::createTexture2D(
+            view_extent(width_),
+            view_extent(height_),
+            false,
+            1,
+            bgfx::TextureFormat::RGBA16F,
+            color_flags);
+        const bgfx::TextureHandle depth = bgfx::createTexture2D(
+            view_extent(width_),
+            view_extent(height_),
+            false,
+            1,
+            bgfx::TextureFormat::D24S8,
+            depth_flags);
+        if (!bgfx::isValid(color) || !bgfx::isValid(depth)) {
+            if (bgfx::isValid(color)) {
+                bgfx::destroy(color);
+            }
+            if (bgfx::isValid(depth)) {
+                bgfx::destroy(depth);
+            }
+            return;
+        }
+        const std::array<bgfx::TextureHandle, 2> attachments{color, depth};
+        const bgfx::FrameBufferHandle framebuffer =
+            bgfx::createFrameBuffer(static_cast<std::uint8_t>(attachments.size()),
+                                    attachments.data(),
+                                    true);
+        if (!bgfx::isValid(framebuffer)) {
+            bgfx::destroy(color);
+            bgfx::destroy(depth);
+            return;
+        }
+        scene_color_ = color;
+        scene_framebuffer_ = framebuffer;
+        postprocess_active_ = true;
+        bgfx::setViewFrameBuffer(main_view, scene_framebuffer_);
+    }
+
+    void destroy_shadow_target() noexcept {
+        if (bgfx::isValid(shadow_framebuffer_)) {
+            bgfx::destroy(shadow_framebuffer_);
+        }
+        shadow_framebuffer_ = BGFX_INVALID_HANDLE;
+        shadow_texture_ = BGFX_INVALID_HANDLE;
+        shadow_active_ = false;
+        bgfx::setViewFrameBuffer(shadow_view, BGFX_INVALID_HANDLE);
+    }
+
+    void create_shadow_target() {
+        destroy_shadow_target();
+        const std::array<std::uint8_t, 4> white{255, 255, 255, 255};
+        fallback_shadow_texture_ = bgfx::createTexture2D(
+            1,
+            1,
+            false,
+            1,
+            bgfx::TextureFormat::RGBA8,
+            BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
+            bgfx::copy(white.data(), static_cast<std::uint32_t>(white.size())));
+        if (!bgfx::isValid(fallback_shadow_texture_)) {
+            throw EngineError("bgfx failed to create the shadow fallback texture");
+        }
+        if (!graphics_features_.shadows) {
+            return;
+        }
+        const bgfx::Caps* caps = bgfx::getCaps();
+        const std::uint16_t resolution = static_cast<std::uint16_t>(std::min(
+            static_cast<std::uint32_t>(graphics_features_.shadow_resolution),
+            caps->limits.maxTextureSize));
+        constexpr std::uint64_t color_flags =
+            BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+            BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+        constexpr std::uint64_t depth_flags = BGFX_TEXTURE_RT;
+        if (resolution == 0 ||
+            !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::R32F, color_flags) ||
+            !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D24S8, depth_flags)) {
+            return;
+        }
+        const bgfx::TextureHandle color = bgfx::createTexture2D(
+            resolution, resolution, false, 1, bgfx::TextureFormat::R32F, color_flags);
+        const bgfx::TextureHandle depth = bgfx::createTexture2D(
+            resolution, resolution, false, 1, bgfx::TextureFormat::D24S8, depth_flags);
+        if (!bgfx::isValid(color) || !bgfx::isValid(depth)) {
+            if (bgfx::isValid(color)) {
+                bgfx::destroy(color);
+            }
+            if (bgfx::isValid(depth)) {
+                bgfx::destroy(depth);
+            }
+            return;
+        }
+        const std::array<bgfx::TextureHandle, 2> attachments{color, depth};
+        const bgfx::FrameBufferHandle framebuffer =
+            bgfx::createFrameBuffer(static_cast<std::uint8_t>(attachments.size()),
+                                    attachments.data(),
+                                    true);
+        if (!bgfx::isValid(framebuffer)) {
+            bgfx::destroy(color);
+            bgfx::destroy(depth);
+            return;
+        }
+        shadow_resolution_ = resolution;
+        shadow_texture_ = color;
+        shadow_framebuffer_ = framebuffer;
+        shadow_active_ = true;
+        bgfx::setViewFrameBuffer(shadow_view, shadow_framebuffer_);
+        bgfx::setViewRect(shadow_view, 0, 0, resolution, resolution);
+        bgfx::setViewClear(
+            shadow_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0F, 0);
+    }
+
+    void submit_postprocess() {
+        constexpr std::array<PostprocessVertex, 3> vertices{{
+            {{-1.0F, -1.0F, 0.0F}, {0.0F, 1.0F}},
+            {{3.0F, -1.0F, 0.0F}, {2.0F, 1.0F}},
+            {{-1.0F, 3.0F, 0.0F}, {0.0F, -1.0F}},
+        }};
+        if (bgfx::getAvailTransientVertexBuffer(
+                static_cast<std::uint32_t>(vertices.size()), postprocess_layout_) <
+            vertices.size()) {
+            return;
+        }
+        bgfx::TransientVertexBuffer buffer;
+        bgfx::allocTransientVertexBuffer(
+            &buffer, static_cast<std::uint32_t>(vertices.size()), postprocess_layout_);
+        std::memcpy(buffer.data, vertices.data(), sizeof(vertices));
+        const std::array<float, 4> params{
+            1.0F / static_cast<float>(width_),
+            1.0F / static_cast<float>(height_),
+            1.0F,
+            graphics_features_.fxaa ? 1.0F : 0.0F,
+        };
+        bgfx::touch(postprocess_view);
+        bgfx::setVertexBuffer(0, &buffer);
+        bgfx::setTexture(0, postprocess_sampler_, scene_color_);
+        bgfx::setUniform(postprocess_params_, params.data());
+        bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+        bgfx::submit(postprocess_view, postprocess_program_);
+        ++stats_.draw_calls;
     }
 
     [[nodiscard]] static ImageData checker_image() {
@@ -664,6 +949,11 @@ private:
 
     void update_view_rect() const {
         bgfx::setViewRect(main_view, 0, 0, view_extent(width_), view_extent(height_));
+        bgfx::setViewRect(postprocess_view,
+                          0,
+                          0,
+                          view_extent(width_),
+                          view_extent(height_));
     }
 
     [[nodiscard]] static glm::mat4 model_matrix(const Transform& transform) {
@@ -722,7 +1012,19 @@ private:
         const std::array<float, 4> color = {
             material.color.r, material.color.g, material.color.b, material.color.a};
         const std::array<float, 4> material_params = {
-            material.lit ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F};
+            material.lit ? 1.0F : 0.0F,
+            material.metallic,
+            material.roughness,
+            material.emission};
+        const std::array<float, 4> render_params = {
+            graphics_features_.enhanced_lighting ? 1.0F : 0.0F,
+            shadow_active_ && material.receives_shadows ? 1.0F : 0.0F,
+            0.0F,
+            0.0F};
+        const float inverse_shadow_size =
+            shadow_active_ ? 1.0F / static_cast<float>(shadow_resolution_) : 1.0F;
+        const std::array<float, 4> shadow_params = {
+            inverse_shadow_size, inverse_shadow_size, 0.0015F, 0.0F};
         const glm::mat3 normal = glm::inverseTranspose(glm::mat3(transform));
         const std::array<float, 12> normal_rows = {
             normal[0][0], normal[1][0], normal[2][0], 0.0F,
@@ -736,6 +1038,13 @@ private:
         bgfx::setUniform(ambient_light_, lighting_.ambient.data());
         bgfx::setUniform(directional_light_, lighting_.directional_direction.data());
         bgfx::setUniform(directional_color_, lighting_.directional_color.data());
+        bgfx::setUniform(camera_position_, camera_position_value_.data());
+        bgfx::setUniform(render_params_, render_params.data());
+        bgfx::setUniform(shadow_matrix_uniform_, glm::value_ptr(shadow_matrix_));
+        bgfx::setUniform(shadow_params_, shadow_params.data());
+        bgfx::setTexture(1,
+                         shadow_sampler_,
+                         shadow_active_ ? shadow_texture_ : fallback_shadow_texture_);
     }
 
     void submit_draw(const MeshLifetimeManager::Handle mesh,
@@ -772,6 +1081,126 @@ private:
         SceneBatch batch{mesh, material, texture, {}, instancing_eligible};
         batch.transforms.push_back(transform);
         batches.push_back(std::move(batch));
+    }
+
+    static void add_to_shadow_batch(std::vector<ShadowBatch>& batches,
+                                    const MeshLifetimeManager::Handle mesh,
+                                    const glm::mat4& transform) {
+        const auto found = std::find_if(
+            batches.begin(), batches.end(),
+            [mesh](const ShadowBatch& batch) { return batch.mesh == mesh; });
+        if (found != batches.end()) {
+            found->transforms.push_back(transform);
+            return;
+        }
+        batches.push_back({mesh, {transform}});
+    }
+
+    void submit_shadow_batch(const ShadowBatch& batch) {
+        constexpr std::uint16_t instance_stride = sizeof(float) * 16;
+        if (batch.transforms.size() == 1) {
+            bgfx::setTransform(glm::value_ptr(batch.transforms.front()));
+            mesh_resources_->bind(batch.mesh);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_Z |
+                           BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CW);
+            bgfx::submit(shadow_view, shadow_program_);
+            ++stats_.draw_calls;
+            return;
+        }
+        std::size_t offset = 0;
+        while (offset < batch.transforms.size()) {
+            const auto requested = static_cast<std::uint32_t>(std::min(
+                batch.transforms.size() - offset,
+                static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())));
+            const std::uint32_t available =
+                bgfx::getAvailInstanceDataBuffer(requested, instance_stride);
+            if (available == 0) {
+                return;
+            }
+            bgfx::InstanceDataBuffer instances;
+            bgfx::allocInstanceDataBuffer(&instances, available, instance_stride);
+            std::uint8_t* destination = instances.data;
+            for (std::uint32_t index = 0; index < available; ++index) {
+                std::memcpy(destination,
+                            glm::value_ptr(batch.transforms[offset + index]),
+                            instance_stride);
+                destination += instance_stride;
+            }
+            mesh_resources_->bind(batch.mesh);
+            bgfx::setInstanceDataBuffer(&instances);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_Z |
+                           BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CW);
+            bgfx::submit(shadow_view, shadow_instanced_program_);
+            ++stats_.draw_calls;
+            ++stats_.instanced_draw_calls;
+            offset += available;
+        }
+    }
+
+    void submit_shadows(const Camera& active_camera) {
+        if (!shadow_active_) {
+            shadow_matrix_ = glm::mat4(1.0F);
+            return;
+        }
+        const Vec3 direction{lighting_.directional_direction[0],
+                             lighting_.directional_direction[1],
+                             lighting_.directional_direction[2]};
+        const Vec3 target = active_camera.position + active_camera.forward() * 12.0F;
+        Camera light_camera = Camera::look_at(target - direction * 45.0F, target);
+        light_camera.projection = CameraProjection::Orthographic;
+        light_camera.orthographic_height = 50.0F;
+        light_camera.near_plane = 0.1F;
+        light_camera.far_plane = 100.0F;
+        const Matrix4 view = light_camera.view_matrix();
+        const Matrix4 projection = light_camera.projection_matrix(
+            1.0F, bgfx::getCaps()->homogeneousDepth);
+        bgfx::setViewTransform(shadow_view, view.data(), projection.data());
+        bgfx::touch(shadow_view);
+
+        const float sy = bgfx::getCaps()->originBottomLeft ? 0.5F : -0.5F;
+        const float sz = bgfx::getCaps()->homogeneousDepth ? 0.5F : 1.0F;
+        const float tz = bgfx::getCaps()->homogeneousDepth ? 0.5F : 0.0F;
+        glm::mat4 bias{1.0F};
+        bias[0][0] = 0.5F;
+        bias[1][1] = sy;
+        bias[2][2] = sz;
+        bias[3][0] = 0.5F;
+        bias[3][1] = 0.5F;
+        bias[3][2] = tz;
+        shadow_matrix_ = bias * glm::make_mat4(projection.data()) *
+                         glm::make_mat4(view.data());
+
+        std::vector<ShadowBatch> batches;
+        for (const DrawItem& item : draw_items_) {
+            if (item.material.casts_shadows) {
+                add_to_shadow_batch(batches, item.mesh, item.transform);
+            }
+        }
+        if (scene_ != nullptr && scene_->active()) {
+            for (const EntityHandle handle : scene_->entity_handles()) {
+                if (!scene_->entity_enabled(handle) || !scene_->entity_visible(handle) ||
+                    !scene_->has_render_component(handle)) {
+                    continue;
+                }
+                const RenderComponent& component = scene_->render_component(handle);
+                if (!component.material.casts_shadows) {
+                    continue;
+                }
+                const glm::mat4 transform = model_matrix(scene_->world_transform(handle));
+                if (component.mesh) {
+                    add_to_shadow_batch(
+                        batches, mesh_resources_->upload_cached(*component.mesh), transform);
+                } else if (component.model) {
+                    for (const ModelPart& part : component.model->parts) {
+                        add_to_shadow_batch(
+                            batches, mesh_resources_->upload_cached(part.mesh), transform);
+                    }
+                }
+            }
+        }
+        for (const ShadowBatch& batch : batches) {
+            submit_shadow_batch(batch);
+        }
     }
 
     void submit_instanced_batch(const SceneBatch& batch) {
@@ -953,6 +1382,12 @@ private:
     void submit_geometry() {
         update_scene_lighting();
         const Camera& active_camera = scene_ == nullptr ? camera_ : scene_->camera();
+        camera_position_value_ = {
+            active_camera.position.x,
+            active_camera.position.y,
+            active_camera.position.z,
+            1.0F};
+        submit_shadows(active_camera);
         const Matrix4 view = active_camera.view_matrix();
         const Matrix4 projection = active_camera.projection_matrix(
             Camera::aspect_ratio(width_, height_), bgfx::getCaps()->homogeneousDepth);
@@ -969,27 +1404,50 @@ private:
     }
 
     bool initialized_{false};
+    GraphicsPreset graphics_preset_{GraphicsPreset::Medium};
+    GraphicsFeatures graphics_features_{};
     std::uint32_t reset_flags_{BGFX_RESET_NONE};
     std::uint32_t width_{1};
     std::uint32_t height_{1};
     bgfx::SwapChain swap_chain_{};
     bgfx::VertexLayout layout_{};
+    bgfx::VertexLayout postprocess_layout_{};
     bgfx::ProgramHandle solid_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle solid_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_instanced_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle postprocess_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle shadow_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle shadow_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_params_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle normal_matrix_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle ambient_light_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle directional_light_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle directional_color_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle camera_position_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle render_params_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle texture_sampler_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle postprocess_sampler_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle postprocess_params_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle shadow_sampler_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle shadow_matrix_uniform_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle shadow_params_{BGFX_INVALID_HANDLE};
+    bgfx::FrameBufferHandle scene_framebuffer_{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle scene_color_{BGFX_INVALID_HANDLE};
+    bool postprocess_active_{false};
+    bgfx::FrameBufferHandle shadow_framebuffer_{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle shadow_texture_{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle fallback_shadow_texture_{BGFX_INVALID_HANDLE};
+    std::uint16_t shadow_resolution_{0};
+    bool shadow_active_{false};
+    glm::mat4 shadow_matrix_{1.0F};
     std::unique_ptr<MeshLifetimeManager> mesh_resources_;
     std::unique_ptr<TextureLifetimeManager> texture_resources_;
     std::vector<DrawItem> draw_items_;
     Camera camera_{};
     LightingState lighting_{};
+    std::array<float, 4> camera_position_value_{0.0F, 0.0F, 0.0F, 1.0F};
     RendererStats stats_{};
     const Scene* scene_{nullptr};
     TextureCache scene_textures_;
@@ -999,10 +1457,17 @@ BgfxRenderer::BgfxRenderer(void* native_window,
                            const std::uint32_t width,
                            const std::uint32_t height,
                            const bool vsync,
+                           const GraphicsPreset graphics_preset,
                            const bool geometry_diagnostic,
                            const Scene* const scene)
     : impl_(std::make_unique<Impl>()) {
-    impl_->initialize(native_window, width, height, vsync, geometry_diagnostic, scene);
+    impl_->initialize(native_window,
+                      width,
+                      height,
+                      vsync,
+                      graphics_preset,
+                      geometry_diagnostic,
+                      scene);
 }
 
 BgfxRenderer::~BgfxRenderer() {

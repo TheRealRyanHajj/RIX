@@ -17,6 +17,40 @@ int native_add(const int left, const int right) noexcept {
     return left + right;
 }
 
+const char* graphics_preset_name(const GraphicsPreset preset) noexcept {
+    switch (preset) {
+    case GraphicsPreset::Low: return "low";
+    case GraphicsPreset::Medium: return "medium";
+    case GraphicsPreset::High: return "high";
+    case GraphicsPreset::Ultra: return "ultra";
+    }
+    return "medium";
+}
+
+GraphicsFeatures graphics_features(const GraphicsPreset preset) noexcept {
+    switch (preset) {
+    case GraphicsPreset::Low:
+        return {.enhanced_lighting = false};
+    case GraphicsPreset::Medium:
+        return {.enhanced_lighting = true,
+                .postprocessing = true,
+                .fxaa = true};
+    case GraphicsPreset::High:
+        return {.enhanced_lighting = true,
+                .shadows = true,
+                .postprocessing = true,
+                .fxaa = true,
+                .shadow_resolution = 2048};
+    case GraphicsPreset::Ultra:
+        return {.enhanced_lighting = true,
+                .shadows = true,
+                .postprocessing = true,
+                .fxaa = true,
+                .shadow_resolution = 4096};
+    }
+    return {};
+}
+
 void RendererStatsAtomic::reset() noexcept {
     store({});
 }
@@ -27,6 +61,11 @@ void RendererStatsAtomic::store(const RendererStats stats) noexcept {
     visible_instances_.store(stats.visible_instances, std::memory_order_relaxed);
     culled_instances_.store(stats.culled_instances, std::memory_order_relaxed);
     instanced_draw_calls_.store(stats.instanced_draw_calls, std::memory_order_relaxed);
+    enhanced_lighting_.store(stats.enhanced_lighting, std::memory_order_relaxed);
+    shadows_.store(stats.shadows, std::memory_order_relaxed);
+    postprocessing_.store(stats.postprocessing, std::memory_order_relaxed);
+    fxaa_.store(stats.fxaa, std::memory_order_relaxed);
+    shadow_resolution_.store(stats.shadow_resolution, std::memory_order_relaxed);
     sequence_.fetch_add(1, std::memory_order_release);
 }
 
@@ -41,6 +80,11 @@ RendererStats RendererStatsAtomic::load() const noexcept {
             visible_instances_.load(std::memory_order_relaxed),
             culled_instances_.load(std::memory_order_relaxed),
             instanced_draw_calls_.load(std::memory_order_relaxed),
+            enhanced_lighting_.load(std::memory_order_relaxed),
+            shadows_.load(std::memory_order_relaxed),
+            postprocessing_.load(std::memory_order_relaxed),
+            fxaa_.load(std::memory_order_relaxed),
+            shadow_resolution_.load(std::memory_order_relaxed),
         };
         if (before == sequence_.load(std::memory_order_acquire)) {
             return result;

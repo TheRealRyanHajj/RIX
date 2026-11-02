@@ -46,6 +46,11 @@ struct Material final {
     bool depth_test{true};
     bool depth_write{true};
     bool cull_back_faces{true};
+    float metallic{0.0F};
+    float roughness{0.5F};
+    float emission{0.0F};
+    bool casts_shadows{true};
+    bool receives_shadows{true};
 
     void validate() const;
     friend bool operator==(const Material&, const Material&) = default;

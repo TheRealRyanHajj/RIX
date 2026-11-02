@@ -707,15 +707,30 @@ PYBIND11_MODULE(_easy3d, module) {
                          const std::uint32_t width,
                          const std::uint32_t height,
                          const bool vsync,
-                         const double fps_limit) {
+                         const double fps_limit,
+                         const std::string& graphics_preset) {
+                 easy3d::GraphicsPreset preset;
+                 if (graphics_preset == "low") {
+                     preset = easy3d::GraphicsPreset::Low;
+                 } else if (graphics_preset == "medium") {
+                     preset = easy3d::GraphicsPreset::Medium;
+                 } else if (graphics_preset == "high") {
+                     preset = easy3d::GraphicsPreset::High;
+                 } else if (graphics_preset == "ultra") {
+                     preset = easy3d::GraphicsPreset::Ultra;
+                 } else {
+                     throw py::value_error(
+                         "graphics_preset must be 'low', 'medium', 'high', or 'ultra'");
+                 }
                  return std::make_unique<easy3d::Engine>(easy3d::EngineConfig{
-                     std::move(title), width, height, vsync, fps_limit});
+                     std::move(title), width, height, vsync, fps_limit, preset});
              }),
              py::arg("title") = "Easy3D",
              py::arg("width") = 1280,
              py::arg("height") = 720,
              py::arg("vsync") = true,
-             py::arg("fps_limit") = 0.0)
+             py::arg("fps_limit") = 0.0,
+             py::arg("graphics_preset") = "medium")
         .def("run",
              [](easy3d::Engine& engine, const py::object& callback) {
                  easy3d::Engine::FrameCallback frame_callback;
@@ -745,6 +760,9 @@ PYBIND11_MODULE(_easy3d, module) {
         .def_property_readonly("is_running", &easy3d::Engine::is_running)
         .def_property_readonly("frame_count", &easy3d::Engine::frame_count)
         .def_property_readonly("last_frame_seconds", &easy3d::Engine::last_frame_seconds)
+        .def_property_readonly("graphics_preset", [](const easy3d::Engine& engine) {
+            return easy3d::graphics_preset_name(engine.config().graphics_preset);
+        })
         .def_property_readonly(
             "input",
             static_cast<easy3d::InputSystem& (easy3d::Engine::*)() noexcept>(
@@ -755,7 +773,12 @@ PYBIND11_MODULE(_easy3d, module) {
             return py::make_tuple(stats.draw_calls,
                                   stats.visible_instances,
                                   stats.culled_instances,
-                                  stats.instanced_draw_calls);
+                                  stats.instanced_draw_calls,
+                                  stats.enhanced_lighting,
+                                  stats.shadows,
+                                  stats.postprocessing,
+                                  stats.fxaa,
+                                  stats.shadow_resolution);
         });
 
     py::class_<easy3d::EntityHandle>(module, "EntityHandle")
@@ -928,7 +951,12 @@ PYBIND11_MODULE(_easy3d, module) {
                                     component.material.color.b,
                                     component.material.color.a),
                      asset,
-                     component.material.lit);
+                     component.material.lit,
+                     component.material.metallic,
+                     component.material.roughness,
+                     component.material.emission,
+                     component.material.casts_shadows,
+                     component.material.receives_shadows);
              },
              py::arg("handle"))
         .def("set_render_color",
@@ -944,6 +972,14 @@ PYBIND11_MODULE(_easy3d, module) {
              &easy3d::Scene::set_render_lit,
              py::arg("handle"),
              py::arg("lit"))
+        .def("set_render_surface",
+             &easy3d::Scene::set_render_surface,
+             py::arg("handle"),
+             py::arg("metallic"),
+             py::arg("roughness"),
+             py::arg("emission"),
+             py::arg("casts_shadows"),
+             py::arg("receives_shadows"))
         .def("remove_render_component", &easy3d::Scene::remove_render_component)
         .def("add_light_component",
              [light_kind](easy3d::Scene& scene,

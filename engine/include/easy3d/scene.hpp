@@ -164,6 +164,12 @@ public:
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
     void set_render_color(EntityHandle handle, Color color);
     void set_render_lit(EntityHandle handle, bool lit);
+    void set_render_surface(EntityHandle handle,
+                            float metallic,
+                            float roughness,
+                            float emission,
+                            bool casts_shadows,
+                            bool receives_shadows);
     void remove_render_component(EntityHandle handle);
     void add_light_component(EntityHandle handle,
                              LightKind kind,
@@ -261,6 +267,12 @@ public:
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
     void set_render_color(EntityHandle handle, Color color);
     void set_render_lit(EntityHandle handle, bool lit);
+    void set_render_surface(EntityHandle handle,
+                            float metallic,
+                            float roughness,
+                            float emission,
+                            bool casts_shadows,
+                            bool receives_shadows);
     void remove_render_component(EntityHandle handle);
     void add_light_component(EntityHandle handle,
                              LightKind kind,

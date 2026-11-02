@@ -186,6 +186,7 @@ class Engine:
         height: int = 720,
         vsync: bool = True,
         fps_limit: float = 0.0,
+        graphics_preset: str = "medium",
     ) -> None: ...
     def run(self, frame_callback: Callable[[float], None] | None = None) -> None: ...
     def stop(self) -> None: ...
@@ -197,7 +198,11 @@ class Engine:
     @property
     def last_frame_seconds(self) -> float: ...
     @property
-    def renderer_stats(self) -> tuple[int, int, int, int]: ...
+    def graphics_preset(self) -> str: ...
+    @property
+    def renderer_stats(
+        self,
+    ) -> tuple[int, int, int, int, bool, bool, bool, bool, int]: ...
     @property
     def input(self) -> _NativeInput: ...
 
@@ -283,11 +288,30 @@ class _NativeScene:
     def has_render_component(self, handle: EntityHandle) -> bool: ...
     def render_component_info(
         self, handle: EntityHandle
-    ) -> tuple[str, tuple[float, float, float, float], str | None, bool]: ...
+    ) -> tuple[
+        str,
+        tuple[float, float, float, float],
+        str | None,
+        bool,
+        float,
+        float,
+        float,
+        bool,
+        bool,
+    ]: ...
     def set_render_color(
         self, handle: EntityHandle, color: tuple[float, float, float, float]
     ) -> None: ...
     def set_render_lit(self, handle: EntityHandle, lit: bool) -> None: ...
+    def set_render_surface(
+        self,
+        handle: EntityHandle,
+        metallic: float,
+        roughness: float,
+        emission: float,
+        casts_shadows: bool,
+        receives_shadows: bool,
+    ) -> None: ...
     def remove_render_component(self, handle: EntityHandle) -> None: ...
     def add_light_component(
         self,

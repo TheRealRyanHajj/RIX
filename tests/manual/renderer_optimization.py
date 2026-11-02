@@ -33,8 +33,11 @@ def main(*, seconds: float = 5.0) -> None:
     stats = game.renderer_stats
     if stats.visible_instances != 2 or stats.culled_instances != 3:
         raise RuntimeError(f"unexpected culling counters: {stats}")
-    if stats.draw_calls != 1 or stats.instanced_draw_calls != 1:
+    # One instanced scene draw plus the medium preset's full-screen post pass.
+    if stats.draw_calls != 2 or stats.instanced_draw_calls != 1:
         raise RuntimeError(f"shared cubes were not instanced: {stats}")
+    if not (stats.enhanced_lighting and stats.postprocessing and stats.fxaa):
+        raise RuntimeError(f"medium preset features were not active: {stats}")
     print(f"renderer_optimization: PASS frames={game.frame_count} stats={stats}")
 
 

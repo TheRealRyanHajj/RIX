@@ -9,11 +9,18 @@ from easy3d._easy3d import Engine
 
 
 def test_game_construction_does_not_initialize_graphics() -> None:
-    game = Game("Unit Test", (640, 480), vsync=False, fps_limit=120)
+    game = Game(
+        "Unit Test",
+        (640, 480),
+        vsync=False,
+        fps_limit=120,
+        graphics_preset="high",
+    )
     assert not game.is_running
     assert game.frame_count == 0
     assert game.last_frame_seconds == 0.0
     assert game.renderer_stats == RendererStats()
+    assert game.graphics_preset == "high"
     game.stop()
 
 
@@ -45,4 +52,9 @@ def test_game_rejects_invalid_fps_limit() -> None:
         Game(fps_limit=True)
     with pytest.raises(ValueError):
         Game(fps_limit=math.nan)
+
+
+def test_game_rejects_invalid_graphics_preset() -> None:
+    with pytest.raises(ValueError, match="graphics_preset"):
+        Game(graphics_preset="cinematic")  # type: ignore[arg-type]
 

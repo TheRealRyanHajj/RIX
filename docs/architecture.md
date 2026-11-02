@@ -124,6 +124,22 @@ This establishes debug visualization without persistent GPU handles or
 per-frame Python callbacks. Scene clear releases both entities and debug lines;
 camera configuration remains reusable.
 
+Phase 6.1 keeps quality selection above bgfx as four immutable engine presets.
+The low path retains the baseline direct diffuse shader. Medium and above add a
+camera-aware metallic/roughness specular approximation, render the 3D pass to
+an RGBA16F/D24S8 framebuffer, then tone-map, gamma-correct and optionally FXAA
+in one fullscreen pass. High and Ultra prepend a single R32F/D24S8 directional
+shadow pass at 2048 or 4096 pixels. The shadow camera tracks the scene camera
+with a bounded orthographic volume and 3x3 PCF sampling.
+
+Render-target creation is capability-checked. A failed HDR target routes the
+main view directly to the swap chain and disables postprocessing/FXAA; a failed
+shadow target binds a white fallback texture and disables shadow sampling.
+Resize recreates only the window-sized HDR target. bgfx continues to own handle
+retirement, while Easy3D destroys framebuffers, textures, uniforms and programs
+before renderer shutdown. Atomic latest-frame stats expose the features that
+actually became active.
+
 ## Input ownership and frame boundaries
 
 `Engine` owns one platform-neutral `InputSystem`; it has no SDL dependency and

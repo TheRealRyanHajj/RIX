@@ -12,6 +12,26 @@ namespace easy3d {
 
 class Scene;
 
+enum class GraphicsPreset {
+    Low,
+    Medium,
+    High,
+    Ultra,
+};
+
+struct GraphicsFeatures final {
+    bool enhanced_lighting{true};
+    bool shadows{false};
+    bool postprocessing{false};
+    bool fxaa{false};
+    std::uint16_t shadow_resolution{0};
+
+    friend bool operator==(const GraphicsFeatures&, const GraphicsFeatures&) = default;
+};
+
+[[nodiscard]] const char* graphics_preset_name(GraphicsPreset preset) noexcept;
+[[nodiscard]] GraphicsFeatures graphics_features(GraphicsPreset preset) noexcept;
+
 [[nodiscard]] const char* engine_version() noexcept;
 [[nodiscard]] int native_add(int left, int right) noexcept;
 
@@ -26,6 +46,7 @@ struct EngineConfig {
     std::uint32_t height{720};
     bool vsync{true};
     double fps_limit{0.0};
+    GraphicsPreset graphics_preset{GraphicsPreset::Medium};
     // Native validation scene used only by the opt-in geometry diagnostic.
     bool geometry_diagnostic{false};
 };
@@ -35,6 +56,11 @@ struct RendererStats final {
     std::uint64_t visible_instances{0};
     std::uint64_t culled_instances{0};
     std::uint64_t instanced_draw_calls{0};
+    bool enhanced_lighting{false};
+    bool shadows{false};
+    bool postprocessing{false};
+    bool fxaa{false};
+    std::uint32_t shadow_resolution{0};
 
     friend bool operator==(const RendererStats&, const RendererStats&) = default;
 };
@@ -51,6 +77,11 @@ private:
     std::atomic_uint64_t visible_instances_{0};
     std::atomic_uint64_t culled_instances_{0};
     std::atomic_uint64_t instanced_draw_calls_{0};
+    std::atomic_bool enhanced_lighting_{false};
+    std::atomic_bool shadows_{false};
+    std::atomic_bool postprocessing_{false};
+    std::atomic_bool fxaa_{false};
+    std::atomic_uint32_t shadow_resolution_{0};
 };
 
 class Engine final {

@@ -1253,3 +1253,20 @@ disconnect callbacks run. Intersect replication's ready recipients with the
 native active connection set before user teardown callbacks. This preserves
 normal single-peer leave broadcasts while preventing despawn broadcasts to
 already-inactive peers during whole-server shutdown.
+
+## ADR-0045: Presets request features; runtime capabilities decide activation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Expose four immutable quality presets instead of independent renderer toggles.
+Low retains the baseline path, Medium adds enhanced direct-light materials and
+an HDR/tone-map/FXAA pass, and High/Ultra add one directional shadow map at
+2048/4096 pixels. Keep material controls intentionally small and describe the
+shader as a metallic/roughness approximation, not full PBR.
+
+Create optional render targets only after querying bgfx capabilities. If a
+format, size or framebuffer is unavailable, continue with the nearest usable
+path and report actual activation through renderer statistics and startup logs.
+This makes presets portable requests rather than unsupported guarantees and
+keeps adapter-specific policy out of the Python gameplay layer.

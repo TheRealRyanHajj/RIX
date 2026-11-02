@@ -17,6 +17,7 @@ public:
                  std::uint32_t width,
                  std::uint32_t height,
                  bool vsync,
+                 GraphicsPreset graphics_preset,
                  bool geometry_diagnostic,
                  const Scene* scene);
     ~BgfxRenderer();

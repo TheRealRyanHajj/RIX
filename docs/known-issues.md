@@ -259,6 +259,20 @@ driver leak claim.
 
 ## Shader artifacts currently target D3D11 only
 
+Phase 6.1 graphics are intentionally bounded. The material shader is a compact
+direct-light metallic/roughness approximation without environment maps or glTF
+material texture channels. Shadows use only the first enabled directional
+light, one camera-centered orthographic map and fixed bias; there are no
+cascades, point/spot shadows, skinned casters or alpha-cutout casters. Large
+outdoor scenes can therefore show missing distant shadows or bias artifacts.
+
+Postprocessing requires RGBA16F plus D24S8 render-target support. Directional
+shadows require R32F plus D24S8 and a maximum texture size of at least 2048 or
+4096 for the requested preset. Unsupported features fall back and are reported
+through `Game.renderer_stats`; a preset name is not proof that every requested
+feature is active. Only the D3D11 path on the recorded NVIDIA adapter has been
+visually exercised. Other bgfx backends remain unverified.
+
 Easy3D's source shaders are present and reproducibly regenerable with the pinned
 bgfx compiler, but only reviewed DXBC Shader Model 5 headers are committed and
 runtime-tested. This matches the explicit Windows D3D11 backend. Vulkan,
