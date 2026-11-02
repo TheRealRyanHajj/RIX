@@ -552,8 +552,9 @@ this codec.
 
 ## Direct-IP client
 
-`easy3d.network.Client(...)` accepts a finite positive `timeout`, positive
-bounded queue/message/version values, and optional `on_connect(client)` and
+`easy3d.network.Client(...)` accepts finite positive `timeout` and
+`peer_timeout` values, bounded queue/message/version values, and optional
+`on_connect(client)` and
 `on_disconnect(client, event)` callables. `connect(address, port)` accepts a
 numeric IPv4/IPv6 address and port `1..65535`, starts asynchronously, and rejects
 an already-active client. DNS names are not accepted. `state` is one of
@@ -573,11 +574,17 @@ control/NUL characters. `stats` contains application counters. `metrics` adds
 state, GNS ping/recent rates/pending bytes and the negotiated payload limit;
 unavailable live values retain documented zero/`-1` defaults.
 
+`timeout` covers initial transport connection and protocol handshake.
+`peer_timeout` configures GNS connected-peer liveness detection and defaults to
+10 seconds; it is finite and in `[0.001, 2147483.647]`. Disconnect observation
+still requires polling and backend scheduling, so the configured value is not
+an exact wall-clock callback deadline.
+
 ## Headless authoritative server
 
 `easy3d.network.Server(...)` (also exported as `easy3d.Server`) accepts a
 numeric `bind_address`, port `1..65535`, `max_players` in `1..1024`, positive
-`tick_rate`/handshake timeout and bounded queue/message/protocol settings. It is
+`tick_rate`/handshake/peer timeouts and bounded queue/message/protocol settings. It is
 headless by construction: no graphics option is necessary and no window,
 renderer or input owner is created. `start()` binds without entering the
 simulation loop. `state`, normalized `bind_address`, active `port`, immutable
@@ -598,6 +605,11 @@ replaced only while `run()` is inactive.
 on the `run`/`step`/`poll` caller. Callback exceptions propagate after the event
 is drained and are not replayed. The dedicated `Server` itself implies no local
 client, player identity, entity replication, DNS or discovery behavior.
+
+The server's `peer_timeout` configures the same GNS connected-peer liveness
+policy for accepted clients. `ListenServer` passes one value to its isolated
+authority and local client. Abrupt backend/OS failure codes are retained as
+integers when they are outside Easy3D's stable application-code range.
 
 ## Isolated listen host
 

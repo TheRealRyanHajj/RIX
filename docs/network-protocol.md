@@ -160,6 +160,12 @@ or `poll` caller, never from a GNS callback. `stop()` only signals while a run
 loop is active and is safe to request from another Python thread. No `Engine`,
 SDL window or bgfx renderer is constructed.
 
+Client and server owners separately configure GNS connected-peer liveness with
+`peer_timeout` (default 10 seconds). This is distinct from initial connection
+and handshake deadlines. Liveness callbacks are still delivered only while the
+owner polls, and backend/OS failure codes outside Easy3D's stable application
+range remain integers rather than being relabelled.
+
 ## Implemented in Phase 3.6
 
 `ListenServer` does not add a wire mode or privileged in-process shortcut. It
@@ -200,11 +206,27 @@ authentication or anti-spoofing mechanism. Discovery never starts a GNS
 connection, and the Phase 3.3 handshake still validates any address the user
 later selects.
 
+## Implemented in Phase 3.8
+
+`examples/06_two_process` runs the public `Server` and `Client` in independent
+Python processes. The client completes the format-1 handshake, sends one exact
+bounded request, validates one exact reply and closes. Server and client
+readiness are distinct: a client is ready after sending confirmation, while the
+server is ready for application identity only after polling and validating that
+confirmation.
+
+Subprocess integration covers clean loopback exchange, a second listener's
+same-port bind rejection while the first listener remains usable, abrupt server
+termination observed by the client, and abrupt client termination observed by
+the server. Abrupt tests do not assert one stable disconnect code because the
+backend/OS owns that failure reason. They assert recovery to a disconnected
+application event and bounded process completion. This remains byte transport;
+no entity synchronization, RPC, ownership or authentication format exists yet.
+
 ## Not implemented yet
 
 There is no rendered-Game attachment, firewall automation, DNS, replication or
-RPC yet. LAN discovery is IPv4/local-subnet only. Phase 3.8 supplies a supported two-process sample and
-abrupt-disconnect/port-collision integration. Transport encryption also does not
+RPC yet. LAN discovery is IPv4/local-subnet only. Transport encryption also does not
 establish account or player identity; authentication remains a separate
 extension boundary.
 

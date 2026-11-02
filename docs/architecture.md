@@ -374,3 +374,14 @@ during a finite window and stores a finite TTL/LRU result cache. A result is
 only an address suggestion: the caller must explicitly pass its numeric address
 and game port to `Client.connect()`, where the ordinary protocol handshake
 still applies.
+
+Phase 3 process integration launches the installed extension in independent
+Python processes rather than constructing two owners in one interpreter. The
+sample and tests publish readiness only after a real bind or each side's
+application-level handshake event. That distinction prevents a client
+confirmation from being mistaken for server-side establishment. GNS
+`TimeoutConnected` is configured per client/listener through the public
+`peer_timeout`; application code continues to observe liveness changes only
+when its owner polls. Abrupt process tests deliberately use OS termination and
+assert copied disconnect events without assigning stable meaning to backend/OS
+failure codes.

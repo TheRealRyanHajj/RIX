@@ -60,11 +60,11 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
-Phase 3.7 exposes a numeric direct-IP client, headless authoritative server,
-isolated headless listen-host composition and opt-in IPv4 LAN discovery. There
-is not yet rendered-`Game` attachment, DNS, automatic firewall rule, player
-identity, replication, or a supported two-process sample; those are later
-work. Transports advance only when
+Phase 3.8 exposes a numeric direct-IP client, headless authoritative server,
+isolated headless listen-host composition, opt-in IPv4 LAN discovery and a
+supported two-process byte-exchange sample. There is not yet rendered-`Game`
+attachment, DNS, automatic firewall rule, player identity or replication;
+those are later work. Transports advance only when
 their owning thread polls (the server `run()` loop does this automatically), so
 a stalled owning loop also stalls callbacks and deadline enforcement.
 Exact protocol/schema equality is the only compatibility policy in wire format
@@ -84,8 +84,17 @@ client isolation, VPN routing, virtual adapters and host firewall policy can
 hide an otherwise healthy server. Discovery names and endpoints are
 unauthenticated LAN input; a matching nonce is request correlation, not
 identity. Select a result explicitly and retain numeric direct IP as fallback.
-Phase 3.7 is validated over local IPv4 UDP loopback. Separate-machine and
-abrupt-process-loss validation remain Phase 3.8.
+Phase 3.8 is validated over local IPv4 loopback with independent processes,
+including bind collision and abrupt termination in both directions. Two
+physical machines, actual Defender prompts/rules and routed LAN variations
+remain **UNVERIFIED**; the sample supports them but they are not claimed as
+executed evidence.
+
+`peer_timeout` configures the GNS connected-peer timeout, but disconnect events
+remain poll-driven and backend scheduling/keepalive granularity can add time.
+Treat it as failure-detection policy, not an exact callback deadline or a
+replacement for gameplay-level heartbeat/AFK rules. Abrupt transport failure
+codes can originate in GNS/the OS and are intentionally preserved as integers.
 
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection

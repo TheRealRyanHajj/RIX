@@ -30,6 +30,13 @@ NetworkClientConfig validate_client_config(NetworkClientConfig config) {
         config.connection_timeout_seconds <= 0.0) {
         throw std::invalid_argument("connection timeout must be finite and positive");
     }
+    if (!std::isfinite(config.peer_timeout_seconds) ||
+        config.peer_timeout_seconds < 0.001 ||
+        config.peer_timeout_seconds >
+            static_cast<double>(std::numeric_limits<std::int32_t>::max()) / 1000.0) {
+        throw std::invalid_argument(
+            "peer timeout must be between 1 ms and INT32_MAX ms");
+    }
     if (config.event_queue_capacity == 0) {
         throw std::invalid_argument("client event queue capacity must be positive");
     }
@@ -149,7 +156,7 @@ struct NetworkClient::Impl final {
                                     static_cast<std::uint32_t>(
                                         config.maximum_message_size)});
 
-        std::array<SteamNetworkingConfigValue_t, 3> options;
+        std::array<SteamNetworkingConfigValue_t, 4> options;
         options[0].SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
                           reinterpret_cast<void*>(&Impl::status_callback));
         options[1].SetInt64(
@@ -159,6 +166,9 @@ struct NetworkClient::Impl final {
             k_ESteamNetworkingConfig_RecvMaxMessageSize,
             static_cast<std::int32_t>(std::max<std::size_t>(
                 config.maximum_message_size, detail::maximum_handshake_frame_size)));
+        options[3].SetInt32(
+            k_ESteamNetworkingConfig_TimeoutConnected,
+            static_cast<std::int32_t>(config.peer_timeout_seconds * 1000.0));
 
         state = NetworkClientState::Connecting;
         deadline = std::chrono::steady_clock::now() +

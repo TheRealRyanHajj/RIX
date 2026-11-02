@@ -946,3 +946,39 @@ Never auto-connect, resolve DNS, change firewall state or route discovery.
   isolation and routers. Numeric direct IP is the documented fallback.
 - IPv6 discovery, mDNS/directory/relay services, authentication and
   separate-machine evidence are not implied by this local IPv4 milestone.
+
+## ADR-0029: Process-boundary transport gate with explicit peer liveness
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Same-interpreter loopback proves protocol behavior but not extension loading,
+socket ownership or teardown across real process boundaries. Abrupt process
+loss cannot use Easy3D's graceful close reason, and the upstream connected-peer
+timeout needs an engine-owned policy separate from handshake deadlines. Tests
+must also distinguish client confirmation from the server's later validated
+establishment event.
+
+### Decision
+
+Ship one public-API-only command with independent server/client roles and a
+fixed bounded request/reply. Add finite positive `peer_timeout` configuration to
+the native client and listener, mapped to GNS `TimeoutConnected`, with a
+10-second default and no process-global mutation. In integration tests, publish
+separate bind, client-connected and server-connected markers; terminate the
+opposite process only after the relevant establishment marker. Bound and reap
+every subprocess. Treat backend/OS abrupt-failure codes as observational while
+requiring an application disconnect event.
+
+### Consequences
+
+- Clean exchange, gameplay-port collision and abrupt loss in both directions
+  exercise the installed native extension across Windows processes.
+- Peer timeout is a liveness policy, not an exact callback deadline; polling and
+  backend scheduling remain part of observation latency.
+- The sample can be run on a LAN with numeric addressing and firewall policy,
+  but two-physical-machine execution remains separately reported evidence.
+- Process transport success does not imply replication, RPC, player identity,
+  ownership, prediction or rendered-client integration.

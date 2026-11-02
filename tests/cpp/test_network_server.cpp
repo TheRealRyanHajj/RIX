@@ -128,6 +128,14 @@ int main() {
         } catch (const std::invalid_argument&) {
             // Expected.
         }
+        try {
+            easy3d::NetworkServerConfig invalid;
+            invalid.peer_timeout_seconds = 0.0;
+            easy3d::NetworkServer server(invalid);
+            return fail(22, "zero server peer timeout was accepted");
+        } catch (const std::invalid_argument&) {
+            // Expected.
+        }
 
         easy3d::NetworkServerConfig config;
         config.bind_address = "127.0.0.1";

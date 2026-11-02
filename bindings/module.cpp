@@ -212,18 +212,21 @@ PYBIND11_MODULE(_easy3d, module) {
                                &easy3d::SimulatedNetwork::in_flight_count);
     py::class_<easy3d::NetworkClient>(module, "_NetworkClient")
         .def(py::init([](const double connection_timeout_seconds,
+                         const double peer_timeout_seconds,
                          const std::size_t event_queue_capacity,
                          const std::size_t maximum_message_size,
                          const std::uint16_t protocol_version,
                          const std::uint32_t schema_version) {
                  return std::make_unique<easy3d::NetworkClient>(
                      easy3d::NetworkClientConfig{connection_timeout_seconds,
+                                                 peer_timeout_seconds,
                                                  event_queue_capacity,
                                                  maximum_message_size,
                                                  protocol_version,
                                                  schema_version});
              }),
              py::arg("connection_timeout_seconds") = 5.0,
+             py::arg("peer_timeout_seconds") = 10.0,
              py::arg("event_queue_capacity") = 1024,
              py::arg("maximum_message_size") = 64 * 1024,
              py::arg("protocol_version") = 1,
@@ -296,6 +299,7 @@ PYBIND11_MODULE(_easy3d, module) {
                          const std::uint16_t port,
                          const std::size_t maximum_connections,
                          const double handshake_timeout_seconds,
+                         const double peer_timeout_seconds,
                          const std::size_t event_queue_capacity,
                          const std::size_t maximum_message_size,
                          const std::uint16_t protocol_version,
@@ -305,6 +309,7 @@ PYBIND11_MODULE(_easy3d, module) {
                                                  port,
                                                  maximum_connections,
                                                  handshake_timeout_seconds,
+                                                 peer_timeout_seconds,
                                                  event_queue_capacity,
                                                  maximum_message_size,
                                                  protocol_version,
@@ -314,6 +319,7 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("port") = 7777,
              py::arg("maximum_connections") = 32,
              py::arg("handshake_timeout_seconds") = 5.0,
+             py::arg("peer_timeout_seconds") = 10.0,
              py::arg("event_queue_capacity") = 4096,
              py::arg("maximum_message_size") = 64 * 1024,
              py::arg("protocol_version") = 1,

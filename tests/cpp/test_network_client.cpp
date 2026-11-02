@@ -287,6 +287,14 @@ int main() {
         } catch (const std::invalid_argument&) {
             // Expected.
         }
+        try {
+            easy3d::NetworkClientConfig invalid;
+            invalid.peer_timeout_seconds = 0.0;
+            easy3d::NetworkClient client(invalid);
+            return fail(22, "zero client peer timeout was accepted");
+        } catch (const std::invalid_argument&) {
+            // Expected.
+        }
 
         LocalHandshakeServer server;
         easy3d::NetworkClientConfig config;

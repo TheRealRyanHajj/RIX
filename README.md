@@ -1,8 +1,8 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2 and Phase 3.1–3.7 transport, server, listen-host and
-opt-in LAN-discovery foundations are validated.
+native core. Phases 0–2 and the complete Phase 3 transport, server, listen-host,
+LAN-discovery and two-process foundations are validated.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -465,6 +465,23 @@ client isolation, VPNs, virtual adapters and router policy may block it. A
 known directed broadcast such as `192.168.1.255` can be passed as
 `target_address`, but it is still subject to network policy. Use the numeric
 server address with `network.Client.connect()` as the fallback.
+
+Phase 3.8 provides a supported process-boundary transport sample. Run these in
+two terminals:
+
+```powershell
+python examples/06_two_process/main.py server --bind 127.0.0.1 --port 7777 --one-shot
+python examples/06_two_process/main.py client --address 127.0.0.1 --port 7777
+```
+
+For LAN use, bind `0.0.0.0` and replace the client address with the server's
+numeric LAN address. `Client`, `Server`, and `ListenServer` accept a
+`peer_timeout` (10 seconds by default) that configures GNS connected-peer
+liveness detection separately from connection/handshake deadlines. Detection
+is poll-driven and may include backend scheduling time; it is not a gameplay
+heartbeat or latency promise. The sample proves bounded byte exchange and
+disconnect recovery only—entity replication, RPC and player identity begin in
+Phase 4.
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 

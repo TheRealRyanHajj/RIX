@@ -82,6 +82,7 @@ enum class NetworkClientState : std::uint8_t {
 
 struct NetworkClientConfig final {
     double connection_timeout_seconds{5.0};
+    double peer_timeout_seconds{10.0};
     std::size_t event_queue_capacity{1024};
     std::size_t maximum_message_size{64 * 1024};
     std::uint16_t protocol_version{1};
@@ -109,6 +110,7 @@ struct NetworkServerConfig final {
     std::uint16_t port{7777};
     std::size_t maximum_connections{32};
     double handshake_timeout_seconds{5.0};
+    double peer_timeout_seconds{10.0};
     std::size_t event_queue_capacity{4096};
     std::size_t maximum_message_size{64 * 1024};
     std::uint16_t protocol_version{1};

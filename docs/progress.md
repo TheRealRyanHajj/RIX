@@ -3083,3 +3083,132 @@ Phase 3.7: **DONE**. Immediate next task: Phase 3.8 — provide a supported
 two-process server/client sample and subprocess integration coverage for
 loopback exchange, port collision and abrupt peer loss. No replication is
 claimed by this checkpoint.
+
+## 2026-11-01 — Phase 3.8 two-process transport exit gate (complete)
+
+### Bounded approach
+
+Add one public-API-only `examples/06_two_process` command with `server` and
+`client` roles. The server binds a numeric address, publishes a flushed ready
+line (and optional automation marker), echoes one fixed bounded request, and can
+run persistently or exit after a one-client exchange. The client connects by
+explicit numeric address, pumps the existing handshake, sends the fixed request,
+validates the exact reply and closes cleanly. Document two-terminal loopback
+and two-machine LAN use, discovery as optional address selection, firewall
+requirements and the absence of entity synchronization.
+
+Exercise the actual installed extension in child Python processes. Cover a
+complete server/client handshake and byte exchange, a second server's bind
+collision without disturbing the first listener, and abrupt server process
+termination observed by an already-established client. Bound every process,
+wait, message and output capture with monotonic deadlines; always terminate and
+reap children in test cleanup. Keep abrupt-loss timing tolerant of GNS liveness
+detection, but do not weaken assertions into sleeps or mocks. Re-run the full
+Python/native matrices, then check 3.8 only if process-boundary evidence passes.
+
+### Implemented
+
+- Added `examples/06_two_process` with public `server` and `client` roles. The
+  server binds a numeric address, prints flushed readiness, accepts a fixed
+  bounded request and returns an exact reply. The client completes the real GNS
+  and Phase 3.3 handshake, validates the reply and closes. One-shot and bounded
+  timeout modes support both two-terminal use and deterministic automation.
+- Added finite positive `peer_timeout` to native/Python `Client`, `Server` and
+  composed `ListenServer`, distinct from initial connection/handshake timeout.
+  It maps per connection/listener to GNS `TimeoutConnected`, defaults to 10
+  seconds, accepts 1 ms through `INT32_MAX` ms and makes no exact callback-time
+  promise because callback progress remains poll/backend driven.
+- Added independent-process integration for clean reliable exchange, second
+  server bind collision followed by successful use of the first listener,
+  abrupt OS termination of the server observed by the connected client, and
+  abrupt OS termination of the client observed by the established server.
+  Every child has readiness/deadline/output bounds and is killed/reaped in
+  cleanup. Abrupt tests require disconnect events but do not mislabel backend/
+  OS failure codes as stable Easy3D protocol reasons.
+- Added separate bind-ready, client-established and authority-established
+  markers. This preserves the protocol invariant that a client may report after
+  sending confirmation before the server has polled and validated it.
+- Added native/Python peer-timeout validation regressions, ADR-0029, protocol/
+  architecture/API/known-limit docs, and two-terminal loopback/LAN/firewall
+  instructions. No dependency or license inventory changed.
+
+### Failures found and corrected
+
+- The first three-case subprocess suite passed. Adding abrupt client death
+  initially timed out the server because the test killed the client after only
+  the client-side connected event; at that point the server had not yet polled
+  its confirmation, so no application peer existed to disconnect. A distinct
+  server-established marker now gates the kill.
+- With both sides established, the first reverse abrupt-loss run still reached
+  the sample's 20-second deadline under the upstream default liveness policy;
+  its final graceful cleanup emitted server-stop code `1009`, correctly showing
+  that no abrupt event had arrived in time. The native owners now expose and set
+  per-owner GNS connected-peer timeouts. With a 2-second policy and tolerant
+  process deadline, abrupt loss is observed in both directions on all final
+  repeated runs.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests\python\test_two_process_network.py -q
+....                                                                     [100%]
+4 passed in 17.27s
+
+# The focused command above was then invoked three consecutive times.
+# All runs passed 4/4 in 17.20s, 17.20s and 17.22s.
+3 consecutive two-process integration runs passed
+
+build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py tests\python\test_server.py tests\python\test_listen_server.py -q
+.............................                                            [100%]
+29 passed in 0.60s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 51%]
+.....................................................................    [100%]
+141 passed in 18.03s
+
+cmake --build build\windows-headless --config Debug --parallel 4
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.62 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.76 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.83 sec
+
+# From the documented Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3928707
+sha256=7fe5b414afb040523db99dd3bb43c31ef87831604b0eb42c5cd510a35c1882a5
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -m pip check
+No broken requirements found.
+
+build\venv311\Scripts\python.exe -m pip show -f easy3d
+# editable metadata, project license and easy3d/_easy3d.cp311-win_amd64.pyd;
+# no runtime or private dependency packages
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+The sample is documented for numeric LAN use, but two physical machines,
+actual Defender prompt/rule behavior and routed/guest/VPN networks remain
+**UNVERIFIED** and are not claimed. Process-boundary IPv4 loopback, clean close,
+port collision and abrupt loss in both directions are independently verified.
+
+Phase 3.8 and the Phase 3 exit gate: **DONE**. Immediate next task: Phase 4.1 —
+define stable network-object IDs, bounded prefab/schema registration and
+server-owned spawn/despawn/late-join state. No entity synchronization is
+claimed by this checkpoint.

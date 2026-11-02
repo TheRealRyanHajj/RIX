@@ -76,6 +76,8 @@ def test_direct_ip_client_validation_metrics_and_timeout_callback() -> None:
     [
         {"timeout": 0},
         {"timeout": float("inf")},
+        {"peer_timeout": 0},
+        {"peer_timeout": float("inf")},
         {"event_queue_capacity": 0},
         {"maximum_message_size": 1024 * 1024 + 1},
         {"protocol_version": True},

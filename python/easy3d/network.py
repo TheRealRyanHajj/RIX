@@ -154,6 +154,15 @@ def backend_smoke_test() -> bool:
     return _network_backend_smoke_test()
 
 
+def _validated_peer_timeout(value: float) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError("peer_timeout must be a number")
+    result = float(value)
+    if not math.isfinite(result) or not 0.001 <= result <= 2_147_483.647:
+        raise ValueError("peer_timeout must be between 0.001 and 2147483.647")
+    return result
+
+
 def _network_event(
     value: tuple[str, int, str, bytes, str, int, int],
 ) -> NetworkEvent:
@@ -207,6 +216,7 @@ class Client:
         self,
         *,
         timeout: float = 5.0,
+        peer_timeout: float = 10.0,
         event_queue_capacity: int = 1024,
         maximum_message_size: int = 64 * 1024,
         protocol_version: int = 1,
@@ -218,6 +228,7 @@ class Client:
             raise TypeError("timeout must be a number")
         if not math.isfinite(float(timeout)) or timeout <= 0:
             raise ValueError("timeout must be finite and positive")
+        validated_peer_timeout = _validated_peer_timeout(peer_timeout)
         limits = (
             ("event_queue_capacity", event_queue_capacity, None),
             ("maximum_message_size", maximum_message_size, 1024 * 1024),
@@ -235,6 +246,7 @@ class Client:
             raise TypeError("on_disconnect must be callable")
         self._native = _NetworkClient(
             float(timeout),
+            validated_peer_timeout,
             event_queue_capacity,
             maximum_message_size,
             protocol_version,
@@ -374,6 +386,7 @@ class Server:
         tick_rate: float = 60.0,
         bind_address: str = "0.0.0.0",
         handshake_timeout: float = 5.0,
+        peer_timeout: float = 10.0,
         event_queue_capacity: int = 4096,
         maximum_message_size: int = 64 * 1024,
         protocol_version: int = 1,
@@ -405,6 +418,7 @@ class Server:
             raise TypeError("handshake_timeout must be a number")
         if not math.isfinite(float(handshake_timeout)) or handshake_timeout <= 0:
             raise ValueError("handshake_timeout must be finite and positive")
+        validated_peer_timeout = _validated_peer_timeout(peer_timeout)
         for name, callback in (
             ("on_connect", on_connect),
             ("on_disconnect", on_disconnect),
@@ -422,6 +436,7 @@ class Server:
             port,
             max_players,
             float(handshake_timeout),
+            validated_peer_timeout,
             event_queue_capacity,
             maximum_message_size,
             protocol_version,
@@ -732,6 +747,7 @@ class ListenServer:
         bind_address: str = "0.0.0.0",
         local_address: str = "127.0.0.1",
         handshake_timeout: float = 5.0,
+        peer_timeout: float = 10.0,
         event_queue_capacity: int = 4096,
         maximum_message_size: int = 64 * 1024,
         protocol_version: int = 1,
@@ -757,6 +773,7 @@ class ListenServer:
             tick_rate=tick_rate,
             bind_address=bind_address,
             handshake_timeout=handshake_timeout,
+            peer_timeout=peer_timeout,
             event_queue_capacity=event_queue_capacity,
             maximum_message_size=maximum_message_size,
             protocol_version=protocol_version,
@@ -769,6 +786,7 @@ class ListenServer:
         )
         self._client = Client(
             timeout=handshake_timeout,
+            peer_timeout=peer_timeout,
             event_queue_capacity=event_queue_capacity,
             maximum_message_size=maximum_message_size,
             protocol_version=protocol_version,

@@ -30,6 +30,8 @@ def test_server_configuration_validation() -> None:
         {"tick_rate": 0},
         {"bind_address": ""},
         {"handshake_timeout": float("inf")},
+        {"peer_timeout": 0},
+        {"peer_timeout": float("inf")},
         {"event_queue_capacity": 0},
         {"maximum_message_size": 1024 * 1024 + 1},
         {"protocol_version": True},
