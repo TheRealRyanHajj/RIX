@@ -46,6 +46,8 @@ enum class DisconnectCode : std::uint16_t {
     MessageTooLarge = 1006,
     ConnectionTimeout = 1007,
     TransportFailure = 1008,
+    ServerStopped = 1009,
+    ServerFull = 1010,
 };
 
 struct HandshakeConfig final {

@@ -160,6 +160,8 @@ bool known_disconnect_code(const DisconnectCode code) {
     case DisconnectCode::MessageTooLarge:
     case DisconnectCode::ConnectionTimeout:
     case DisconnectCode::TransportFailure:
+    case DisconnectCode::ServerStopped:
+    case DisconnectCode::ServerFull:
         return true;
     case DisconnectCode::None:
         return false;
@@ -503,6 +505,10 @@ const char* disconnect_code_name(const DisconnectCode code) noexcept {
         return "connection_timeout";
     case DisconnectCode::TransportFailure:
         return "transport_failure";
+    case DisconnectCode::ServerStopped:
+        return "server_stopped";
+    case DisconnectCode::ServerFull:
+        return "server_full";
     }
     return "unknown";
 }

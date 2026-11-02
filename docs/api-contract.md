@@ -572,3 +572,29 @@ requires an active connection. Reason text is at most 120 UTF-8 bytes with no
 control/NUL characters. `stats` contains application counters. `metrics` adds
 state, GNS ping/recent rates/pending bytes and the negotiated payload limit;
 unavailable live values retain documented zero/`-1` defaults.
+
+## Headless authoritative server
+
+`easy3d.network.Server(...)` (also exported as `easy3d.Server`) accepts a
+numeric `bind_address`, port `1..65535`, `max_players` in `1..1024`, positive
+`tick_rate`/handshake timeout and bounded queue/message/protocol settings. It is
+headless by construction: no graphics option is necessary and no window,
+renderer or input owner is created. `start()` binds without entering the
+simulation loop. `state`, normalized `bind_address`, active `port`, immutable
+`connections`, counters and `tick_count` are observational snapshots.
+
+`load_scene(scene)` gives the server exclusive scene ownership. `run()` blocks
+on its calling thread, services networking, and executes authoritative Python
+lifecycle plus native physics at the configured fixed rate until `stop()` is
+requested. `stop()` may be called from another Python thread. `step()` starts
+the listener if necessary and executes exactly one network pump/fixed tick;
+`poll()` services networking without advancing simulation. Scenes can be
+replaced only while `run()` is inactive.
+
+`send(connection, bytes_like, delivery=...)`, `broadcast(...)` and
+`disconnect(...)` operate only on post-handshake opaque IDs. Optional
+`on_connect(server, connection)`, `on_message(server, event)` and
+`on_disconnect(server, event)` callbacks execute synchronously in event order
+on the `run`/`step`/`poll` caller. Callback exceptions propagate after the event
+is drained and are not replayed. No player identity, entity replication,
+listen-host client, DNS or discovery behavior is implied.

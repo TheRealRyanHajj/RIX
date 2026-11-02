@@ -344,3 +344,14 @@ and invokes optional callbacks only after returning from native GNS code on the
 same owning thread. The native callback finds its owner through per-connection
 GNS user data; shutdown clears that pointer before closing the handle so queued
 callbacks cannot target a destroyed client.
+
+`NetworkServer` applies the same boundary to many peers. One native listener
+and poll group own a bounded handle→peer map; each peer owns its server-side
+handshake, deadline, negotiated limit and monotonically generated local
+`ConnectionId`. Handshaking sockets count against the configured maximum but
+are absent from the application connection list. The server closes accepted
+peers before its listen socket so GNS cannot replace graceful application
+reasons with listener teardown. The Python `Server` composes this transport
+with `SimulationScheduler` and a `Scene`; it deliberately never creates
+`Engine`, `Input`, a platform window or a renderer. `run()` is a paced fixed-
+rate loop, while `step()` is an exact one-tick integration seam for tests.

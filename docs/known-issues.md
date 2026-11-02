@@ -60,11 +60,12 @@ initial constraint set; hinge, slider, motors, break thresholds and compound
 shapes are not yet public. Linear-cast CCD mitigates fast linear tunneling but
 does not eliminate the documented extreme-angular-motion case.
 
-Phase 3.4 exposes a numeric direct-IP client with timeout and the Phase 3.3
-handshake. There is not yet a public authoritative listener/server, DNS, LAN
-discovery, automatic firewall rule, or complete two-process sample; those are
-Phase 3.5–3.8 work. The client advances only when its owning thread calls
-`poll()`, so a stalled game loop also stalls callbacks and deadline enforcement.
+Phase 3.5 exposes a numeric direct-IP client and headless authoritative server
+with the Phase 3.3 handshake. There is not yet a listen-host role, DNS, LAN
+discovery, automatic firewall rule, player identity, replication, or supported
+two-process sample; those are Phase 3.6–4.x work. Transports advance only when
+their owning thread polls (the server `run()` loop does this automatically), so
+a stalled owning loop also stalls callbacks and deadline enforcement.
 Exact protocol/schema equality is the only compatibility policy in wire format
 1; migrations or version ranges are not implied.
 
@@ -73,6 +74,12 @@ raises, the exception propagates after its event was drained and the callback
 is not replayed. GNS rate/ping metrics can be zero or `-1` before enough live
 traffic exists. Direct transport encryption is unauthenticated and is not a
 player/account identity guarantee.
+
+Server bind addresses are numeric only. Binding a LAN-facing address can cause
+Windows Firewall to prompt or block inbound traffic; Easy3D does not create or
+modify firewall rules. Phase 3.5 is validated over local IPv4 loopback, with
+native multi-client and Python client/server tests. Separate-process LAN and
+abrupt-process-loss validation remain Phase 3.8.
 
 The supported Windows build uses MSVC. A diagnostic attempt with MinGW GCC
 15.1 reaches an upstream Protobuf `musttail` compile failure in

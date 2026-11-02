@@ -1,7 +1,8 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2 and the Phase 3.4 direct-IP client are validated.
+native core. Phases 0–2 and the Phase 3.5 direct-IP client/headless server are
+validated.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -383,8 +384,25 @@ for event in client.poll():
 ```
 
 `connect()` is asynchronous; `poll()` advances native callbacks, handshake,
-timeouts and Python callback dispatch. The public authoritative listener/server
-is Phase 3.5, so this client is not yet a complete two-process sample.
+timeouts and Python callback dispatch.
+
+Phase 3.5 adds an authoritative server that never creates a window or renderer:
+
+```python
+from easy3d import Scene, Server
+
+server = Server(port=7777, max_players=16, tick_rate=60)
+server.load_scene(Scene("World"))
+server.run()
+```
+
+`Server.run()` paces the existing Python lifecycle/native physics scheduler at
+the configured fixed rate. `Server.step()` executes one deterministic tick for
+tests and embedding. Connect, message and disconnect callbacks are dispatched
+only by `run()`, `step()` or `poll()` on their calling thread. Run
+`python examples/04_dedicated_server/main.py --seconds 2` for a bounded
+headless example. Listen-host roles, LAN discovery, replication and player
+identity remain later milestones.
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 

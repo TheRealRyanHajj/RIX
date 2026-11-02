@@ -20,6 +20,10 @@ namespace {
 constexpr std::size_t maximum_transport_messages_per_poll = 256;
 constexpr std::size_t receive_batch_size = 16;
 constexpr std::size_t maximum_transport_close_reason_size = 120;
+// GNS accepts application close reasons only in its 1000+ range. Keep a
+// transport-adapter sentinel distinct from Easy3D's protocol error codes and
+// map it back to the public graceful code 1 on receipt.
+constexpr int graceful_transport_close_reason = 1011;
 
 NetworkClientConfig validate_client_config(NetworkClientConfig config) {
     if (!std::isfinite(config.connection_timeout_seconds) ||
@@ -208,13 +212,16 @@ struct NetworkClient::Impl final {
         case k_ESteamNetworkingConnectionState_ClosedByPeer:
         case k_ESteamNetworkingConnectionState_ProblemDetectedLocally: {
             const auto raw_reason = info.m_info.m_eEndReason;
-            const auto code = raw_reason > 0 && raw_reason <=
-                                                  std::numeric_limits<std::uint16_t>::max()
-                                  ? static_cast<std::uint16_t>(raw_reason)
-                                  : static_cast<std::uint16_t>(
-                                        detail::DisconnectCode::TransportFailure);
+            const detail::DisconnectCode code =
+                raw_reason == graceful_transport_close_reason
+                    ? detail::DisconnectCode::Normal
+                    : raw_reason > 0 &&
+                              raw_reason <=
+                                  std::numeric_limits<std::uint16_t>::max()
+                          ? static_cast<detail::DisconnectCode>(raw_reason)
+                          : detail::DisconnectCode::TransportFailure;
             complete_disconnect(
-                static_cast<detail::DisconnectCode>(code),
+                code,
                 safe_transport_debug(info.m_info.m_szEndDebug,
                                      "network connection closed"),
                 false);
@@ -250,7 +257,7 @@ struct NetworkClient::Impl final {
         if (handle != k_HSteamNetConnection_Invalid) {
             static_cast<void>(sockets->SetConnectionUserData(handle, 0));
             const int transport_code = code == detail::DisconnectCode::Normal
-                                           ? 0
+                                           ? graceful_transport_close_reason
                                            : static_cast<int>(code);
             const std::string debug_reason =
                 reason.size() <= maximum_transport_close_reason_size

@@ -217,11 +217,13 @@ if(EASY3D_ENABLE_NETWORKING)
     list(APPEND easy3d_core_sources
         engine/src/network/backend_gns.cpp
         engine/src/network/client_gns.cpp
+        engine/src/network/server_gns.cpp
     )
 else()
     list(APPEND easy3d_core_sources
         engine/src/network/backend_stub.cpp
         engine/src/network/client_stub.cpp
+        engine/src/network/server_stub.cpp
     )
 endif()
 
@@ -450,6 +452,12 @@ if(BUILD_TESTING)
         target_link_libraries(easy3d_network_client_tests
             PRIVATE Easy3D::core GameNetworkingSockets::static)
         add_test(NAME easy3d.network_client COMMAND easy3d_network_client_tests)
+
+        add_executable(easy3d_network_server_tests tests/cpp/test_network_server.cpp)
+        target_compile_features(easy3d_network_server_tests PRIVATE cxx_std_20)
+        target_link_libraries(easy3d_network_server_tests
+            PRIVATE Easy3D::core GameNetworkingSockets::static)
+        add_test(NAME easy3d.network_server COMMAND easy3d_network_server_tests)
     endif()
 
     add_executable(easy3d_physics_tests tests/cpp/test_physics.cpp)

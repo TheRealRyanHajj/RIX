@@ -2680,3 +2680,145 @@ Phase 3.4: **DONE**. Immediate next task: Phase 3.5 — implement the public
 authoritative headless `Server`, multi-connection handshake ownership and
 fixed-step Python server logic without SDL or bgfx. No replication or entity
 synchronization is claimed by this checkpoint.
+
+## 2026-11-01 — Phase 3.5 headless authoritative server (complete)
+
+### Bounded approach
+
+Add a single-owner native GameNetworkingSockets listener with a bounded player
+count, per-connection Phase 3.3 server handshake/deadline, opaque connection
+IDs, poll-group message draining, reliable/unreliable sends, explicit stop and
+copied transport events. Keep every GNS callback native and make `poll()` the
+only state/message pump. A networking-disabled source must still compile and
+fail explicitly.
+
+Expose a Python `easy3d.network.Server` that owns the native listener plus the
+existing `SimulationScheduler`. It will attach one `Scene`, run a monotonic
+fixed-rate blocking loop with thread-safe `stop()`, dispatch connect/message/
+disconnect callbacks only on the run/poll thread, and offer a deterministic
+single-tick method for tests. It must never instantiate `Engine`, SDL or bgfx.
+This milestone does not add listen-host client roles, LAN discovery,
+replication, identities, prefabs or RPCs.
+
+Planned files: network headers/sources, CMake, pybind bindings/stubs, Python
+network and package exports, native/Python tests, a minimal dedicated-server
+example, protocol/API/architecture/known-issues/decision docs and the 3.5
+checkbox only after verification. Primary risks are listener callback
+ownership before accept, per-peer timeout/queue cleanup, stopping a paced
+Python loop from another thread, and proving headless operation in the
+graphics-disabled native matrix.
+
+Planned verification: targeted native server tests (including multiple real
+localhost clients), graphics-disabled compilation/tests, Python deterministic
+tick and threaded run/stop tests, editable install/import, full Debug/Release/
+headless CTest matrices, full pytest and package audit.
+
+### Implemented
+
+- Added native `NetworkServer`, a numeric IPv4/IPv6 GNS listener with one poll
+  group, bounded maximum including handshaking sockets, monotonic opaque IDs,
+  per-peer Phase 3.3 handshake/deadline/negotiated limit, copied bounded events,
+  reliable/unreliable sends, aggregate counters and explicit restartable stop.
+- Kept `poll()` as the only callback/message pump and capped each pass at 256
+  transport messages. Incoming peers stay invisible to application code until
+  client confirmation. Protocol mismatch, server-full, silent peer timeout,
+  message bounds, remote/local close and transport errors clean their native
+  records without exposing GNS handles or calling Python.
+- Preserved graceful close semantics across GNS's 1000+ application-reason
+  restriction with a private transport sentinel mapped back to Easy3D's stable
+  public code `1`. Added stable server-stopped `1009` and server-full `1010`
+  codes. Accepted peers close before the listen socket so GNS cannot replace
+  the server reason with an ungraceful listener teardown.
+- Added typed `easy3d.network.Server` and root `easy3d.Server`. It exclusively
+  owns one `Scene`, composes the existing `SimulationScheduler`, paces a
+  fixed-rate `run()`, offers exact single-tick `step()`, thread-safe stop
+  requests, sends/broadcast/disconnect, immutable state/counters, and
+  connect/message/disconnect callbacks on the owning Python thread. It never
+  constructs `Engine`, `Input`, SDL or bgfx.
+- Added a real native multi-client localhost suite covering bidirectional
+  reliable/unreliable payloads, two simultaneous players, connection limits,
+  protocol rejection, silent raw-GNS handshake timeout, exact clean/stop codes,
+  send bounds, counter reset and listener restart. Added Python configuration,
+  scene/physics tick, paced run/stop, callback and real client/server exchange
+  regressions.
+- Added `examples/04_dedicated_server` using only public API, graphics-disabled
+  fallback compilation, API/protocol/architecture/known-issue documentation
+  and ADR-0026. Listen-host roles, discovery, identity and replication remain
+  explicitly unclaimed.
+
+### Failures found and corrected
+
+- The first Python pass had two failures. The headless tick test expected a
+  physics-step counter without creating the lazily owned physics world; setting
+  scene gravity made the test exercise a real native physics owner. More
+  importantly, a server stop emitted its local event but the client remained
+  connected. GNS documents that `CloseListenSocket` ungracefully closes all
+  accepted peers; shutdown had closed the listener first. Reversing that order
+  preserved code `1009`, and the remote regression now passes.
+- Reviewing normal close behavior found that Easy3D code `1` is outside GNS's
+  accepted application range. Passing zero would be rewritten to GNS generic
+  `1000`, colliding with Easy3D's malformed-message code. A private `1011`
+  adapter sentinel now maps to/from public `1`; both client→server and
+  server→client clean closes are covered.
+- The first parallel matrix launcher preserved escaped quotes around
+  `VsDevCmd.bat`; all three commands returned `is not recognized` before a
+  build began. The established PowerShell-composed `cmd /c` invocation then
+  built and passed every matrix. This was recorded rather than presented as a
+  product failure.
+
+### Exact final verification evidence
+
+```text
+cmake --build build\windows-headless --config Debug --parallel 4
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.54 sec
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.65 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.78 sec
+
+ctest --test-dir build\windows-headless -C Debug -R easy3d.network_server --repeat until-fail:20 --output-on-failure
+100% tests passed, 0 tests failed out of 1
+Total Test time (real) = 5.09 sec
+
+# From the documented Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3927230
+sha256=bf6364df1d86dea750b1daae0458513f91a4e6d97c8369c0621323fe990234da
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 59%]
+.................................................                        [100%]
+121 passed in 0.51s
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+cl /nologo /std:c++20 /EHsc /Iengine\include /c engine\src\network\server_stub.cpp /Fobuild\network_server_stub.obj
+server_stub.cpp
+# exit code 0
+
+build\venv311\Scripts\python.exe examples\04_dedicated_server\main.py --bind 127.0.0.1 --port 32391 --tick-rate 120 --seconds 0.05
+Easy3D dedicated server listening on 127.0.0.1:32391 at 120 Hz
+server stopped after 6 authoritative ticks
+
+build\venv311\Scripts\python.exe -m pip show -f easy3d
+# editable metadata plus easy3d/_easy3d.cp311-win_amd64.pyd; no private dependency artifacts
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+Phase 3.5: **DONE**. Immediate next task: Phase 3.6 — compose a listen server
+from isolated authoritative `Server` and local `Client` roles without duplicate
+authority callbacks or shared transport identity. No discovery or replication
+is claimed by this checkpoint.

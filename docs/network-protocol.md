@@ -90,6 +90,13 @@ cannot inject control text into diagnostics. Defined protocol codes are:
 - `1006` message too large
 - `1007` connection/handshake timeout
 - `1008` local transport failure
+- `1009` authoritative server stopped
+- `1010` server connection limit reached
+
+GNS reserves application close reasons below 1000. The adapter therefore uses
+private transport sentinel `1011` for a graceful close and maps it back to the
+public Easy3D code `1` at both endpoints; `1011` is never emitted as an
+application event or protocol rejection.
 
 Parsing checks the outer 512-byte cap and declared length before reading or
 copying payload data. Local state-machine misuse raises a C++ logic error;
@@ -127,20 +134,46 @@ bytes and the negotiated limit. Rates are observations, not bandwidth promises.
 Python connect/disconnect callbacks run synchronously while the owning thread
 calls `poll()`; no native callback enters Python.
 
+## Implemented in Phase 3.5
+
+`easy3d.network.Server` owns one numeric direct-IP GNS listen socket, one poll
+group and a bounded map of native peer records. An incoming transport is not an
+application player: it receives an opaque local connection ID and becomes
+visible through `connected`/`connections` only after the Phase 3.3 server
+handshake validates the client's confirmation. A monotonic per-peer deadline
+removes silent pre-handshake sockets. The configured player limit includes
+handshaking sockets so incomplete peers cannot bypass the bound.
+
+`poll()` is the sole callback and message pump. It accepts connections, drains
+at most 256 messages, advances every handshake, applies each negotiated payload
+limit and copies application events into one bounded queue. Reliable and
+unreliable sends target established opaque IDs. Stop, application disconnect,
+remote close, protocol rejection, timeout, queue overflow and transport failure
+clean their peer records without exposing GNS handles. The listener closes
+accepted peers before closing the listen socket because GNS documents listener
+close as ungraceful for attached connections; this preserves code `1009` for
+remote clients.
+
+The Python server uses the existing `SimulationScheduler` at a configured
+fixed tick rate. Network callbacks and scene scripts run on the `run`, `step`
+or `poll` caller, never from a GNS callback. `stop()` only signals while a run
+loop is active and is safe to request from another Python thread. No `Engine`,
+SDL window or bgfx renderer is constructed.
+
 ## Not implemented yet
 
-There is no public listener/server, discovery, firewall automation, DNS,
-replication or RPC yet. Phase 3.5 supplies the authoritative headless server;
-Phase 3.8 supplies a supported two-process sample and abrupt-disconnect/port
-collision integration. Transport encryption also does not establish account or
-player identity; authentication remains a separate extension boundary.
+There is no listen-host role, discovery, firewall automation, DNS, replication
+or RPC yet. Phase 3.8 supplies a supported two-process sample and abrupt-
+disconnect/port-collision integration. Transport encryption also does not
+establish account or player identity; authentication remains a separate
+extension boundary.
 
 ## Threading and ownership
 
-The current direct-IP client services its connection-specific GNS callback only
-through `RunCallbacks()` inside `poll()`. The callback mutates native connection
-state and never calls Python, mutates a `Scene`, or retains a borrowed Python
-buffer. Application events contain copied bounded data. Python callbacks and
-protocol event handling run afterward on the gameplay thread that called
-`poll()`. A client is single-owner; concurrent calls from multiple threads are
-unsupported.
+The direct-IP client and server service GNS callbacks only through
+`RunCallbacks()` inside their owning poll. Native callbacks mutate native
+connection state and never call Python, mutate a `Scene`, or retain a borrowed
+Python buffer. Application events contain copied bounded data. Python callbacks
+and protocol handling run afterward on the owning gameplay thread. Transport
+objects are single-owner; concurrent operations are unsupported except the
+high-level server's thread-safe `stop()` request.

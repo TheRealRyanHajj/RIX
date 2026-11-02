@@ -99,6 +99,22 @@ struct NetworkConnectionMetrics final {
     TransportStats transport;
 };
 
+enum class NetworkServerState : std::uint8_t {
+    Stopped,
+    Listening,
+};
+
+struct NetworkServerConfig final {
+    std::string bind_address{"0.0.0.0"};
+    std::uint16_t port{7777};
+    std::size_t maximum_connections{32};
+    double handshake_timeout_seconds{5.0};
+    std::size_t event_queue_capacity{4096};
+    std::size_t maximum_message_size{64 * 1024};
+    std::uint16_t protocol_version{1};
+    std::uint32_t schema_version{1};
+};
+
 [[nodiscard]] NetworkBackendInfo network_backend_info();
 
 class NetworkBackendRuntime final {
@@ -167,6 +183,36 @@ public:
     [[nodiscard]] NetworkClientState state() const noexcept;
     [[nodiscard]] std::string remote_address() const;
     [[nodiscard]] NetworkConnectionMetrics metrics() const;
+
+    [[nodiscard]] SendStatus send(ConnectionId connection,
+                                  std::span<const std::uint8_t> payload,
+                                  NetworkDelivery delivery) override;
+    void disconnect(ConnectionId connection, std::string reason) override;
+    [[nodiscard]] std::vector<TransportEvent> poll(
+        std::size_t maximum_events) override;
+    [[nodiscard]] TransportStats stats() const override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+class NetworkServer final : public NetworkTransport {
+public:
+    explicit NetworkServer(NetworkServerConfig config = {});
+    ~NetworkServer() override;
+
+    NetworkServer(const NetworkServer&) = delete;
+    NetworkServer& operator=(const NetworkServer&) = delete;
+    NetworkServer(NetworkServer&&) = delete;
+    NetworkServer& operator=(NetworkServer&&) = delete;
+
+    void start();
+    void stop(std::string reason = "server stopped");
+    [[nodiscard]] NetworkServerState state() const noexcept;
+    [[nodiscard]] std::uint16_t port() const noexcept;
+    [[nodiscard]] std::string bind_address() const;
+    [[nodiscard]] std::vector<ConnectionId> connections() const;
 
     [[nodiscard]] SendStatus send(ConnectionId connection,
                                   std::span<const std::uint8_t> payload,

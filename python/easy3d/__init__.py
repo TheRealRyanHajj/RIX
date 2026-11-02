@@ -36,6 +36,7 @@ from .game import Game, RendererStats
 from .input import ActionState, Binding, Input, PointerState
 from .lights import Light
 from .math import Quat, Vec2, Vec3
+from .network import Server
 from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, Constraint, PhysicsHit
 from .player import Player
@@ -96,6 +97,7 @@ __all__ = [
     "Binding",
     "Plane",
     "Scene",
+    "Server",
     "SchedulerStats",
     "ScriptCallbackError",
     "Sphere",

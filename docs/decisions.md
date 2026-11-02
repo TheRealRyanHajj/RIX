@@ -833,3 +833,46 @@ application counters and GNS observational ping/rate/queue metrics.
   discovery and firewall guidance remain explicit later work.
 - The client is usable against a compatible peer, but the public authoritative
   listener and headless server remain Phase 3.5 rather than a hidden test API.
+
+## ADR-0026: Poll-owned native listener with a Python fixed-rate headless owner
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+A dedicated server must accept multiple peers and run the same Python gameplay
+lifecycle/native physics used by a game without creating SDL or bgfx. GNS
+listener callbacks arrive through process-global callback pumping, incomplete
+handshakes can consume resources, and `CloseListenSocket` ungracefully closes
+accepted connections. Python must remain on one deterministic gameplay thread,
+while an operator or test still needs to request shutdown from another thread.
+
+### Decision
+
+Give `NetworkServer` one numeric direct-IP listener, one poll group, a bounded
+peer map and a shared bounded application event queue. Count handshaking peers
+against the configured maximum. Give every peer a monotonic local ID, Phase 3.3
+server handshake, deadline and negotiated payload cap; publish it only after
+client confirmation. Route callbacks through inherited per-connection GNS user
+data, clear that pointer before close, and keep `poll()` as the sole callback/
+message pump. Close accepted peers before the listener so remote clients retain
+the stable server-stop reason.
+
+Compose the native transport in Python with the existing `SimulationScheduler`
+and exclusive `Scene` ownership. `run()` paces exact fixed ticks, `step()` is a
+deterministic one-tick seam, and callbacks execute only on the caller. A
+thread-safe event is the sole cross-thread operation used by `stop()`; no other
+concurrent server calls are supported.
+
+### Consequences
+
+- Dedicated simulation and physics run in graphics-disabled builds without an
+  `Engine`, window, input owner or renderer device.
+- Pre-handshake peers are bounded, timed out and invisible to gameplay.
+- Python server logic uses the same lifecycle/order as single-player scripts;
+  callback exceptions remain visible rather than being swallowed by native
+  worker code.
+- This is an authoritative dedicated role only. Listen hosts, discovery,
+  player identity, replication and cross-process sample guarantees remain
+  later milestones.
