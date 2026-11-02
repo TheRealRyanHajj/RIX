@@ -1023,6 +1023,37 @@ CharacterMotorState Scene::character_state(const EntityHandle handle) const {
     return physics_->character_state(component.character);
 }
 
+void Scene::correct_character(const EntityHandle handle,
+                              const Vec3 position,
+                              const Quat rotation,
+                              const Vec3 linear_velocity) {
+    CharacterEntity& component = require_character_entity(handle);
+    physics_->correct_character(
+        component.character, position, rotation, linear_velocity);
+    const CharacterMotorState state = physics_->character_state(component.character);
+    Transform transform = world_.local_transform(handle);
+    transform.position = state.position;
+    transform.rotation = state.rotation;
+    world_.set_local_transform(handle, transform);
+}
+
+void Scene::replay_character_input(const EntityHandle handle,
+                                   const Vec3 movement,
+                                   const float heading_degrees,
+                                   const bool jump,
+                                   const float delta_seconds) {
+    CharacterEntity& component = require_character_entity(handle);
+    physics_->replay_character_input(
+        component.character,
+        {movement, heading_degrees, jump},
+        delta_seconds);
+    const CharacterMotorState state = physics_->character_state(component.character);
+    Transform transform = world_.local_transform(handle);
+    transform.position = state.position;
+    transform.rotation = state.rotation;
+    world_.set_local_transform(handle, transform);
+}
+
 void Scene::teleport_character(const EntityHandle handle,
                                const Vec3 position,
                                const float heading_degrees) {

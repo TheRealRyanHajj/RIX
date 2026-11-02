@@ -5,7 +5,16 @@ import time
 
 import pytest
 
-from easy3d import Entity, NetworkError, Quat, Scene, Server, network, replication
+from easy3d import (
+    Entity,
+    NetworkError,
+    Quat,
+    RemoteTransformInterpolator,
+    Scene,
+    Server,
+    network,
+    replication,
+)
 
 
 def _registry() -> replication.PrefabRegistry:
@@ -84,12 +93,19 @@ def test_transform_schema_codec_interpolation_and_history_bounds() -> None:
     authority.scale = (3, 5, 7)
     second = replication._transform_frame(source, 2, 20)
     mirror._apply(second)
-    assert mirror.interpolate_transforms(15) == 1
+    remote = RemoteTransformInterpolator(mirror, delay_ticks=5)
+    assert remote.update(20) == 1
     replica = mirror.objects[0].entity
     assert tuple(replica.position) == pytest.approx((5, 2, -1))
     assert tuple(replica.scale) == pytest.approx((2, 3, 4))
     assert math.isclose(replica.quaternion.length, 1.0, abs_tol=1.0e-6)
     assert replica.quaternion.almost_equal(Quat.from_euler((0, 60, 0)), 1.0e-5)
+    assert remote.stats.calls == 1
+    assert remote.stats.applied_objects == 1
+    assert remote.stats.last_authority_tick == 20
+    assert remote.stats.last_render_tick == 15
+    with pytest.raises(ValueError, match="backwards"):
+        remote.update(19)
 
     mirror._apply(first)
     assert mirror.transform_stats.stale_dropped == 1

@@ -414,13 +414,28 @@ an immutable validated input value. `PredictedCharacterController(controller,
 role="client" | "server", max_pending_inputs=256)` drives the same native motor
 on both sides. Client `submit(...)` allocates a strictly increasing uint64
 sequence, applies immediately, and appends to `pending_inputs`; a full queue or
-sequence exhaustion raises `NetworkError`. `acknowledge(sequence)` removes the
-acknowledged prefix and rejects backward or never-submitted acknowledgements.
-Server `accept(command)` has no replay queue and native code rejects zero,
-duplicate, or stale sequence numbers before input changes. Direct offline
-`CharacterController.set_input` remains unsequenced;
-`set_sequenced_input` and `last_input_sequence` expose the lower-level contract.
-No method in this Phase 5.1 surface sends commands or corrects/replays state.
+sequence exhaustion raises `NetworkError`. Server `accept(command)` has no
+replay queue and native code rejects zero, duplicate, or stale sequences before
+input changes.
+
+After stepping accepted input, authority `make_correction(server_tick)` returns
+an immutable `CharacterCorrection` containing a nondecreasing acknowledged
+sequence, strictly newer uint64 simulation tick, position, normalized rotation
+and velocity. Client `reconcile(correction, fixed_delta_seconds=...)` rejects a
+future/backward acknowledgement or stale tick, restores the authority state,
+removes the acknowledged prefix and replays every retained newer input through
+the ordinary native motor without advancing the whole scene. The queue bound is
+therefore also the replay-work bound. `CorrectionStats` reports correction,
+replay and pre-snap position-error totals/max/average. Direct offline
+`CharacterController.set_input` remains unsequenced; `correct_state` and
+`replay_input` expose the lower-level mechanics. Easy3D does not serialize these
+values automatically; games choose their bounded input/correction channel.
+
+`RemoteTransformInterpolator(client_replication, delay_ticks=2)` applies the
+existing clamped remote transform histories at authority tick minus delay.
+Authority ticks cannot move backward. `RemoteInterpolationStats` exposes calls,
+applied objects and the last authority/render ticks. It does not extrapolate or
+operate on the local predicted character.
 
 Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
 `(0, -9.81, 0)` without allocation and creates the world when changed. During a

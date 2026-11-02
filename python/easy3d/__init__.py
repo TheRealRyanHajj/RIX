@@ -49,9 +49,14 @@ from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, Constraint, PhysicsHit
 from .player import Player
 from .prediction import (
+    CharacterCorrection,
     CharacterInputCommand,
+    CorrectionStats,
     PredictedCharacterController,
     PredictionRole,
+    ReconciliationResult,
+    RemoteInterpolationStats,
+    RemoteTransformInterpolator,
 )
 from .replication import (
     ClientReplication,
@@ -99,6 +104,7 @@ __all__ = [
     "Camera",
     "CallbackStats",
     "CharacterController",
+    "CharacterCorrection",
     "CharacterInputCommand",
     "ClientMatchState",
     "ClientReplication",
@@ -107,6 +113,7 @@ __all__ = [
     "Constraint",
     "ClockDomain",
     "Cooldown",
+    "CorrectionStats",
     "Cube",
     "Entity",
     "Easing",
@@ -149,6 +156,9 @@ __all__ = [
     "Player",
     "PredictedCharacterController",
     "PredictionRole",
+    "ReconciliationResult",
+    "RemoteInterpolationStats",
+    "RemoteTransformInterpolator",
     "RendererStats",
     "Rigidbody",
     "ActionState",

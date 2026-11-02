@@ -360,6 +360,21 @@ class _NativeScene:
         jump: bool = False,
     ) -> None: ...
     def character_input_sequence(self, handle: EntityHandle) -> int: ...
+    def correct_character(
+        self,
+        handle: EntityHandle,
+        position: tuple[float, float, float],
+        rotation: tuple[float, float, float, float],
+        linear_velocity: tuple[float, float, float],
+    ) -> None: ...
+    def replay_character_input(
+        self,
+        handle: EntityHandle,
+        movement: tuple[float, float, float],
+        heading_degrees: float,
+        jump: bool,
+        delta_seconds: float,
+    ) -> None: ...
     def physics_raycast_all(
         self,
         origin: tuple[float, float, float],

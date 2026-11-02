@@ -275,6 +275,34 @@ int main() {
     assert(almost_equal(character_world.character_state(first_person).position,
                         Vec3{-3.0F, 1.0F, 2.0F},
                         1.0e-4F));
+    character_world.correct_character(
+        first_person,
+        {2.0F, 1.0F, 3.0F},
+        Quat::from_euler_degrees({0.0F, 45.0F, 0.0F}),
+        {1.0F, 0.0F, 0.0F});
+    const CharacterMotorState corrected = character_world.character_state(first_person);
+    assert(almost_equal(corrected.position, Vec3{2.0F, 1.0F, 3.0F}, 1.0e-4F));
+    assert(almost_equal(corrected.linear_velocity, Vec3{1.0F, 0.0F, 0.0F}, 1.0e-4F));
+    assert(character_world.character_input_sequence(first_person) == 2);
+    character_world.replay_character_input(
+        first_person,
+        {.movement = {1.0F, 0.0F, 0.0F}, .heading_degrees = 90.0F},
+        1.0F / 60.0F);
+    assert(character_world.character_input_sequence(first_person) == 2);
+    assert(!almost_equal(character_world.character_state(first_person).position,
+                         corrected.position,
+                         1.0e-5F));
+    bool rejected_correction = false;
+    try {
+        character_world.correct_character(
+            first_person,
+            {},
+            {},
+            {501.0F, 0.0F, 0.0F});
+    } catch (const std::invalid_argument&) {
+        rejected_correction = true;
+    }
+    assert(rejected_correction);
     character_world.destroy_character(first_person);
     assert(!character_world.is_alive(first_person));
     assert(character_world.character_count() == 1);

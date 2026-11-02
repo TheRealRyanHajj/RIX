@@ -222,6 +222,13 @@ public:
     [[nodiscard]] std::uint64_t character_input_sequence(
         PhysicsCharacterHandle handle) const;
     [[nodiscard]] CharacterMotorState character_state(PhysicsCharacterHandle handle) const;
+    void correct_character(PhysicsCharacterHandle handle,
+                           Vec3 position,
+                           Quat rotation,
+                           Vec3 linear_velocity);
+    void replay_character_input(PhysicsCharacterHandle handle,
+                                CharacterMotorInput input,
+                                float delta_seconds);
     void teleport_character(PhysicsCharacterHandle handle, Vec3 position, float heading_degrees);
 
     [[nodiscard]] PhysicsConstraintHandle create_constraint(

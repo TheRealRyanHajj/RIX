@@ -1255,6 +1255,41 @@ PYBIND11_MODULE(_easy3d, module) {
                      state.grounded);
              },
              py::arg("handle"))
+        .def("correct_character",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& position,
+                const std::array<float, 4>& rotation,
+                const std::array<float, 3>& linear_velocity) {
+                 scene.correct_character(
+                     handle,
+                     {position[0], position[1], position[2]},
+                     {rotation[0], rotation[1], rotation[2], rotation[3]},
+                     {linear_velocity[0], linear_velocity[1], linear_velocity[2]});
+             },
+             py::arg("handle"),
+             py::arg("position"),
+             py::arg("rotation"),
+             py::arg("linear_velocity"))
+        .def("replay_character_input",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& movement,
+                const float heading_degrees,
+                const bool jump,
+                const float delta_seconds) {
+                 scene.replay_character_input(
+                     handle,
+                     {movement[0], movement[1], movement[2]},
+                     heading_degrees,
+                     jump,
+                     delta_seconds);
+             },
+             py::arg("handle"),
+             py::arg("movement"),
+             py::arg("heading_degrees"),
+             py::arg("jump"),
+             py::arg("delta_seconds"))
         .def("teleport_character",
              [](easy3d::Scene& scene,
                 const easy3d::EntityHandle handle,

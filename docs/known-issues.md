@@ -145,12 +145,12 @@ fields and relevant transforms but does not preserve client wrapper identity or
 reconnect a lost transport/account identity. Automatic ACK/baseline recovery is
 Phase 5 work.
 
-Phase 5.1 sequences and immediately predicts native character input, but the
-facade deliberately does not choose an RPC/input transport or accept an
-authoritative pose correction. Applications must forward commands themselves.
-The bounded pending queue is retained for Phase 5.2 reconciliation/replay; a
-full queue raises `NetworkError` instead of silently discarding unacknowledged
-input. Remote players still use the Phase 4 transform interpolation stream.
+Phase 5.1/5.2 prediction deliberately does not choose an RPC/input transport;
+applications forward commands and corrections themselves. A full pending queue
+raises `NetworkError` instead of silently discarding unacknowledged input.
+Replay advances one `CharacterVirtual` against the current collision world; it
+does not roll back dynamic bodies, contacts, scripts or the full scene. Remote
+players use delayed, clamped Phase 4 transform histories without extrapolation.
 
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection

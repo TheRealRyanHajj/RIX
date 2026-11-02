@@ -668,6 +668,64 @@ public:
         }
     }
 
+    void update_character(CharacterSlot& slot, const float delta_seconds) {
+        JPH::CharacterVirtual& character = *slot.character;
+        character.UpdateGroundVelocity();
+
+        const float heading = JPH::DegreesToRadians(slot.input.heading_degrees);
+        const JPH::Quat heading_rotation =
+            JPH::Quat::sRotation(JPH::Vec3::sAxisY(), heading);
+        const JPH::Vec3 local_movement(
+            slot.input.movement.x, 0.0F, -slot.input.movement.z);
+        const JPH::Vec3 desired_direction = heading_rotation * local_movement;
+        const JPH::Vec3 desired_horizontal = desired_direction * slot.settings.speed;
+
+        const bool on_walkable_ground = character.GetGroundState() ==
+                                        JPH::CharacterVirtual::EGroundState::OnGround;
+        const float control = on_walkable_ground ? 1.0F : slot.settings.air_control;
+        const float maximum_delta = slot.settings.acceleration * control * delta_seconds;
+        const JPH::Vec3 current = character.GetLinearVelocity();
+        JPH::Vec3 horizontal(approach(current.GetX(), desired_horizontal.GetX(), maximum_delta),
+                             0.0F,
+                             approach(current.GetZ(), desired_horizontal.GetZ(), maximum_delta));
+
+        JPH::Vec3 velocity = horizontal + current.GetY() * JPH::Vec3::sAxisY();
+        const JPH::Vec3 ground_velocity = character.GetGroundVelocity();
+        const bool moving_towards_ground = current.GetY() - ground_velocity.GetY() < 0.1F;
+        if (on_walkable_ground && moving_towards_ground) {
+            velocity = horizontal + ground_velocity;
+            if (slot.input.jump) velocity += slot.settings.jump_speed * JPH::Vec3::sAxisY();
+        }
+        const JPH::Vec3 world_gravity = physics_system.GetGravity();
+        velocity += world_gravity * delta_seconds;
+        character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(velocity));
+
+        if (slot.settings.mode == CharacterMotorMode::FirstPerson) {
+            character.SetRotation(heading_rotation);
+        } else if (!desired_direction.IsNearZero()) {
+            const float facing = std::atan2(-desired_direction.GetX(),
+                                            -desired_direction.GetZ());
+            character.SetRotation(
+                JPH::Quat::sRotation(JPH::Vec3::sAxisY(), facing));
+        }
+
+        JPH::CharacterVirtual::ExtendedUpdateSettings update_settings;
+        update_settings.mWalkStairsStepUp =
+            slot.settings.step_height * JPH::Vec3::sAxisY();
+        update_settings.mStickToFloorStepDown =
+            -slot.settings.step_height * JPH::Vec3::sAxisY();
+        character.ExtendedUpdate(
+            delta_seconds,
+            world_gravity,
+            update_settings,
+            physics_system.GetDefaultBroadPhaseLayerFilter(character_layer),
+            physics_system.GetDefaultLayerFilter(character_layer),
+            {},
+            {},
+            temporary_allocator);
+        slot.input.jump = false;
+    }
+
     void clear() noexcept {
         free_constraint_indices.clear();
         free_constraint_indices.reserve(constraint_slots.size());
@@ -1020,6 +1078,37 @@ CharacterMotorState PhysicsWorld::character_state(
                 JPH::CharacterVirtual::EGroundState::OnGround};
 }
 
+void PhysicsWorld::correct_character(const PhysicsCharacterHandle handle,
+                                     const Vec3 position,
+                                     const Quat rotation,
+                                     const Vec3 linear_velocity) {
+    if (!finite(position) || !finite(rotation) || !finite(linear_velocity) ||
+        linear_velocity.length() > 500.0F) {
+        throw std::invalid_argument(
+            "character correction must have finite position/rotation and velocity no greater than 500 m/s");
+    }
+    Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    slot.character->SetPosition(to_jolt_position(position));
+    slot.character->SetRotation(to_jolt(rotation.normalized()));
+    slot.character->SetLinearVelocity(to_jolt(linear_velocity));
+    slot.character->RefreshContacts(
+        impl_->physics_system.GetDefaultBroadPhaseLayerFilter(character_layer),
+        impl_->physics_system.GetDefaultLayerFilter(character_layer),
+        {},
+        {},
+        impl_->temporary_allocator);
+}
+
+void PhysicsWorld::replay_character_input(const PhysicsCharacterHandle handle,
+                                          CharacterMotorInput input,
+                                          const float delta_seconds) {
+    if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0F) {
+        throw std::invalid_argument("character replay delta must be finite and positive");
+    }
+    set_character_input(handle, input);
+    impl_->update_character(impl_->require_slot(handle), delta_seconds);
+}
+
 void PhysicsWorld::teleport_character(const PhysicsCharacterHandle handle,
                                       const Vec3 position,
                                       const float heading_degrees) {
@@ -1361,63 +1450,9 @@ void PhysicsWorld::step(const float delta_seconds, const std::uint32_t collision
         throw std::invalid_argument("physics collision steps must be between 1 and 64");
     }
 
-    const JPH::Vec3 world_gravity = impl_->physics_system.GetGravity();
     for (Impl::CharacterSlot& slot : impl_->character_slots) {
         if (!slot.alive) continue;
-        JPH::CharacterVirtual& character = *slot.character;
-        character.UpdateGroundVelocity();
-
-        const float heading = JPH::DegreesToRadians(slot.input.heading_degrees);
-        const JPH::Quat heading_rotation =
-            JPH::Quat::sRotation(JPH::Vec3::sAxisY(), heading);
-        const JPH::Vec3 local_movement(
-            slot.input.movement.x, 0.0F, -slot.input.movement.z);
-        const JPH::Vec3 desired_direction = heading_rotation * local_movement;
-        const JPH::Vec3 desired_horizontal = desired_direction * slot.settings.speed;
-
-        const bool on_walkable_ground = character.GetGroundState() ==
-                                        JPH::CharacterVirtual::EGroundState::OnGround;
-        const float control = on_walkable_ground ? 1.0F : slot.settings.air_control;
-        const float maximum_delta = slot.settings.acceleration * control * delta_seconds;
-        const JPH::Vec3 current = character.GetLinearVelocity();
-        JPH::Vec3 horizontal(approach(current.GetX(), desired_horizontal.GetX(), maximum_delta),
-                             0.0F,
-                             approach(current.GetZ(), desired_horizontal.GetZ(), maximum_delta));
-
-        JPH::Vec3 velocity = horizontal + current.GetY() * JPH::Vec3::sAxisY();
-        const JPH::Vec3 ground_velocity = character.GetGroundVelocity();
-        const bool moving_towards_ground = current.GetY() - ground_velocity.GetY() < 0.1F;
-        if (on_walkable_ground && moving_towards_ground) {
-            velocity = horizontal + ground_velocity;
-            if (slot.input.jump) velocity += slot.settings.jump_speed * JPH::Vec3::sAxisY();
-        }
-        velocity += world_gravity * delta_seconds;
-        character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(velocity));
-
-        if (slot.settings.mode == CharacterMotorMode::FirstPerson) {
-            character.SetRotation(heading_rotation);
-        } else if (!desired_direction.IsNearZero()) {
-            const float facing = std::atan2(-desired_direction.GetX(),
-                                            -desired_direction.GetZ());
-            character.SetRotation(
-                JPH::Quat::sRotation(JPH::Vec3::sAxisY(), facing));
-        }
-
-        JPH::CharacterVirtual::ExtendedUpdateSettings update_settings;
-        update_settings.mWalkStairsStepUp =
-            slot.settings.step_height * JPH::Vec3::sAxisY();
-        update_settings.mStickToFloorStepDown =
-            -slot.settings.step_height * JPH::Vec3::sAxisY();
-        character.ExtendedUpdate(
-            delta_seconds,
-            world_gravity,
-            update_settings,
-            impl_->physics_system.GetDefaultBroadPhaseLayerFilter(character_layer),
-            impl_->physics_system.GetDefaultLayerFilter(character_layer),
-            {},
-            {},
-            impl_->temporary_allocator);
-        slot.input.jump = false;
+        impl_->update_character(slot, delta_seconds);
     }
 
     const JPH::EPhysicsUpdateError error = impl_->physics_system.Update(

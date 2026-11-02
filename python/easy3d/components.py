@@ -570,6 +570,49 @@ class CharacterController:
             self._entity._handle
         )
 
+    def correct_state(
+        self,
+        position: Vec3 | tuple[float, float, float],
+        rotation: Quat | tuple[float, float, float, float],
+        linear_velocity: Vec3 | tuple[float, float, float],
+    ) -> None:
+        """Restore one authoritative native motor state for reconciliation."""
+
+        target_position = Vec3.from_value(position)
+        target_rotation = rotation if isinstance(rotation, Quat) else Quat(rotation)
+        target_velocity = Vec3.from_value(linear_velocity)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.correct_character(
+            self._entity._handle,
+            tuple(target_position),
+            tuple(target_rotation),
+            tuple(target_velocity),
+        )
+
+    def replay_input(
+        self,
+        movement: Vec3 | tuple[float, float, float],
+        *,
+        heading_degrees: float = 0.0,
+        jump: bool = False,
+        delta_seconds: float,
+    ) -> None:
+        """Replay one validated tick without advancing the rest of the scene."""
+
+        if not isinstance(jump, bool):
+            raise TypeError("jump must be a bool")
+        heading = float(heading_degrees)
+        delta = float(delta_seconds)
+        if not math.isfinite(heading):
+            raise ValueError("heading_degrees must be finite")
+        if not math.isfinite(delta) or delta <= 0:
+            raise ValueError("delta_seconds must be finite and positive")
+        value = Vec3.from_value(movement)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.replay_character_input(
+            self._entity._handle, tuple(value), heading, jump, delta
+        )
+
     def teleport(
         self,
         position: Vec3 | tuple[float, float, float],

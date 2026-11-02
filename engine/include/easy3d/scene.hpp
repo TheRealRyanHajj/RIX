@@ -302,6 +302,15 @@ public:
                                        bool jump);
     [[nodiscard]] std::uint64_t character_input_sequence(EntityHandle handle) const;
     [[nodiscard]] CharacterMotorState character_state(EntityHandle handle) const;
+    void correct_character(EntityHandle handle,
+                           Vec3 position,
+                           Quat rotation,
+                           Vec3 linear_velocity);
+    void replay_character_input(EntityHandle handle,
+                                Vec3 movement,
+                                float heading_degrees,
+                                bool jump,
+                                float delta_seconds);
     void teleport_character(EntityHandle handle, Vec3 position, float heading_degrees);
     [[nodiscard]] PhysicsConstraintHandle add_fixed_constraint(EntityHandle first,
                                                                EntityHandle second);

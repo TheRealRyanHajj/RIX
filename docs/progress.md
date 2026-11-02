@@ -3861,3 +3861,88 @@ Total Test time (real) = 1.67 sec
 Phase 5.1: **DONE**. Exact next task: Phase 5.2 — authoritative character
 correction, bounded pending-input replay, remote interpolation and correction
 telemetry.
+
+## 2026-11-01 — Phase 5.2 reconciliation and interpolation telemetry (active)
+
+### Bounded approach
+
+Add a native character correction primitive that atomically restores finite
+position, normalized rotation and bounded velocity, plus a character-only replay
+step that reuses the exact ordinary Jolt motor update without advancing the
+whole world. Refactor the motor step once so live simulation and replay cannot
+drift into separate algorithms.
+
+Extend `PredictedCharacterController` so the authority snapshots state after a
+processed input and the client validates a monotonic acknowledgement, snaps to
+that state, removes the acknowledged queue prefix and replays the bounded
+remainder at an explicit fixed delta. Preserve the already-accepted native
+input sequence during replay. Record correction count/error and replay count.
+Wrap the existing bounded remote transform history with an explicit interpolation
+delay and call/applied-object telemetry rather than adding a second transform
+stream. Do not claim rollback of arbitrary bodies or automatic wire transport.
+
+### Result
+
+Refactored the Jolt character update into one native routine used by both the
+ordinary scene step and character-only replay. Native correction restores
+finite position, normalized rotation and velocity capped at 500 m/s, refreshes
+contacts and preserves the latest accepted input sequence. Replay applies one
+validated command/fixed delta without advancing the whole `PhysicsSystem` and
+synchronizes the owning scene entity.
+
+Authority `make_correction(server_tick)` captures post-step state with a
+strictly newer simulation tick. Client `reconcile` rejects stale ticks,
+future/backward acknowledgements and invalid state; it restores authority,
+removes the acknowledged prefix and replays the bounded suffix. Corrections may
+advance server tick without advancing the acknowledged input sequence. Public
+telemetry reports corrections, last/total replay work and last/max/average
+position error.
+
+`RemoteTransformInterpolator` applies the existing bounded transform history at
+an explicit delayed render tick and reports calls, applied-object totals and
+last authority/render ticks. It rejects backward time and performs no
+extrapolation. Tests prove native live/replay motor parity, acknowledgement and
+tick rules, bounded queue replay, correction telemetry and delayed remote
+interpolation.
+
+### Exact verification evidence
+
+```text
+# Under the supported x64 VsDevCmd environment:
+cmake --build --preset windows-debug
+Build completed: 30 targets/actions, exit 0
+
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.73 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3932918
+sha256=fa4dc50e4a08a096f468a0f3eb7c7f3fff3a32726bcb048f1a295a4861edeb15
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_prediction.py tests/python/test_network_transform.py -q
+...........                                                              [100%]
+11 passed in 0.26s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+....................................                                     [100%]
+180 passed in 19.68s
+
+cmake --build --preset windows-release
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 2.25 sec
+
+cmake --build build\windows-headless --config Release --parallel 4
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.57 sec
+```
+
+Phase 5.2: **DONE**. Exact next task: Phase 5.3 — deterministic lag, jitter and
+loss scenarios at declared representative conditions with documented failure
+behavior.

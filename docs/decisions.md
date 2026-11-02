@@ -648,8 +648,8 @@ movement. Scene pose synchronization occurs only after the native step.
 ### Consequences
 
 - Character movement remains headless and no Jolt callback enters Python.
-- The input/state boundary can gain sequence numbers and replay in Phase 5.1
-  without replacing the collision motor.
+- The input/state boundary gained sequence numbers and bounded replay in Phase
+  5 without replacing the collision motor.
 - Characters participate in normal queries, body collision, sensors and copied
   contact events through their inner body.
 - Camera pitch/offset/obstruction remain explicit game-side behavior.
@@ -1160,3 +1160,18 @@ feeds received commands through the identical native path without retaining a
 client replay queue. Do not hide transport, corrections or replay in the Phase
 5.1 facade. This makes duplicate/stale rejection authoritative and client/server
 motor parity testable while leaving reconciliation policy explicit for 5.2.
+
+## ADR-0039: Reconcile one virtual character, never an implicit world rollback
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+An authority correction carries a strictly newer server tick, acknowledged
+input sequence and complete native character pose/velocity. Restore that state,
+discard the acknowledged queue prefix and replay the bounded suffix through the
+same motor update routine used by the live fixed step. Replay queries the current
+collision world but does not call `PhysicsSystem::Update` or rewind bodies,
+scripts and contacts. Measure pre-snap position error and replay work. Keep
+remote actors on the existing bounded transform history with an explicit delay
+wrapper and telemetry. This provides deterministic motor parity without making
+an unsupported whole-world rollback claim.

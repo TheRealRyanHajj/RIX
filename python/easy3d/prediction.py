@@ -9,7 +9,8 @@ import math
 
 from ._easy3d import NetworkError
 from .components import CharacterController
-from .math import Vec3
+from .math import Quat, Vec3
+from .replication import ClientReplication
 
 
 _MAX_SEQUENCE = (1 << 64) - 1
@@ -46,12 +47,136 @@ class CharacterInputCommand:
         object.__setattr__(self, "heading_degrees", heading)
 
 
+@dataclass(frozen=True, slots=True)
+class CharacterCorrection:
+    """Authoritative post-input motor state; sequence zero is the initial state."""
+
+    acknowledged_sequence: int
+    server_tick: int
+    position: tuple[float, float, float] | Vec3
+    rotation: tuple[float, float, float, float] | Quat
+    linear_velocity: tuple[float, float, float] | Vec3
+
+    def __post_init__(self) -> None:
+        sequence = self.acknowledged_sequence
+        if isinstance(sequence, bool) or not isinstance(sequence, int):
+            raise TypeError("acknowledged_sequence must be an integer")
+        if not 0 <= sequence <= _MAX_SEQUENCE:
+            raise ValueError("acknowledged_sequence must be a uint64")
+        if isinstance(self.server_tick, bool) or not isinstance(self.server_tick, int):
+            raise TypeError("server_tick must be an integer")
+        if not 0 <= self.server_tick <= _MAX_SEQUENCE:
+            raise ValueError("server_tick must be a uint64")
+        position = Vec3.from_value(self.position)
+        rotation = (
+            self.rotation if isinstance(self.rotation, Quat) else Quat(self.rotation)
+        ).normalized()
+        velocity = Vec3.from_value(self.linear_velocity)
+        if velocity.length > 500.0:
+            raise ValueError("linear_velocity must not exceed 500 m/s")
+        object.__setattr__(self, "position", tuple(position))
+        object.__setattr__(self, "rotation", tuple(rotation))
+        object.__setattr__(self, "linear_velocity", tuple(velocity))
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationResult:
+    acknowledged_sequence: int
+    server_tick: int
+    replayed_inputs: int
+    position_error: float
+
+
+@dataclass(frozen=True, slots=True)
+class CorrectionStats:
+    corrections: int
+    replayed_inputs: int
+    last_replay_count: int
+    last_position_error: float
+    maximum_position_error: float
+    total_position_error: float
+
+    @property
+    def average_position_error(self) -> float:
+        return (
+            self.total_position_error / self.corrections
+            if self.corrections
+            else 0.0
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteInterpolationStats:
+    calls: int
+    applied_objects: int
+    last_authority_tick: float
+    last_render_tick: float
+
+
+class RemoteTransformInterpolator:
+    """Apply the existing remote history at an explicit buffered render tick."""
+
+    __slots__ = (
+        "_replication",
+        "_delay_ticks",
+        "_calls",
+        "_applied_objects",
+        "_last_authority_tick",
+        "_last_render_tick",
+    )
+
+    def __init__(
+        self, replication: ClientReplication, *, delay_ticks: float = 2.0
+    ) -> None:
+        if not isinstance(replication, ClientReplication):
+            raise TypeError("replication must be an easy3d.ClientReplication")
+        delay = float(delay_ticks)
+        if not math.isfinite(delay) or delay < 0:
+            raise ValueError("delay_ticks must be finite and non-negative")
+        self._replication = replication
+        self._delay_ticks = delay
+        self._calls = 0
+        self._applied_objects = 0
+        self._last_authority_tick = 0.0
+        self._last_render_tick = 0.0
+
+    @property
+    def delay_ticks(self) -> float:
+        return self._delay_ticks
+
+    @property
+    def stats(self) -> RemoteInterpolationStats:
+        return RemoteInterpolationStats(
+            self._calls,
+            self._applied_objects,
+            self._last_authority_tick,
+            self._last_render_tick,
+        )
+
+    def update(self, authority_tick: float) -> int:
+        if isinstance(authority_tick, bool) or not isinstance(
+            authority_tick, (int, float)
+        ):
+            raise TypeError("authority_tick must be a number")
+        tick = float(authority_tick)
+        if not math.isfinite(tick) or not 0 <= tick <= _MAX_SEQUENCE:
+            raise ValueError("authority_tick must be a finite non-negative uint64 range value")
+        if self._calls and tick < self._last_authority_tick:
+            raise ValueError("authority_tick cannot move backwards")
+        render_tick = max(0.0, tick - self._delay_ticks)
+        applied = self._replication.interpolate_transforms(render_tick)
+        self._calls += 1
+        self._applied_objects += applied
+        self._last_authority_tick = tick
+        self._last_render_tick = render_tick
+        return applied
+
+
 class PredictedCharacterController:
     """Apply sequenced inputs and retain a bounded client replay queue.
 
-    This Phase 5.1 facade does not send commands or reconcile authoritative
-    corrections. Callers own transport; Phase 5.2 consumes ``pending_inputs``
-    for bounded replay.
+    Callers own transport. The authority snapshots post-step state and the
+    client restores it before replaying the unacknowledged bounded suffix.
     """
 
     __slots__ = (
@@ -61,6 +186,13 @@ class PredictedCharacterController:
         "_pending",
         "_next_sequence",
         "_last_acknowledged_sequence",
+        "_last_correction_tick",
+        "_corrections",
+        "_replayed_inputs",
+        "_last_replay_count",
+        "_last_position_error",
+        "_maximum_position_error",
+        "_total_position_error",
     )
 
     def __init__(
@@ -88,6 +220,13 @@ class PredictedCharacterController:
         self._pending: deque[CharacterInputCommand] = deque()
         self._next_sequence = controller.last_input_sequence
         self._last_acknowledged_sequence = 0
+        self._last_correction_tick: int | None = None
+        self._corrections = 0
+        self._replayed_inputs = 0
+        self._last_replay_count = 0
+        self._last_position_error = 0.0
+        self._maximum_position_error = 0.0
+        self._total_position_error = 0.0
 
     @property
     def controller(self) -> CharacterController:
@@ -112,6 +251,17 @@ class PredictedCharacterController:
     @property
     def pending_inputs(self) -> tuple[CharacterInputCommand, ...]:
         return tuple(self._pending)
+
+    @property
+    def correction_stats(self) -> CorrectionStats:
+        return CorrectionStats(
+            self._corrections,
+            self._replayed_inputs,
+            self._last_replay_count,
+            self._last_position_error,
+            self._maximum_position_error,
+            self._total_position_error,
+        )
 
     def submit(
         self,
@@ -143,6 +293,91 @@ class PredictedCharacterController:
             raise TypeError("command must be an easy3d.CharacterInputCommand")
         self._apply(command)
         self._next_sequence = command.sequence
+
+    def make_correction(self, server_tick: int) -> CharacterCorrection:
+        """Snapshot authoritative state after its last accepted input was stepped."""
+
+        self._require_role(PredictionRole.SERVER, "make_correction")
+        if isinstance(server_tick, bool) or not isinstance(server_tick, int):
+            raise TypeError("server_tick must be an integer")
+        if not 0 <= server_tick <= _MAX_SEQUENCE:
+            raise ValueError("server_tick must be a uint64")
+        if (
+            self._last_correction_tick is not None
+            and server_tick <= self._last_correction_tick
+        ):
+            raise ValueError("server_tick must be strictly increasing")
+        position, rotation, velocity, _ground_normal, _grounded = (
+            self._controller._state()
+        )
+        correction = CharacterCorrection(
+            self.last_input_sequence,
+            server_tick,
+            position,
+            rotation,
+            velocity,
+        )
+        self._last_correction_tick = server_tick
+        return correction
+
+    def reconcile(
+        self,
+        correction: CharacterCorrection,
+        *,
+        fixed_delta_seconds: float,
+    ) -> ReconciliationResult:
+        """Restore authority state and replay the bounded unacknowledged suffix."""
+
+        self._require_role(PredictionRole.CLIENT, "reconcile")
+        if not isinstance(correction, CharacterCorrection):
+            raise TypeError("correction must be an easy3d.CharacterCorrection")
+        delta = float(fixed_delta_seconds)
+        if not math.isfinite(delta) or delta <= 0:
+            raise ValueError("fixed_delta_seconds must be finite and positive")
+        sequence = correction.acknowledged_sequence
+        if sequence > self._next_sequence:
+            raise ValueError("correction acknowledges an input that was not submitted")
+        if sequence < self._last_acknowledged_sequence:
+            raise ValueError("correction acknowledgement cannot move backwards")
+        if (
+            self._last_correction_tick is not None
+            and correction.server_tick <= self._last_correction_tick
+        ):
+            raise ValueError("correction server_tick must be strictly increasing")
+
+        current_position = self._controller.entity.position
+        target_position = Vec3(correction.position)
+        position_error = (current_position - target_position).length
+        replay = tuple(
+            command for command in self._pending if command.sequence > sequence
+        )
+
+        self._controller.correct_state(
+            correction.position,
+            correction.rotation,
+            correction.linear_velocity,
+        )
+        for command in replay:
+            self._controller.replay_input(
+                command.movement,
+                heading_degrees=command.heading_degrees,
+                jump=command.jump,
+                delta_seconds=delta,
+            )
+
+        self.acknowledge(sequence)
+        self._last_correction_tick = correction.server_tick
+        self._corrections += 1
+        self._replayed_inputs += len(replay)
+        self._last_replay_count = len(replay)
+        self._last_position_error = position_error
+        self._maximum_position_error = max(
+            self._maximum_position_error, position_error
+        )
+        self._total_position_error += position_error
+        return ReconciliationResult(
+            sequence, correction.server_tick, len(replay), position_error
+        )
 
     def acknowledge(self, sequence: int) -> int:
         """Remove acknowledged client inputs and return the removal count."""

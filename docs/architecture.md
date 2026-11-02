@@ -288,8 +288,23 @@ entry point. A client allocates a monotonic command, applies it immediately and
 retains it in a fixed-capacity deque until explicit acknowledgement. An
 authority accepts externally sequenced immutable commands and keeps no replay
 queue. Queue saturation and uint64 exhaustion fail explicitly. Transport is
-caller-owned at this stage; authoritative state correction and replay are not
-performed until Phase 5.2.
+caller-owned.
+
+After an authority has stepped an accepted command, it snapshots a monotonic
+server tick, acknowledged input sequence, position, normalized rotation and
+bounded velocity. Client reconciliation rejects future/backward acknowledgements
+and non-newer server ticks, restores that native state, drops the acknowledged
+deque prefix and runs the remaining fixed-tick commands through the same
+`update_character` routine used by live simulation. Replay advances only that
+virtual character against the current collision world; it does not rewind or
+advance arbitrary rigid bodies. Correction telemetry records pre-snap position
+error and replay work.
+
+Remote actors retain the Phase 4 bounded transform histories. The Phase 5
+interpolator derives `render_tick = max(0, authority_tick - delay)` and delegates
+to the existing clamped vector/quaternion interpolation, while counting calls
+and applied objects. It does not extrapolate or touch the locally predicted
+motor.
 
 ## Advanced physics resources
 

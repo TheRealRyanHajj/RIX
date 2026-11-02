@@ -307,8 +307,16 @@ command = prediction.submit((0, 0, 1), heading_degrees=0)
 
 Client submission applies immediately and retains an immutable bounded queue;
 the server path rejects duplicate or stale sequences before changing native
-motor input. Transport attachment, authoritative correction, and replay are
-not implicit—reconciliation is the next Phase 5 milestone.
+motor input. After its fixed step, authority calls `make_correction(server_tick)`.
+The client passes that state to `reconcile(..., fixed_delta_seconds=...)`, which
+snaps the native motor and replays only the unacknowledged bounded suffix.
+`correction_stats` reports error and replay work. Transport attachment remains
+explicit rather than choosing a game-specific input/RPC route.
+
+Remote replicas continue to use the bounded transform history. A
+`RemoteTransformInterpolator` subtracts a configured tick delay and reports
+interpolation calls/applied-object totals; it neither extrapolates nor changes
+the locally predicted character.
 
 Run the complete Phase 2 course with:
 
