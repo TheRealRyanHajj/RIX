@@ -437,3 +437,9 @@ peers before their Python connect callbacks run. Spawn/value/transform/RPC
 broadcasts target only snapshot-ready peers, preventing a later callback's peer
 from receiving a live spawn before its snapshot begin. Reliable ordering then
 places subsequent live state after that peer's queued snapshot end.
+
+Explicit resync reuses this same readiness boundary. A replay-guarded client
+control frame temporarily removes only that peer, streams a new complete
+snapshot and re-adds it on queue success. No client state is accepted and no
+parallel delta-patch format exists. Healthy peers continue receiving live state
+throughout another client's rebuild.

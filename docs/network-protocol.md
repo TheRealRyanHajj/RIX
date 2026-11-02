@@ -299,6 +299,16 @@ malformed, wrong-direction, replayed or ownership-tampered calls close the
 offending connection. Server-to-client calls receive the inverse validation.
 Reliable/unreliable is selected by schema and does not change authority.
 
+## Implemented in Phase 4.8
+
+Resync request type `8` is a reliable client control with exactly one nonzero
+uint64 caller sequence. The server requires a snapshot-ready peer, strictly
+newer sequence and a 250 ms minimum accepted interval. It temporarily removes
+the peer from live recipients, queues a fresh ordinary snapshot and restores
+readiness only after end is queued. Duplicate/replayed or malformed requests
+disconnect; excess valid requests inside the interval are ignored. The request
+contains no entity IDs or state.
+
 ## Not implemented yet
 
 There is no rendered-Game attachment, firewall automation, DNS, replicated

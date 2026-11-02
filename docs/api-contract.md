@@ -766,3 +766,14 @@ properties plus `remaining_ticks(current_tick)`. All four values use the normal
 reliable dirty-field stream and complete late-join snapshot. A listen host has
 one `ServerMatchState` on its authority; its local transport client has no
 second timer or authority transition path.
+
+## Replication resynchronization
+
+`ClientReplication.request_resync()` is available only after initial sync and
+queues a reliable nonzero monotonic request. The authority validates replay and
+a 250 ms minimum interval, removes that peer from live-update recipients, and
+queues the same complete epoch/schema/lifecycle/value/transform snapshot used
+for late join. Readiness returns only after snapshot end is queued. Snapshot
+begin clears and recreates client replicas; exact same-version/same-value field
+updates crossing the boundary are idempotent, while older or conflicting
+versions remain protocol errors.

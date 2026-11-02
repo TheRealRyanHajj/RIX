@@ -1133,3 +1133,16 @@ successfully queued. Send lifecycle, values, transforms and RPCs only to that
 set; remove peers on disconnect. This handles batched native connection events
 without allowing a live spawn to overtake a not-yet-started snapshot, while
 reliable channel order preserves updates queued after snapshot end.
+
+## ADR-0037: Explicit resync reuses the complete snapshot protocol
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Use a reliable type-8 control carrying only a caller-monotonic sequence. Validate
+replay and a minimum request interval, remove the requester from live readiness,
+and queue the ordinary complete snapshot before restoring it. Client snapshot
+begin destroys/recreates mirrors. Permit only exact idempotent same-version
+field duplicates across the boundary; reject older or conflicting versions.
+This restores coherent current state without client-authored patches or a
+second serialization format.

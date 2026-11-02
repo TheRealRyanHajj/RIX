@@ -37,6 +37,7 @@ _END = 4
 _VALUE = 5
 _TRANSFORM = 6
 _RPC = 7
+_RESYNC = 8
 _HEADER = struct.Struct("<4sHBBI")
 _BEGIN_PAYLOAD = struct.Struct("<QII16s")
 _SPAWN_PAYLOAD = struct.Struct("<QI")
@@ -52,6 +53,7 @@ _RPC_PREFIX = struct.Struct("<QHQB")
 _RPC_ARGUMENT_PREFIX = struct.Struct("<BI")
 _MAX_RPC_ARGUMENTS = 16
 _MAX_RPC_BYTES = 60 * 1024
+_RESYNC_PAYLOAD = struct.Struct("<Q")
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -636,6 +638,14 @@ def _rpc_value_spec(index: int, argument: RpcArgumentSpec) -> NetworkVarSpec:
     return NetworkVarSpec(index + 1, f"arg{index}", argument.type, b"", argument.max_bytes)
 
 
+def _resync_frame(sequence: int) -> bytes:
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        raise TypeError("resync sequence must be an integer")
+    if not 1 <= sequence <= 2**64 - 1:
+        raise ValueError("resync sequence must be a nonzero uint64")
+    return _frame(_RESYNC, _RESYNC_PAYLOAD.pack(sequence))
+
+
 def _rpc_frame(
     object_id: NetworkObjectId,
     spec: RpcSpec,
@@ -700,6 +710,7 @@ def _decode(frame: bytes) -> tuple[int, bytes]:
         _VALUE,
         _TRANSFORM,
         _RPC,
+        _RESYNC,
     ):
         raise ValueError("unknown replication frame type")
     if message_type not in (_VALUE, _TRANSFORM, _RPC) and len(frame) > _MAX_FRAME_SIZE:
@@ -731,6 +742,8 @@ class ServerReplication:
         "_old_disconnect",
         "_old_message",
         "_registry",
+        "_resync_last_sequences",
+        "_resync_last_times",
         "_server",
         "_snapshot_epoch",
         "_last_transform_flush",
@@ -777,6 +790,8 @@ class ServerReplication:
         registry.freeze()
         self._server = server
         self._registry = registry
+        self._resync_last_sequences: dict[ConnectionId, int] = {}
+        self._resync_last_times: dict[ConnectionId, float] = {}
         self._max_objects = max_objects
         self._max_transform_sends = max_transform_sends
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
@@ -1057,6 +1072,8 @@ class ServerReplication:
             if owner == event.connection:
                 self._owners[identifier] = None
         self._rpc_last_sequences.pop(event.connection, None)
+        self._resync_last_sequences.pop(event.connection, None)
+        self._resync_last_times.pop(event.connection, None)
         for key in [key for key in self._rpc_windows if key[0] == event.connection]:
             del self._rpc_windows[key]
         if self._old_disconnect is not None:
@@ -1066,14 +1083,35 @@ class ServerReplication:
         if event.payload.startswith(_MAGIC):
             try:
                 message_type, payload = _decode(event.payload)
-                if message_type != _RPC:
+                if message_type == _RPC:
+                    self._receive_rpc(event.connection, payload)
+                elif message_type == _RESYNC:
+                    self._receive_resync(event.connection, payload)
+                else:
                     raise PermissionError("client-authored replication is forbidden")
-                self._receive_rpc(event.connection, payload)
             except (KeyError, PermissionError, TypeError, ValueError) as error:
-                server.disconnect(event.connection, f"invalid RPC: {error}")
+                server.disconnect(event.connection, f"invalid replication control: {error}")
             return
         if self._old_message is not None:
             self._old_message(server, event)
+
+    def _receive_resync(self, connection: ConnectionId, payload: bytes) -> None:
+        if connection not in self._ready_connections:
+            raise PermissionError("resync arrived before replication snapshot readiness")
+        if len(payload) != _RESYNC_PAYLOAD.size:
+            raise ValueError("invalid resync payload size")
+        (sequence,) = _RESYNC_PAYLOAD.unpack(payload)
+        if sequence == 0 or sequence <= self._resync_last_sequences.get(connection, 0):
+            raise ValueError("resync sequence is stale or duplicated")
+        self._resync_last_sequences[connection] = sequence
+        now = time.monotonic()
+        previous = self._resync_last_times.get(connection)
+        if previous is not None and now - previous < 0.25:
+            return
+        self._resync_last_times[connection] = now
+        self._ready_connections.discard(connection)
+        if self._send_snapshot(connection):
+            self._ready_connections.add(connection)
 
     def _receive_rpc(self, connection: ConnectionId, payload: bytes) -> None:
         if connection not in self._ready_connections:
@@ -1242,6 +1280,7 @@ class ClientReplication:
         "_received_count",
         "_received_transforms",
         "_registry",
+        "_resync_sequence",
         "_rpc_executed",
         "_rpc_last_sequence",
         "_rpc_received",
@@ -1285,6 +1324,7 @@ class ClientReplication:
         self._client = client
         self._scene = scene
         self._registry = registry
+        self._resync_sequence = 0
         self._max_objects = max_objects
         self._max_transform_samples = max_transform_samples
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
@@ -1365,6 +1405,18 @@ class ClientReplication:
             return self._variables[(identifier, field_id)]
         except KeyError as error:
             raise KeyError("unknown network object field") from error
+
+    def request_resync(self) -> SendStatus:
+        """Request one complete authoritative snapshot on the reliable channel."""
+
+        if not self._synchronized or self._client.connection is None:
+            return SendStatus.INVALID_CONNECTION
+        if self._resync_sequence == 2**64 - 1:
+            raise NetworkError("resync request sequence space is exhausted")
+        self._resync_sequence += 1
+        return self._client.send(
+            _resync_frame(self._resync_sequence), delivery=Delivery.RELIABLE
+        )
 
     def call_server(
         self,
@@ -1531,6 +1583,10 @@ class ClientReplication:
                     variable._apply(value, version)
                 self._snapshot_fields.add(field_key)
             else:
+                if version == variable.version:
+                    if value != variable.value:
+                        raise ValueError("NetworkVar duplicate version conflicts with state")
+                    return
                 variable._apply(value, version)
             return
         if message_type == _TRANSFORM:

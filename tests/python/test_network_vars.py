@@ -116,8 +116,11 @@ def test_live_values_flush_and_late_join_current_state() -> None:
         assert late.variable(spawned.id, 2).version == 1
 
         stale = replication._value_frame(spawned.id, owner.variable(spawned.id, 2))
+        # Exact same-version state is idempotent across a resync/live boundary.
+        mirror._apply(stale)
+        older = replication.NetworkVar(owner.variable(spawned.id, 2).spec, authority=True)
         with pytest.raises(ValueError, match="stale"):
-            mirror._apply(stale)
+            mirror._apply(replication._value_frame(spawned.id, older))
     finally:
         mirror.clear()
         if late is not None:

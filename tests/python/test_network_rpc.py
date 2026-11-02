@@ -223,3 +223,41 @@ def test_rpc_codec_rejects_argument_errors_and_root_exports() -> None:
     assert easy3d.RpcDirection is replication.RpcDirection
     assert easy3d.RpcSpec is replication.RpcSpec
     assert easy3d.RpcStats is replication.RpcStats
+
+
+@pytest.mark.parametrize("kind", ("unknown", "truncated"))
+def test_live_malformed_rpc_disconnects_without_execution(kind: str) -> None:
+    server_calls: list[tuple[str, network.ConnectionId, tuple[object, ...]]] = []
+    registry = _server_calls_registry(server_calls, [])
+    server = _server()
+    server.load_scene(Scene(f"malformed {kind}"))
+    owner = replication.ServerReplication(server, registry)
+    spawned = owner.spawn(1)
+    client = network.Client(timeout=1, peer_timeout=2)
+    mirror = replication.ClientReplication(client, Scene(f"client {kind}"), registry)
+    try:
+        client.connect("127.0.0.1", server.port)
+        _pump(server, (mirror,), lambda: mirror.is_synchronized)
+        if kind == "unknown":
+            payload = replication._RPC_PREFIX.pack(spawned.id.value, 65535, 1, 0)
+        else:
+            payload = b"\x00"
+        frame = replication._HEADER.pack(
+            replication._MAGIC,
+            replication._WIRE_VERSION,
+            replication._RPC,
+            0,
+            len(payload),
+        ) + payload
+        assert client.send(frame) is network.SendStatus.QUEUED
+        _pump(
+            server,
+            (mirror,),
+            lambda: client.state is network.ClientState.DISCONNECTED,
+        )
+        assert not server_calls and owner.rpc_stats.executed == 0
+    finally:
+        mirror.clear()
+        owner.close(destroy=True)
+        server.stop()
+        server.unload_scene(clear=True)

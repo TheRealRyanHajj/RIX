@@ -550,6 +550,11 @@ and hit requests, synchronizes every remote transform, and requires two clients
 to destroy the authoritative replicated crate. It is headless loopback evidence,
 not a rendered or 32-player performance claim.
 
+Clients can call `ClientReplication.request_resync()` after detecting an
+application baseline problem. The reliable request is sequence/rate guarded;
+the authority temporarily withholds live traffic, queues a fresh complete
+snapshot, and restores that peer to the live-ready set only on success.
+
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 
 ```python

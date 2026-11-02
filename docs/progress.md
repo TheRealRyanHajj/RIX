@@ -3702,3 +3702,84 @@ build\venv311\Scripts\python.exe -m pytest -q
 Phase 4.7: **DONE**. Immediate next task: Phase 4.8 — consolidate adversarial
 replication integration for malformed RPC, ownership tampering, out-of-order
 updates, explicit state resync, and join/leave churn.
+
+## 2026-11-01 — Phase 4.8 adversarial replication and resync (active)
+
+### Bounded approach
+
+Add one reliable, empty-state client resync request containing only a nonzero
+caller sequence. Validate exact framing, monotonic sequence and a per-connection
+minimum interval. Temporarily remove that peer from the live-ready set, queue a
+fresh authoritative snapshot through the existing epoch/fingerprint/object/
+field/transform path, then restore readiness only on complete queue success.
+The client clears/recreates replicas at begin exactly as for initial join; no
+parallel patch format or client-authored state is introduced.
+
+Consolidate real-loopback adversarial coverage for malformed/unknown RPC,
+direction and ownership tampering, replay, transform reordering, resync of
+corrupted/missing local mirrors, and repeated join/leave with owner cleanup.
+Bound all waits and require post-failure healthy peers to remain coherent. Do
+not claim automatic baseline detection, reconnect identity persistence or Phase
+5 delta ACK recovery.
+
+### Implemented and verified
+
+- Added reliable type-8 `request_resync()` with nonzero monotonic client
+  sequence, exact fixed payload, replay rejection and 250 ms authority rate
+  guard. The requester leaves live readiness, receives the ordinary complete
+  snapshot, and returns only after snapshot-end queue success.
+- Client snapshot begin destroys/recreates mirrors and restores current values
+  plus relevant transform baseline. Exact same-version/same-value updates that
+  legitimately cross the resync boundary are idempotent; older/conflicting
+  versions remain errors.
+- Real two-client integration corrupts/removes one local mirror baseline,
+  resynchronizes it to authority, verifies wrapper replacement, then flushes a
+  boundary duplicate while the healthy peer stays connected and coherent.
+- Added 12 sequential join/leave cycles proving owner cleanup, authoritative
+  despawn and monotonic non-reused IDs. Added live unknown/truncated RPC
+  disconnect tests alongside existing direction, ownership, replay, rate and
+  out-of-order transform coverage.
+
+```text
+build\venv311\Scripts\python.exe -m pytest -q tests/python/test_replication_resync.py tests/python/test_network_rpc.py tests/python/test_network_transform.py tests/python/test_network_vars.py tests/python/test_coop_sandbox.py
+..................                                                       [100%]
+18 passed in 1.33s
+
+# Resync plus 12-cycle churn suite invoked 20 consecutive times.
+20/20 resync and churn iterations passed
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+............................                                             [100%]
+172 passed in 19.52s
+
+cmake --build build\windows-headless --config Release
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 16; 0.92 sec
+
+cmake --build --preset windows-debug
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 17; 0.93 sec
+
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 17; 0.79 sec
+
+# Under the supported x64 VsDevCmd environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3930455
+sha256=32d6e904cb524d58d37b80c85edf9b79db9e2d4dd367b44fdf127b5b59a5fe6e
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(hasattr(easy3d.ClientReplication, 'request_resync'))"
+0.1.0
+True
+```
+
+Phase 4.8: **DONE**. Phase 4 exit gate is complete for tested local Windows
+loopback: lifecycle, authoritative fields/transforms/match state, ownership and
+RPC validation remain coherent; unauthorized client state is rejected. Exact
+next task: Phase 5.1 — input-sequenced native predicted character motor on
+client and server.

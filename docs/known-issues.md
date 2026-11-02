@@ -139,6 +139,12 @@ to a rendered `Game`, simulate WAN impairment, prove physical-LAN behavior or
 make a 32-player capacity claim. Movement is authoritative request/replication,
 without prediction or reconciliation.
 
+Phase 4.8 resync is explicit/application-triggered; Easy3D does not yet infer a
+missing unreliable baseline from acknowledgements. It rebuilds current objects,
+fields and relevant transforms but does not preserve client wrapper identity or
+reconnect a lost transport/account identity. Automatic ACK/baseline recovery is
+Phase 5 work.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase
