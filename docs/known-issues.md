@@ -133,6 +133,12 @@ wired into every `Server` because games choose when a match clock is paused.
 The built-in phase machine carries round/deadline/revision only. Scores, teams,
 combat rules and persistence belong to the sandbox/arena milestones.
 
+The Phase 4.7 cooperative sandbox is a finite headless loopback integration
+scenario. It validates 2, 4 and 8 local clients but does not attach replication
+to a rendered `Game`, simulate WAN impairment, prove physical-LAN behavior or
+make a 32-player capacity claim. Movement is authoritative request/replication,
+without prediction or reconciliation.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

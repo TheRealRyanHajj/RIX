@@ -1121,3 +1121,15 @@ simulation deadline, round and monotonic revision in ordinary reliable
 the state. Explicit authority advancement preserves game-defined pause policy,
 uses the existing complete late-join snapshot, and avoids divergent wall clocks
 or a second listen-host timer.
+
+## ADR-0036: Live replication begins only after snapshot queue completion
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Transport establishment and replication readiness are distinct. Maintain an
+authority-local ready set populated only after begin/current state/end are
+successfully queued. Send lifecycle, values, transforms and RPCs only to that
+set; remove peers on disconnect. This handles batched native connection events
+without allowing a live spawn to overtake a not-yet-started snapshot, while
+reliable channel order preserves updates queued after snapshot end.

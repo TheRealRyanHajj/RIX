@@ -726,6 +726,7 @@ class ServerReplication:
         "_next_id",
         "_objects",
         "_owners",
+        "_ready_connections",
         "_old_connect",
         "_old_disconnect",
         "_old_message",
@@ -780,6 +781,7 @@ class ServerReplication:
         self._max_transform_sends = max_transform_sends
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
         self._owners: dict[NetworkObjectId, ConnectionId | None] = {}
+        self._ready_connections: set[ConnectionId] = set()
         self._next_id = 1
         self._snapshot_epoch = 0
         self._transform_sequence = 0
@@ -905,7 +907,7 @@ class ServerReplication:
         if connection is not None:
             if not isinstance(connection, ConnectionId):
                 raise TypeError("connection must be an easy3d.network.ConnectionId")
-            if connection not in self._server.connections:
+            if connection not in self._ready_connections:
                 raise ValueError("owner connection is not established")
         self._owners[identifier] = connection
 
@@ -927,7 +929,7 @@ class ServerReplication:
         rpc_id: int,
         *arguments: object,
     ) -> SendStatus:
-        if connection not in self._server.connections:
+        if connection not in self._ready_connections:
             return SendStatus.INVALID_CONNECTION
         identifier = (
             object_id
@@ -958,7 +960,7 @@ class ServerReplication:
     ) -> dict[ConnectionId, SendStatus]:
         return {
             connection: self.call_client(connection, object_id, rpc_id, *arguments)
-            for connection in self._server.connections
+            for connection in sorted(self._ready_connections)
         }
 
     def flush(self) -> int:
@@ -988,7 +990,7 @@ class ServerReplication:
         transform_objects = tuple(
             item for item in self.objects if self._registry.has_transform(item.prefab_id)
         )
-        connections = self._server.connections
+        connections = tuple(sorted(self._ready_connections))
         if len(transform_objects) * len(connections) > self._max_transform_sends:
             raise NetworkError("transform snapshot send bound is exceeded")
         sequence = self._transform_sequence + 1
@@ -1040,14 +1042,17 @@ class ServerReplication:
             self._objects.clear()
             self._owners.clear()
             self._variables.clear()
+        self._ready_connections.clear()
         self._closed = True
 
     def _on_connect(self, server: Server, connection: ConnectionId) -> None:
-        self._send_snapshot(connection)
-        if self._old_connect is not None:
+        if self._send_snapshot(connection):
+            self._ready_connections.add(connection)
+        if connection in self._ready_connections and self._old_connect is not None:
             self._old_connect(server, connection)
 
     def _on_disconnect(self, server: Server, event: NetworkEvent) -> None:
+        self._ready_connections.discard(event.connection)
         for identifier, owner in tuple(self._owners.items()):
             if owner == event.connection:
                 self._owners[identifier] = None
@@ -1071,6 +1076,8 @@ class ServerReplication:
             self._old_message(server, event)
 
     def _receive_rpc(self, connection: ConnectionId, payload: bytes) -> None:
+        if connection not in self._ready_connections:
+            raise PermissionError("RPC arrived before replication snapshot readiness")
         if len(payload) < _RPC_PREFIX.size:
             raise ValueError("truncated RPC prefix")
         object_value, rpc_id, sequence, _count = _RPC_PREFIX.unpack_from(payload)
@@ -1104,10 +1111,10 @@ class ServerReplication:
         spec.handler(replicated.entity, connection, *arguments)
         self._rpc_executed += 1
 
-    def _send_snapshot(self, connection: ConnectionId) -> None:
+    def _send_snapshot(self, connection: ConnectionId) -> bool:
         if self._snapshot_epoch == 2**64 - 1:
             self._server.disconnect(connection, "replication snapshot epoch exhausted")
-            return
+            return False
         self._snapshot_epoch += 1
         epoch = self._snapshot_epoch
         begin = _frame(
@@ -1121,7 +1128,7 @@ class ServerReplication:
         )
         if self._server.send(connection, begin) is not SendStatus.QUEUED:
             self._server.disconnect(connection, "replication snapshot backpressure")
-            return
+            return False
         for item in self.objects:
             spawn = _frame(
                 _SPAWN,
@@ -1129,14 +1136,14 @@ class ServerReplication:
             )
             if self._server.send(connection, spawn) is not SendStatus.QUEUED:
                 self._server.disconnect(connection, "replication snapshot backpressure")
-                return
+                return False
             for spec in self._registry.variables(item.prefab_id):
                 value = _value_frame(item.id, self._variables[(item.id, spec.id)])
                 if self._server.send(connection, value) is not SendStatus.QUEUED:
                     self._server.disconnect(
                         connection, "replication snapshot backpressure"
                     )
-                    return
+                    return False
             if self._registry.has_transform(item.prefab_id):
                 try:
                     relevant = (
@@ -1145,7 +1152,7 @@ class ServerReplication:
                     )
                 except Exception:
                     self._server.disconnect(connection, "replication relevance callback failed")
-                    return
+                    return False
                 if relevant:
                     transform = _transform_frame(
                         item,
@@ -1156,13 +1163,16 @@ class ServerReplication:
                         self._server.disconnect(
                             connection, "replication snapshot backpressure"
                         )
-                        return
+                        return False
         end = _frame(_END, _END_PAYLOAD.pack(epoch))
         if self._server.send(connection, end) is not SendStatus.QUEUED:
             self._server.disconnect(connection, "replication snapshot backpressure")
+            return False
+        return True
 
     def _broadcast(self, frame: bytes) -> None:
-        for connection, status in self._server.broadcast(frame).items():
+        for connection in tuple(sorted(self._ready_connections)):
+            status = self._server.send(connection, frame)
             if status is not SendStatus.QUEUED:
                 self._server.disconnect(connection, "replication update backpressure")
 

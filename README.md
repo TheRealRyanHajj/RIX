@@ -538,6 +538,18 @@ derives remaining display ticks from the replicated deadline. Late join uses
 the normal complete `NetworkVar` snapshot, so it receives current match phase,
 round, deadline and revision before becoming synchronized.
 
+Run the finite real-transport cooperative sandbox with:
+
+```powershell
+python examples/07_coop_sandbox/main.py --clients 2
+python examples/07_coop_sandbox/main.py --clients 8
+```
+
+It assigns one server-owned player per connection, validates owner-gated move
+and hit requests, synchronizes every remote transform, and requires two clients
+to destroy the authoritative replicated crate. It is headless loopback evidence,
+not a rendered or 32-player performance claim.
+
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 
 ```python

@@ -3641,3 +3641,64 @@ build\venv311\Scripts\python.exe -m pytest -q
 Phase 4.6: **DONE**. Immediate next task: Phase 4.7 — build the public-API
 2–8-player cooperative sandbox sample with synchronized spawn, movement,
 interaction/damage and destruction.
+
+## 2026-11-01 — Phase 4.7 cooperative sandbox (active)
+
+### Bounded approach
+
+Build a finite real-loopback public-API sample for 2–8 clients around one
+headless authority. Register player/crate prefabs, player transform and health
+state, plus owner-gated move/hit RPCs and a server-to-client assignment RPC.
+Spawn/despawn players from validated connection callbacks, validate movement
+bounds and hit distance on the server, replicate movement snapshots, decrement
+crate health and destroy it authoritatively.
+
+Run the scenario to completion without graphics: every client must receive all
+players and the crate, learn only its assigned player ID, submit movement,
+observe all remote positions, cooperate to damage/destroy the crate, observe
+the despawn and exit cleanly. Expose a reusable `run_sandbox()` result for an
+automated integration test and a documented CLI with `--clients 2..8`. Do not
+claim prediction, rendered-Game attachment, internet discovery or Phase 5
+bandwidth/scale behavior.
+
+### Implemented and verified
+
+- Added `examples/07_coop_sandbox` using only public `Server`, `Client`, prefab,
+  variable, transform, ownership and RPC APIs over real GNS loopback.
+- One authoritative player is spawned/owned per validated connection; a
+  reliable assignment RPC identifies only that client's player. Owner-gated
+  unreliable move and reliable hit requests validate bounds/proximity on the
+  server. Every client receives/interpolates every player, and two clients
+  cooperatively reduce then authoritatively despawn the crate.
+- The 4/8-client gate exposed a core batched-connection race: `connections`
+  already contained peers whose replication connect callback had not queued a
+  snapshot, so an earlier callback's live spawn could precede their begin.
+  Added a snapshot-ready connection set and restricted all live lifecycle,
+  value, transform and RPC sends to it. The sample is the regression test.
+- Automated runs cover 2, 4 and 8 clients plus invalid bounds. The complete
+  eight-client scenario passed 20 consecutive runs.
+
+```text
+build\venv311\Scripts\python.exe examples/07_coop_sandbox/main.py --clients 2
+sandbox complete: clients=2 players=2 interpolated=4 crate_destroyed=True rpc_executed=4
+
+build\venv311\Scripts\python.exe examples/07_coop_sandbox/main.py --clients 8
+sandbox complete: clients=8 players=8 interpolated=64 crate_destroyed=True rpc_executed=10
+
+build\venv311\Scripts\python.exe -m pytest -q tests/python/test_coop_sandbox.py tests/python/test_replication_lifecycle.py tests/python/test_network_rpc.py
+............                                                             [100%]
+12 passed in 0.54s
+
+# Full eight-client CLI scenario invoked 20 consecutive times.
+20/20 eight-client sandbox runs passed
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 43%]
+........................................................................ [ 86%]
+.......................                                                  [100%]
+167 passed in 18.99s
+```
+
+Phase 4.7: **DONE**. Immediate next task: Phase 4.8 — consolidate adversarial
+replication integration for malformed RPC, ownership tampering, out-of-order
+updates, explicit state resync, and join/leave churn.

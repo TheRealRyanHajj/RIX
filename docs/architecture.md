@@ -429,3 +429,11 @@ dispatch on the existing poll thread. Client dispatch validates the inverse
 direction and authority sequence. Reliable/unreliable selection changes
 delivery only, never authority. Application handlers remain responsible for
 scene/game-condition validation beyond the engine's schema and ownership gate.
+
+Replication peers become live-update recipients only after the authority has
+queued their complete initial snapshot. This readiness set is separate from the
+transport's established connection set: a native poll may establish several
+peers before their Python connect callbacks run. Spawn/value/transform/RPC
+broadcasts target only snapshot-ready peers, preventing a later callback's peer
+from receiving a live spawn before its snapshot begin. Reliable ordering then
+places subsequent live state after that peer's queued snapshot end.
