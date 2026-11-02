@@ -44,11 +44,15 @@ from .player import Player
 from .replication import (
     ClientReplication,
     NetworkObjectId,
+    NetworkTransform,
     NetworkValueType,
     NetworkVar,
     PrefabId,
     PrefabRegistry,
     ServerReplication,
+    TransformFlushStats,
+    TransformReplicationStats,
+    TransformSnapshot,
 )
 from .scene import Scene
 from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
@@ -93,6 +97,7 @@ __all__ = [
     "MissingAssetError",
     "NetworkError",
     "NetworkObjectId",
+    "NetworkTransform",
     "NetworkValueType",
     "NetworkVar",
     "PhysicsError",
@@ -118,6 +123,9 @@ __all__ = [
     "Scene",
     "Server",
     "ServerReplication",
+    "TransformFlushStats",
+    "TransformReplicationStats",
+    "TransformSnapshot",
     "SchedulerStats",
     "ScriptCallbackError",
     "Sphere",

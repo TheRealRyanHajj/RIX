@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -13,6 +14,7 @@ from weakref import WeakKeyDictionary
 
 from ._easy3d import NetworkError
 from .entity import Entity
+from .math import Quat, Vec3
 from .network import (
     Client,
     ConnectionId,
@@ -32,6 +34,7 @@ _SPAWN = 2
 _DESPAWN = 3
 _END = 4
 _VALUE = 5
+_TRANSFORM = 6
 _HEADER = struct.Struct("<4sHBBI")
 _BEGIN_PAYLOAD = struct.Struct("<QII16s")
 _SPAWN_PAYLOAD = struct.Struct("<QI")
@@ -40,6 +43,9 @@ _END_PAYLOAD = struct.Struct("<Q")
 _MAX_FRAME_SIZE = 64
 _VALUE_PREFIX = struct.Struct("<QHBQI")
 _MAX_VALUE_BYTES = 60 * 1024
+_TRANSFORM_PAYLOAD = struct.Struct("<QQQ10f")
+_MAX_TRANSFORM_SAMPLES = 256
+_MAX_FLOAT32 = 3.4028234663852886e38
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -86,6 +92,42 @@ class NetworkVarSpec:
     type: NetworkValueType
     default: object
     max_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class TransformSnapshot:
+    """One validated authority transform sample in local entity space."""
+
+    tick: int
+    sequence: int
+    position: Vec3
+    rotation: Quat
+    scale: Vec3
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkTransform:
+    """Schema marker for authoritative local transform replication."""
+
+    prefab_id: PrefabId
+
+
+@dataclass(frozen=True, slots=True)
+class TransformReplicationStats:
+    received: int
+    stale_dropped: int
+    unknown_dropped: int
+    history_evictions: int
+    interpolated: int
+
+
+@dataclass(frozen=True, slots=True)
+class TransformFlushStats:
+    sequence: int
+    tick: int
+    queued: int
+    filtered: int
+    backpressured: int
 
 
 def _encode_value(spec: NetworkVarSpec, value: object) -> bytes:
@@ -210,6 +252,7 @@ class PrefabRegistry:
         "_frozen",
         "_names",
         "_schema_version",
+        "_transforms",
     )
 
     def __init__(self, *, schema_version: int = 1, capacity: int = 1024) -> None:
@@ -225,6 +268,7 @@ class PrefabRegistry:
         self._capacity = capacity
         self._entries: dict[PrefabId, PrefabRegistration] = {}
         self._fields: dict[PrefabId, dict[int, NetworkVarSpec]] = {}
+        self._transforms: dict[PrefabId, NetworkTransform] = {}
         self._names: set[str] = set()
         self._frozen = False
 
@@ -264,6 +308,7 @@ class PrefabRegistry:
                 digest.update(field_name)
                 digest.update(struct.pack("<I", len(default)))
                 digest.update(default)
+            digest.update(b"\x01" if registration.id in self._transforms else b"\x00")
         return digest.digest()
 
     def register(
@@ -345,6 +390,22 @@ class PrefabRegistry:
         registration = self.resolve(prefab_id)
         return tuple(self._fields[registration.id][key] for key in sorted(self._fields[registration.id]))
 
+    def register_transform(self, prefab_id: PrefabId | int) -> NetworkTransform:
+        """Declare that a prefab receives authoritative transform snapshots."""
+
+        if self._frozen:
+            raise RuntimeError("prefab registry is frozen")
+        registration = self.resolve(prefab_id)
+        if registration.id in self._transforms:
+            raise ValueError("prefab transform replication is already registered")
+        result = NetworkTransform(registration.id)
+        self._transforms[registration.id] = result
+        return result
+
+    def has_transform(self, prefab_id: PrefabId | int) -> bool:
+        registration = self.resolve(prefab_id)
+        return registration.id in self._transforms
+
     def freeze(self) -> None:
         if not self._entries:
             raise RuntimeError("cannot freeze an empty prefab registry")
@@ -388,16 +449,42 @@ def _value_frame(
     return _HEADER.pack(_MAGIC, _WIRE_VERSION, _VALUE, 0, len(payload)) + payload
 
 
+def _transform_frame(
+    replicated: ReplicatedObject,
+    sequence: int,
+    tick: int,
+) -> bytes:
+    position = tuple(replicated.entity.position)
+    rotation = tuple(replicated.entity.quaternion.normalized())
+    scale = tuple(replicated.entity.scale)
+    values = (*position, *rotation, *scale)
+    if not all(
+        math.isfinite(value) and abs(value) <= _MAX_FLOAT32 for value in values
+    ):
+        raise ValueError("replicated transform components must fit finite float32")
+    if any(value == 0.0 for value in scale):
+        raise ValueError("replicated transform scale components must be nonzero")
+    payload = _TRANSFORM_PAYLOAD.pack(
+        replicated.id.value,
+        sequence,
+        tick,
+        *values,
+    )
+    return _HEADER.pack(_MAGIC, _WIRE_VERSION, _TRANSFORM, 0, len(payload)) + payload
+
+
 def _decode(frame: bytes) -> tuple[int, bytes]:
     if len(frame) < _HEADER.size or len(frame) > _HEADER.size + _VALUE_PREFIX.size + _MAX_VALUE_BYTES:
         raise ValueError("invalid replication frame size")
     magic, version, message_type, flags, size = _HEADER.unpack_from(frame)
     if magic != _MAGIC or version != _WIRE_VERSION or flags != 0:
         raise ValueError("invalid replication frame envelope")
-    if message_type not in (_BEGIN, _SPAWN, _DESPAWN, _END, _VALUE):
+    if message_type not in (_BEGIN, _SPAWN, _DESPAWN, _END, _VALUE, _TRANSFORM):
         raise ValueError("unknown replication frame type")
-    if message_type != _VALUE and len(frame) > _MAX_FRAME_SIZE:
+    if message_type not in (_VALUE, _TRANSFORM) and len(frame) > _MAX_FRAME_SIZE:
         raise ValueError("lifecycle frame exceeds its fixed bound")
+    if message_type == _TRANSFORM and len(frame) != _HEADER.size + _TRANSFORM_PAYLOAD.size:
+        raise ValueError("invalid transform frame size")
     if size != len(frame) - _HEADER.size:
         raise ValueError("invalid replication payload length")
     return message_type, frame[_HEADER.size :]
@@ -412,6 +499,7 @@ class ServerReplication:
     __slots__ = (
         "_closed",
         "_max_objects",
+        "_max_transform_sends",
         "_next_id",
         "_objects",
         "_old_connect",
@@ -420,6 +508,10 @@ class ServerReplication:
         "_registry",
         "_server",
         "_snapshot_epoch",
+        "_last_transform_flush",
+        "_last_transform_tick",
+        "_relevance_filter",
+        "_transform_sequence",
         "_variables",
         "__weakref__",
     )
@@ -430,6 +522,8 @@ class ServerReplication:
         registry: PrefabRegistry,
         *,
         max_objects: int = 65536,
+        max_transform_sends: int = 65536,
+        relevance_filter: Callable[[ConnectionId, ReplicatedObject], bool] | None = None,
     ) -> None:
         if not isinstance(server, Server):
             raise TypeError("server must be an easy3d.Server")
@@ -439,6 +533,12 @@ class ServerReplication:
             raise TypeError("max_objects must be an integer")
         if not 1 <= max_objects <= 1_000_000:
             raise ValueError("max_objects must be in [1, 1000000]")
+        if isinstance(max_transform_sends, bool) or not isinstance(max_transform_sends, int):
+            raise TypeError("max_transform_sends must be an integer")
+        if not 1 <= max_transform_sends <= 1_000_000:
+            raise ValueError("max_transform_sends must be in [1, 1000000]")
+        if relevance_filter is not None and not callable(relevance_filter):
+            raise TypeError("relevance_filter must be callable")
         if server in _attached_servers:
             raise RuntimeError("this server already has a replication owner")
         if server.connections:
@@ -447,9 +547,14 @@ class ServerReplication:
         self._server = server
         self._registry = registry
         self._max_objects = max_objects
+        self._max_transform_sends = max_transform_sends
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
         self._next_id = 1
         self._snapshot_epoch = 0
+        self._transform_sequence = 0
+        self._last_transform_tick: int | None = None
+        self._relevance_filter = relevance_filter
+        self._last_transform_flush = TransformFlushStats(0, 0, 0, 0, 0)
         self._variables: dict[tuple[NetworkObjectId, int], NetworkVar] = {}
         self._closed = False
         self._old_connect = server.on_connect
@@ -463,6 +568,18 @@ class ServerReplication:
     @property
     def objects(self) -> tuple[ReplicatedObject, ...]:
         return tuple(self._objects[key] for key in sorted(self._objects))
+
+    @property
+    def last_transform_flush(self) -> TransformFlushStats:
+        return self._last_transform_flush
+
+    def set_relevance_filter(
+        self,
+        relevance_filter: Callable[[ConnectionId, ReplicatedObject], bool] | None,
+    ) -> None:
+        if relevance_filter is not None and not callable(relevance_filter):
+            raise TypeError("relevance_filter must be callable")
+        self._relevance_filter = relevance_filter
 
     def spawn(self, prefab_id: PrefabId | int) -> ReplicatedObject:
         if self._closed:
@@ -535,6 +652,57 @@ class ServerReplication:
                 count += 1
         return count
 
+    def flush_transforms(self, tick: int) -> TransformFlushStats:
+        """Queue one replaceable transform snapshot for each relevant replica."""
+
+        if self._closed:
+            raise RuntimeError("server replication is closed")
+        if isinstance(tick, bool) or not isinstance(tick, int):
+            raise TypeError("tick must be an integer")
+        if not 0 <= tick <= 2**64 - 1:
+            raise ValueError("tick must be a uint64")
+        if self._last_transform_tick is not None and tick < self._last_transform_tick:
+            raise ValueError("transform snapshot ticks cannot decrease")
+        if self._transform_sequence == 2**64 - 1:
+            raise NetworkError("transform snapshot sequence space is exhausted")
+        transform_objects = tuple(
+            item for item in self.objects if self._registry.has_transform(item.prefab_id)
+        )
+        connections = self._server.connections
+        if len(transform_objects) * len(connections) > self._max_transform_sends:
+            raise NetworkError("transform snapshot send bound is exceeded")
+        sequence = self._transform_sequence + 1
+        sends: list[tuple[ConnectionId, bytes]] = []
+        filtered = 0
+        frames = {
+            item.id: _transform_frame(item, sequence, tick)
+            for item in transform_objects
+        }
+        for connection in connections:
+            for item in transform_objects:
+                if self._relevance_filter is not None and not self._relevance_filter(
+                    connection, item
+                ):
+                    filtered += 1
+                    continue
+                sends.append((connection, frames[item.id]))
+        queued = 0
+        backpressured = 0
+        for connection, frame in sends:
+            status = self._server.send(
+                connection, frame, delivery=Delivery.UNRELIABLE
+            )
+            if status is SendStatus.QUEUED:
+                queued += 1
+            else:
+                backpressured += 1
+        self._transform_sequence = sequence
+        self._last_transform_tick = tick
+        self._last_transform_flush = TransformFlushStats(
+            sequence, tick, queued, filtered, backpressured
+        )
+        return self._last_transform_flush
+
     def close(self, *, destroy: bool = False) -> None:
         if self._closed:
             return
@@ -602,6 +770,26 @@ class ServerReplication:
                         connection, "replication snapshot backpressure"
                     )
                     return
+            if self._registry.has_transform(item.prefab_id):
+                try:
+                    relevant = (
+                        self._relevance_filter is None
+                        or self._relevance_filter(connection, item)
+                    )
+                except Exception:
+                    self._server.disconnect(connection, "replication relevance callback failed")
+                    return
+                if relevant:
+                    transform = _transform_frame(
+                        item,
+                        self._transform_sequence,
+                        0 if self._last_transform_tick is None else self._last_transform_tick,
+                    )
+                    if self._server.send(connection, transform) is not SendStatus.QUEUED:
+                        self._server.disconnect(
+                            connection, "replication snapshot backpressure"
+                        )
+                        return
         end = _frame(_END, _END_PAYLOAD.pack(epoch))
         if self._server.send(connection, end) is not SendStatus.QUEUED:
             self._server.disconnect(connection, "replication snapshot backpressure")
@@ -612,20 +800,78 @@ class ServerReplication:
                 self._server.disconnect(connection, "replication update backpressure")
 
 
+def _lerp_vec3(first: Vec3, second: Vec3, amount: float) -> Vec3:
+    return Vec3(
+        first.x + (second.x - first.x) * amount,
+        first.y + (second.y - first.y) * amount,
+        first.z + (second.z - first.z) * amount,
+    )
+
+
+def _lerp_scale(first: Vec3, second: Vec3, amount: float) -> Vec3:
+    def component(left: float, right: float) -> float:
+        if left * right < 0.0:
+            return left if amount < 0.5 else right
+        return left + (right - left) * amount
+
+    return Vec3(
+        component(first.x, second.x),
+        component(first.y, second.y),
+        component(first.z, second.z),
+    )
+
+
+def _nlerp_quat(first: Quat, second: Quat, amount: float) -> Quat:
+    left = tuple(first.normalized())
+    right = tuple(second.normalized())
+    if sum(a * b for a, b in zip(left, right, strict=True)) < 0.0:
+        right = tuple(-value for value in right)
+    return Quat(
+        tuple(a + (b - a) * amount for a, b in zip(left, right, strict=True))
+    ).normalized()
+
+
+def _interpolated_snapshot(
+    history: deque[TransformSnapshot], render_tick: float
+) -> TransformSnapshot:
+    if render_tick <= history[0].tick:
+        return history[0]
+    if render_tick >= history[-1].tick:
+        return history[-1]
+    for first, second in zip(history, tuple(history)[1:]):
+        if first.tick <= render_tick <= second.tick:
+            amount = (render_tick - first.tick) / (second.tick - first.tick)
+            return TransformSnapshot(
+                int(render_tick),
+                second.sequence,
+                _lerp_vec3(first.position, second.position, amount),
+                _nlerp_quat(first.rotation, second.rotation, amount),
+                _lerp_scale(first.scale, second.scale, amount),
+            )
+    return history[-1]
+
+
 class ClientReplication:
     """Apply validated authority lifecycle frames to one client scene."""
 
     __slots__ = (
         "_client",
         "_expected_count",
+        "_history_evictions",
+        "_interpolated",
         "_max_objects",
+        "_max_transform_samples",
         "_objects",
         "_received_count",
+        "_received_transforms",
         "_registry",
         "_scene",
         "_snapshot_epoch",
         "_snapshot_fields",
+        "_stale_transforms",
         "_synchronized",
+        "_transform_history",
+        "_unknown_transforms",
         "_variables",
     )
 
@@ -636,6 +882,7 @@ class ClientReplication:
         registry: PrefabRegistry,
         *,
         max_objects: int = 65536,
+        max_transform_samples: int = 32,
     ) -> None:
         if not isinstance(client, Client):
             raise TypeError("client must be an easy3d.network.Client")
@@ -647,11 +894,18 @@ class ClientReplication:
             raise TypeError("max_objects must be an integer")
         if not 1 <= max_objects <= 1_000_000:
             raise ValueError("max_objects must be in [1, 1000000]")
+        if isinstance(max_transform_samples, bool) or not isinstance(
+            max_transform_samples, int
+        ):
+            raise TypeError("max_transform_samples must be an integer")
+        if not 2 <= max_transform_samples <= _MAX_TRANSFORM_SAMPLES:
+            raise ValueError("max_transform_samples must be in [2, 256]")
         registry.freeze()
         self._client = client
         self._scene = scene
         self._registry = registry
         self._max_objects = max_objects
+        self._max_transform_samples = max_transform_samples
         self._objects: dict[NetworkObjectId, ReplicatedObject] = {}
         self._snapshot_epoch: int | None = None
         self._snapshot_fields: set[tuple[NetworkObjectId, int]] = set()
@@ -659,6 +913,14 @@ class ClientReplication:
         self._received_count = 0
         self._synchronized = False
         self._variables: dict[tuple[NetworkObjectId, int], NetworkVar] = {}
+        self._transform_history: dict[
+            NetworkObjectId, deque[TransformSnapshot]
+        ] = {}
+        self._received_transforms = 0
+        self._stale_transforms = 0
+        self._unknown_transforms = 0
+        self._history_evictions = 0
+        self._interpolated = 0
 
     @property
     def objects(self) -> tuple[ReplicatedObject, ...]:
@@ -667,6 +929,16 @@ class ClientReplication:
     @property
     def is_synchronized(self) -> bool:
         return self._synchronized
+
+    @property
+    def transform_stats(self) -> TransformReplicationStats:
+        return TransformReplicationStats(
+            self._received_transforms,
+            self._stale_transforms,
+            self._unknown_transforms,
+            self._history_evictions,
+            self._interpolated,
+        )
 
     def poll(self, maximum_events: int = 256) -> tuple[NetworkEvent, ...]:
         application: list[NetworkEvent] = []
@@ -699,12 +971,51 @@ class ClientReplication:
         except KeyError as error:
             raise KeyError("unknown network object field") from error
 
+    def transform_snapshots(
+        self, object_id: NetworkObjectId | int
+    ) -> tuple[TransformSnapshot, ...]:
+        identifier = (
+            object_id
+            if isinstance(object_id, NetworkObjectId)
+            else NetworkObjectId(object_id)
+        )
+        if identifier not in self._objects:
+            raise KeyError(f"unknown network object ID {identifier.value}")
+        return tuple(self._transform_history.get(identifier, ()))
+
+    def interpolate_transforms(self, render_tick: float) -> int:
+        """Apply clamped interpolation at ``render_tick`` to client replicas."""
+
+        if isinstance(render_tick, bool) or not isinstance(render_tick, (int, float)):
+            raise TypeError("render_tick must be a number")
+        value = float(render_tick)
+        if not math.isfinite(value) or value < 0 or value > 2**64 - 1:
+            raise ValueError("render_tick must be a finite non-negative uint64 range value")
+        if not self._synchronized:
+            raise RuntimeError("cannot interpolate before the initial snapshot completes")
+        applied = 0
+        for identifier in sorted(self._transform_history):
+            history = self._transform_history[identifier]
+            if not history:
+                continue
+            sample = _interpolated_snapshot(history, value)
+            replicated = self._objects.get(identifier)
+            if replicated is None or not replicated.entity.is_alive:
+                continue
+            replicated.entity.position = sample.position
+            replicated.entity.quaternion = sample.rotation
+            replicated.entity.scale = sample.scale
+            applied += 1
+        self._interpolated += applied
+        return applied
+
     def clear(self) -> None:
         for replicated in self.objects:
             if replicated.entity.is_alive:
                 replicated.entity.destroy()
         self._objects.clear()
         self._variables.clear()
+        self._transform_history.clear()
         self._snapshot_epoch = None
         self._snapshot_fields.clear()
         self._expected_count = 0
@@ -767,6 +1078,7 @@ class ClientReplication:
                 replicated.entity.destroy()
             for key in [key for key in self._variables if key[0] == identifier]:
                 del self._variables[key]
+            self._transform_history.pop(identifier, None)
             return
         if message_type == _VALUE:
             if len(payload) < _VALUE_PREFIX.size:
@@ -797,6 +1109,46 @@ class ClientReplication:
             else:
                 variable._apply(value, version)
             return
+        if message_type == _TRANSFORM:
+            if len(payload) != _TRANSFORM_PAYLOAD.size:
+                raise ValueError("invalid transform update size")
+            unpacked = _TRANSFORM_PAYLOAD.unpack(payload)
+            object_value, sequence, tick = unpacked[:3]
+            identifier = NetworkObjectId(object_value)
+            values = unpacked[3:]
+            if not all(math.isfinite(value) for value in values):
+                raise ValueError("transform update contains non-finite components")
+            replicated = self._objects.get(identifier)
+            self._received_transforms += 1
+            if replicated is None:
+                self._unknown_transforms += 1
+                return
+            if not self._registry.has_transform(replicated.prefab_id):
+                raise ValueError("transform update is not declared by the prefab schema")
+            position = Vec3(values[:3])
+            try:
+                rotation = Quat(values[3:7]).normalized()
+            except ValueError as error:
+                raise ValueError("transform update contains a zero quaternion") from error
+            scale = Vec3(values[7:10])
+            if any(component == 0.0 for component in scale):
+                raise ValueError("transform update contains a zero scale component")
+            history = self._transform_history.setdefault(
+                identifier, deque(maxlen=self._max_transform_samples)
+            )
+            if history and (
+                sequence <= history[-1].sequence or tick < history[-1].tick
+            ):
+                self._stale_transforms += 1
+                return
+            snapshot = TransformSnapshot(tick, sequence, position, rotation, scale)
+            if history and tick == history[-1].tick:
+                history[-1] = snapshot
+                return
+            if len(history) == self._max_transform_samples:
+                self._history_evictions += 1
+            history.append(snapshot)
+            return
         if len(payload) != _END_PAYLOAD.size or self._snapshot_epoch is None:
             raise ValueError("invalid snapshot-end state or size")
         (epoch,) = _END_PAYLOAD.unpack(payload)
@@ -817,6 +1169,7 @@ class ClientReplication:
 __all__ = [
     "ClientReplication",
     "NetworkObjectId",
+    "NetworkTransform",
     "NetworkValueType",
     "NetworkVar",
     "NetworkVarSpec",
@@ -825,4 +1178,7 @@ __all__ = [
     "PrefabRegistry",
     "ReplicatedObject",
     "ServerReplication",
+    "TransformFlushStats",
+    "TransformReplicationStats",
+    "TransformSnapshot",
 ]

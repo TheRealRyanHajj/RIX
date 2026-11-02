@@ -408,3 +408,14 @@ flush sends only dirty state. Snapshot values are streamed after each spawn and
 uniquely accounted before end, avoiding an object-count-sized frame buffer.
 Client setters fail locally and stale/duplicate/type-mismatched updates fail the
 connection rather than mutating state.
+
+Transform replication is a separate replaceable stream rather than generic
+fields. A prefab opts into the fixed local position/quaternion/scale schema.
+The authority samples at explicit nondecreasing simulation ticks and sends one
+monotonic-sequence frame over unreliable delivery. Client replicas retain
+fixed-capacity per-object histories, discard reordering/duplicates, clamp at
+history endpoints, and interpolate vectors plus normalized shortest-path
+quaternions at an explicit render tick. A per-connection predicate provides the
+first relevance seam; it suppresses transform bandwidth only, leaving reliable
+lifecycle and variables coherent. This stage deliberately has no extrapolation,
+client prediction, ownership, reconciliation or spatial index.

@@ -257,10 +257,34 @@ declared field exactly once before accepting snapshot end. Live stale,
 duplicate, unknown or type-mismatched updates are rejected. Clients cannot send
 lifecycle/value magic to the authority.
 
+## Implemented in Phase 4.3
+
+Transform update type `6` uses the `E3DR` envelope and a fixed 64-byte payload:
+uint64 network-object ID, uint64 snapshot sequence, uint64 simulation tick,
+then ten little-endian IEEE float32 values for local position `(x,y,z)`, unit
+quaternion `(w,x,y,z)` and nonzero scale `(x,y,z)`. The complete frame is 76
+bytes. Prefab fingerprints include whether this fixed transform schema is
+registered.
+
+Live frames use unreliable delivery because a later sequence replaces missing
+state. Sequences increase per authority flush; ticks cannot decrease. A client
+retains a bounded ordered history per object, drops unknown, stale, duplicate
+or older-tick frames, and replaces a same-tick sample only with a newer
+sequence. Non-finite values, zero quaternions/scales, undeclared transforms and
+invalid framing are protocol errors. Late-join streams include the current
+transform baseline for each object relevant to that connection before snapshot
+end.
+
+The optional relevance predicate is authority-local policy and is not encoded
+on the wire. It suppresses only type-6 traffic; reliable lifecycle and type-5
+field state remain visible. There is no acknowledgement/baseline recovery,
+spatial interest grid, extrapolation, prediction or reconciliation in this
+format revision.
+
 ## Not implemented yet
 
-There is no rendered-Game attachment, firewall automation, DNS, replicated
-field/transform state or RPC yet. LAN discovery is IPv4/local-subnet only.
+There is no rendered-Game attachment, firewall automation, DNS, ownership or
+RPC yet. LAN discovery is IPv4/local-subnet only.
 Transport encryption also does not
 establish account or player identity; authentication remains a separate
 extension boundary.

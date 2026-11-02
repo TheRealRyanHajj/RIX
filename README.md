@@ -2,7 +2,8 @@
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
 native core. Phases 0–2, the complete Phase 3 transport foundation, and Phase
-4.1–4.2 replicated lifecycle and authoritative typed variables are validated.
+4.1–4.3 replicated lifecycle, authoritative typed variables, and interpolated
+transform snapshots with basic relevance filtering are validated.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -505,6 +506,16 @@ Prefab schemas can declare bounded `NetworkVar` fields (`bool`, signed int64,
 finite float64, safe UTF-8 string, or bytes). Authority mirrors are writable;
 client mirrors are read-only. Call `ServerReplication.flush()` after changing
 values to queue only dirty fields. Late join receives current values.
+
+Register transform replication explicitly with
+`prefabs.register_transform(prefab_id)`. The authority calls
+`replication.flush_transforms(simulation_tick)` to send fixed, replaceable
+position/quaternion/scale samples. Clients retain a bounded history and call
+`mirror.interpolate_transforms(render_tick)` to apply clamped remote-actor
+interpolation. An optional `relevance_filter(connection, object)` suppresses
+transform traffic per connection without hiding lifecycle or field state;
+late join receives the current relevant transform baseline. This is not client
+prediction, spatial interest indexing, ownership, or reconciliation.
 
 OBJ/MTL metadata and immutable shared meshes use the same asset layer:
 

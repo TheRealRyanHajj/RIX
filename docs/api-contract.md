@@ -690,9 +690,9 @@ creates/destroys client entities. `poll()` returns non-replication network
 events; callers must not also poll the same client independently. Disconnect
 clears replicas. Client-authored `E3DR` messages are rejected by the authority.
 
-Phase 4.1 contains lifecycle only: prefab payload/state, `NetworkVar`, transform
-snapshots, ownership, RPC, relevance, prediction and resynchronization are not
-part of this contract yet.
+Lifecycle is the reliable base for the Phase 4 replication contract. Ownership,
+RPC, prediction and resynchronization are not part of the implemented surface
+yet.
 
 `PrefabRegistry.register_variable(prefab, field_id, name, type, default,
 max_bytes=...)` adds a canonical field definition before freeze. Supported
@@ -703,3 +703,25 @@ version and mark it dirty; equal assignments do not. `flush()` reliably queues
 dirty fields and clears their dirty flags. Client variables are read-only and
 accept only known object/field/type updates with strictly newer versions.
 Late-join snapshots include every current field value before snapshot end.
+
+`PrefabRegistry.register_transform(prefab)` adds a `NetworkTransform` schema
+marker and changes the registry fingerprint. `ServerReplication.flush_transforms`
+accepts a nondecreasing uint64 simulation tick, assigns a monotonic uint64
+sequence and queues one fixed position/quaternion/scale frame per relevant
+object/connection using unreliable delivery. Local-space values must be finite;
+quaternions are normalized and scale components must be nonzero. Per-flush work
+is capped by `max_transform_sends`. `TransformFlushStats` reports queued,
+filtered and backpressured sends; replaceable backpressure does not disconnect
+an otherwise healthy peer.
+
+`ClientReplication(..., max_transform_samples=32)` stores at most 2–256 samples
+per object. Unknown, duplicate, stale-sequence and older-tick unreliable frames
+are dropped and counted rather than treated as connection corruption; malformed
+or schema-incompatible frames remain fatal. A newer sample for the same tick
+replaces that tick. `transform_snapshots(id)` exposes the immutable sample
+sequence and `interpolate_transforms(render_tick)` clamps outside history,
+linearly interpolates position and same-sign scale, steps mirrored scale sign
+changes to avoid an invalid zero scale, and normalized-shortest-path
+interpolates rotation before applying only to client replica entities. The optional server
+`relevance_filter(connection, object)` suppresses transform frames only; it does
+not despawn the object or hide its lifecycle/NetworkVar state.

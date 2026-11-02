@@ -3404,3 +3404,98 @@ git diff --check
 Phase 4.2: **DONE**. Immediate next task: Phase 4.3 — implement bounded
 tick/sequence transform snapshots, remote interpolation and basic relevance
 filtering. RPCs and client ownership remain unimplemented.
+
+## 2026-11-01 — Phase 4.3 transform snapshots and interpolation (active)
+
+### Bounded approach
+
+Register transform replication explicitly per prefab rather than as three
+generic `NetworkVar` fields. The authority samples an entity's world-independent
+local position/quaternion/scale at an explicit nondecreasing simulation tick,
+assigns a monotonic snapshot sequence and sends a fixed numeric frame. Keep
+spawn/lifecycle reliable; transform snapshots may use unreliable delivery so
+newer state supersedes loss.
+
+Each client keeps a fixed-capacity per-object snapshot deque, rejects duplicate
+or older sequence/tick data, and interpolates at a caller-provided render tick
+between the surrounding samples. Clamp before the oldest/after the newest;
+lerp position/scale and normalized-shortest-path interpolate quaternion without
+extrapolation. Apply only to client replica entities and expose counters.
+
+Add basic server relevance as an optional per-connection predicate evaluated
+before each snapshot send, defaulting visible-to-all. Relevance suppresses
+transform traffic only in this slice; it does not despawn lifecycle objects or
+claim spatial indexing. Bound tracked objects, samples, finite components,
+tick/sequence ranges and per-flush sends. Test loss/out-of-order/duplicate
+handling, interpolation endpoints/midpoints, quaternion normalization, late
+join baseline and two-client relevance over real loopback. Do not add client
+prediction, reconciliation, interest-grid optimization or ownership.
+
+### Implemented and verified
+
+- Added explicit `NetworkTransform` prefab schema registration and included the
+  declaration in the canonical registry fingerprint.
+- Added fixed type-6 frames containing object ID, monotonic sequence,
+  nondecreasing simulation tick, float32 local position, normalized quaternion
+  and nonzero scale. Live snapshots use unreliable delivery; lifecycle and
+  `NetworkVar` traffic remain reliable.
+- Added `flush_transforms(tick)` with a bounded object/connection product,
+  reusable frame encoding, per-connection relevance predicate, and immutable
+  queued/filtered/backpressured counters. Replaceable queue pressure is counted
+  rather than disconnecting the peer.
+- Added fixed-capacity client histories, stale/duplicate/out-of-order and
+  unknown-object drops, same-tick replacement, history eviction counters,
+  endpoint clamping, position/same-sign-scale lerp, safe mirrored-scale sign
+  stepping and normalized shortest-path quaternion interpolation. Only client
+  replica entities are mutated.
+- Late join receives the current relevant transform baseline between its spawn
+  and snapshot end. Relevance suppresses transform traffic only and does not
+  imply lifecycle hiding, ownership or spatial interest management.
+- Added deterministic codec/interpolation/bounds coverage plus real GNS
+  loopback tests with two differently relevant clients and a late join.
+
+```text
+build\venv311\Scripts\python.exe -m pytest -q tests/python/test_network_transform.py tests/python/test_network_vars.py tests/python/test_replication_lifecycle.py
+...........                                                              [100%]
+11 passed in 0.50s
+
+# test_network_transform.py was invoked 20 consecutive times before the full run.
+20/20 transform iterations passed (3 passed per run)
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 47%]
+........................................................................ [ 94%]
+........                                                                 [100%]
+152 passed in 18.54s
+
+cmake --build build\windows-headless --config Release
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 16; 0.86 sec
+
+cmake --build --preset windows-debug
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 17; 0.95 sec
+
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 17; 0.76 sec
+
+# In an ordinary shell, pip selected MinGW 15.1 and reproduced the documented
+# upstream Protobuf generated_message_tctable_lite.cc `musttail` failure.
+# The supported MSVC command was then run exactly as documented:
+call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3929718
+sha256=4b38e66af6fecbb825a2c8e1a148b2c3e60551592a70485918aa0a657beead06
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.NetworkTransform)"
+0.1.0
+<class 'easy3d.replication.NetworkTransform'>
+```
+
+Phase 4.3: **DONE**. Immediate next task: Phase 4.4 — explicit RPC schema,
+direction/ownership authorization, rate limiting, delivery selection and
+defensive bounded parsing. Prediction, reconciliation and spatial interest
+management remain later work.

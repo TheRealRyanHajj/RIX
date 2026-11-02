@@ -1029,3 +1029,38 @@ uint64 version only on change, and flush reliable full-field updates. Client
 mirrors are read-only and require newer versions. Stream and uniquely account
 all current fields in late-join snapshots. This favors bounded correctness and
 schema diagnostics before delta compression, ownership or transforms.
+
+## ADR-0032: Replaceable fixed transform stream with bounded interpolation
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Transforms update more frequently than reliable gameplay fields. Encoding them
+as ordinary `NetworkVar` values would add per-field overhead and let a missing
+intermediate sample block newer visual state. Client interpolation needs ordered
+ticks, bounded storage and a clear policy for packet reordering. Initial
+relevance must reduce traffic without making reliable object state disappear.
+
+### Decision
+
+Add one fixed float32 local position/quaternion/scale frame to the frozen prefab
+schema. The authority supplies a nondecreasing uint64 tick; each flush assigns a
+monotonic sequence and uses unreliable delivery. Clients normalize validated
+quaternions, retain a fixed-capacity history, drop older/duplicate samples,
+replace newer same-tick samples, and interpolate at an explicit render tick
+without extrapolation. An optional per-connection predicate suppresses only
+transform sends. Late join receives the current relevant baseline. Bound the
+per-client history and authority sends per flush, and expose counters rather
+than disconnecting on replaceable queue pressure.
+
+### Consequences
+
+- Lifecycle and authoritative field state remain reliable and independent of
+  transient transform loss or relevance.
+- Local transforms are coherent with current unparented multiplayer actors;
+  parent-space replication policy remains future work.
+- The predicate is a policy seam, not spatial interest management or a scale
+  claim. Prediction, reconciliation, baseline ACK/resync and bandwidth priority
+  remain Phase 5 work.
