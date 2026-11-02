@@ -551,6 +551,7 @@ public:
         JPH::Ref<JPH::CharacterVirtual> character;
         CharacterMotorSettings settings;
         CharacterMotorInput input;
+        std::uint64_t last_input_sequence{0};
         std::uint32_t generation{1};
         bool alive{false};
     };
@@ -954,6 +955,7 @@ PhysicsCharacterHandle PhysicsWorld::create_character(
     slot.character = std::move(character);
     slot.settings = settings;
     slot.input = {};
+    slot.last_input_sequence = 0;
     slot.alive = true;
     ++impl_->character_count;
     return PhysicsCharacterHandle{impl_->world_id, index, slot.generation};
@@ -987,6 +989,24 @@ void PhysicsWorld::set_character_input(const PhysicsCharacterHandle handle,
     const float length_squared = input.movement.length_squared();
     if (length_squared > 1.0F) input.movement = input.movement.normalized();
     impl_->require_slot(handle).input = input;
+}
+
+void PhysicsWorld::set_character_sequenced_input(
+    const PhysicsCharacterHandle handle,
+    const std::uint64_t sequence,
+    CharacterMotorInput input) {
+    Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    if (sequence == 0 || sequence <= slot.last_input_sequence) {
+        throw std::invalid_argument(
+            "character input sequence must be nonzero and strictly increasing");
+    }
+    set_character_input(handle, input);
+    slot.last_input_sequence = sequence;
+}
+
+std::uint64_t PhysicsWorld::character_input_sequence(
+    const PhysicsCharacterHandle handle) const {
+    return impl_->require_slot(handle).last_input_sequence;
 }
 
 CharacterMotorState PhysicsWorld::character_state(

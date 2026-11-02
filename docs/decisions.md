@@ -1146,3 +1146,17 @@ begin destroys/recreates mirrors. Permit only exact idempotent same-version
 field duplicates across the boundary; reject older or conflicting versions.
 This restores coherent current state without client-authored patches or a
 second serialization format.
+
+## ADR-0038: Character prediction sequences terminate in the native motor
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Use one nonzero monotonic uint64 command sequence per character and validate it
+inside the Jolt-backed motor before mutating input. Keep the existing
+unsequenced path for offline games. A typed client facade applies commands
+immediately and retains a fixed-capacity acknowledgement queue; the authority
+feeds received commands through the identical native path without retaining a
+client replay queue. Do not hide transport, corrections or replay in the Phase
+5.1 facade. This makes duplicate/stale rejection authoritative and client/server
+motor parity testable while leaving reconciliation policy explicit for 5.2.

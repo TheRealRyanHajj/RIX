@@ -291,6 +291,25 @@ jump speed, slope limit, step height, radius, and total capsule height are
 construction-time configuration. Character transforms are solver-owned; use
 `player.controller.teleport(...)` for an explicit discontinuity.
 
+For multiplayer prediction, both client and authority can feed the same native
+motor with strictly increasing commands:
+
+```python
+from easy3d import PredictedCharacterController
+
+prediction = PredictedCharacterController(
+    player.controller, role="client", max_pending_inputs=256
+)
+command = prediction.submit((0, 0, 1), heading_degrees=0)
+# Send command through the game's bounded input protocol. On authority:
+# authority_prediction.accept(command)
+```
+
+Client submission applies immediately and retains an immutable bounded queue;
+the server path rejects duplicate or stale sequences before changing native
+motor input. Transport attachment, authoritative correction, and replay are
+not implicit—reconciliation is the next Phase 5 milestone.
+
 Run the complete Phase 2 course with:
 
 ```powershell

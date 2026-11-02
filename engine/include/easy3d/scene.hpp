@@ -295,6 +295,12 @@ public:
                              Vec3 movement,
                              float heading_degrees,
                              bool jump);
+    void set_character_sequenced_input(EntityHandle handle,
+                                       std::uint64_t sequence,
+                                       Vec3 movement,
+                                       float heading_degrees,
+                                       bool jump);
+    [[nodiscard]] std::uint64_t character_input_sequence(EntityHandle handle) const;
     [[nodiscard]] CharacterMotorState character_state(EntityHandle handle) const;
     void teleport_character(EntityHandle handle, Vec3 position, float heading_degrees);
     [[nodiscard]] PhysicsConstraintHandle add_fixed_constraint(EntityHandle first,

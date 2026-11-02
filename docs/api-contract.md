@@ -409,6 +409,19 @@ Character transforms are physics-owned, cannot be parented, and must use
 `teleport(position, heading_degrees=...)` for discontinuities. A character
 controller and ordinary collider are mutually exclusive on one entity.
 
+`CharacterInputCommand(sequence, movement, heading_degrees=0, jump=False)` is
+an immutable validated input value. `PredictedCharacterController(controller,
+role="client" | "server", max_pending_inputs=256)` drives the same native motor
+on both sides. Client `submit(...)` allocates a strictly increasing uint64
+sequence, applies immediately, and appends to `pending_inputs`; a full queue or
+sequence exhaustion raises `NetworkError`. `acknowledge(sequence)` removes the
+acknowledged prefix and rejects backward or never-submitted acknowledgements.
+Server `accept(command)` has no replay queue and native code rejects zero,
+duplicate, or stale sequence numbers before input changes. Direct offline
+`CharacterController.set_input` remains unsequenced;
+`set_sequenced_input` and `last_input_sequence` expose the lower-level contract.
+No method in this Phase 5.1 surface sends commands or corrects/replays state.
+
 Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
 `(0, -9.81, 0)` without allocation and creates the world when changed. During a
 simulation tick the scheduler runs all eligible Python `fixed_update(dt)` hooks,
@@ -690,9 +703,9 @@ creates/destroys client entities. `poll()` returns non-replication network
 events; callers must not also poll the same client independently. Disconnect
 clears replicas. Client-authored `E3DR` messages are rejected by the authority.
 
-Lifecycle is the reliable base for the Phase 4 replication contract. Ownership,
-RPC, prediction and resynchronization are not part of the implemented surface
-yet.
+Lifecycle is the reliable base for the Phase 4 replication contract. Prediction
+is a separate typed character-input surface and is not automatically attached
+to replication transport.
 
 `PrefabRegistry.register_variable(prefab, field_id, name, type, default,
 max_bytes=...)` adds a canonical field definition before freeze. Supported

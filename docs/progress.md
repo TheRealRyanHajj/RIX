@@ -3783,3 +3783,81 @@ loopback: lifecycle, authoritative fields/transforms/match state, ownership and
 RPC validation remain coherent; unauthorized client state is rejected. Exact
 next task: Phase 5.1 — input-sequenced native predicted character motor on
 client and server.
+
+## 2026-11-01 — Phase 5.1 sequenced predicted character input (active)
+
+### Bounded approach
+
+Extend the existing Jolt `CharacterVirtual` motor with a separate nonzero uint64
+sequenced-input path while preserving unsequenced offline input. Reject stale or
+duplicate sequences natively before changing motor input; expose the last
+accepted sequence in a separate prediction state so existing tuple/API shapes
+do not break.
+
+Add a typed Python `CharacterInputCommand` and bounded
+`PredictedCharacterController` facade. Client mode allocates monotonic commands,
+applies them immediately to the native motor and retains a fixed replay queue;
+server mode accepts externally sequenced commands through the same native
+validation. Acknowledge/remove commands without replay yet—authoritative state
+correction and bounded replay belong to Phase 5.2. Test native validation,
+client/server parity, queue bounds, jump/heading/movement input and sequence
+exhaustion. Do not claim arbitrary Python prediction or network transport is
+automatically attached.
+
+### Result
+
+Implemented a separate native sequenced-input entry point on
+`PhysicsWorld`/`Scene` and the binding. Nonzero uint64 commands must be strictly
+newer; ordinary motor validation completes before the accepted sequence is
+advanced, and reused character slots reset it to zero. Existing offline
+`set_input` remains unsequenced.
+
+Added immutable `CharacterInputCommand`, explicit client/server
+`PredictionRole`, and `PredictedCharacterController`. Client submission applies
+immediately and retains at most the declared number of unacknowledged commands;
+acknowledgements remove a monotonic prefix. Authority acceptance uses the same
+native motor and rejection. Queue saturation, role misuse, invalid values and
+sequence exhaustion fail explicitly. No transport attachment, correction or
+replay is claimed.
+
+### Exact verification evidence
+
+```text
+# Under the supported x64 VsDevCmd environment:
+cmake --build --preset windows-debug
+Build completed: 30 targets/actions, exit 0
+
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.75 sec
+
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3931439
+sha256=37e3164fd899f6d44b70b476c3a36d15ed8680fe97bb3fd087e6111568fe3e51
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_prediction.py -q
+......                                                                   [100%]
+6 passed in 0.16s
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+..................................                                       [100%]
+178 passed in 19.70s
+
+cmake --build --preset windows-release
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 2.55 sec
+
+cmake --build build\windows-headless --config Release --parallel 4
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.67 sec
+```
+
+Phase 5.1: **DONE**. Exact next task: Phase 5.2 — authoritative character
+correction, bounded pending-input replay, remote interpolation and correction
+telemetry.

@@ -1003,6 +1003,21 @@ void Scene::set_character_input(const EntityHandle handle,
         component.character, {movement, heading_degrees, jump});
 }
 
+void Scene::set_character_sequenced_input(const EntityHandle handle,
+                                          const std::uint64_t sequence,
+                                          const Vec3 movement,
+                                          const float heading_degrees,
+                                          const bool jump) {
+    CharacterEntity& component = require_character_entity(handle);
+    physics_->set_character_sequenced_input(
+        component.character, sequence, {movement, heading_degrees, jump});
+}
+
+std::uint64_t Scene::character_input_sequence(const EntityHandle handle) const {
+    const CharacterEntity& component = require_character_entity(handle);
+    return physics_->character_input_sequence(component.character);
+}
+
 CharacterMotorState Scene::character_state(const EntityHandle handle) const {
     const CharacterEntity& component = require_character_entity(handle);
     return physics_->character_state(component.character);

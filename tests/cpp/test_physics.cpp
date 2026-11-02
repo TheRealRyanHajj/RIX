@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 int main() {
@@ -207,6 +208,37 @@ int main() {
                                .jump_speed = 5.0F,
                                .max_slope_degrees = 45.0F,
                                .step_height = 0.4F});
+    assert(character_world.character_input_sequence(first_person) == 0);
+    character_world.set_character_sequenced_input(
+        first_person,
+        1,
+        {.movement = {1.0F, 0.0F, 0.0F}, .heading_degrees = 15.0F});
+    assert(character_world.character_input_sequence(first_person) == 1);
+    for (const std::uint64_t rejected_sequence : {std::uint64_t{0}, std::uint64_t{1}}) {
+        bool rejected = false;
+        try {
+            character_world.set_character_sequenced_input(
+                first_person, rejected_sequence, {.movement = {0.0F, 0.0F, -1.0F}});
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        assert(rejected);
+        assert(character_world.character_input_sequence(first_person) == 1);
+    }
+    bool rejected_invalid_sequenced_input = false;
+    try {
+        character_world.set_character_sequenced_input(
+            first_person,
+            2,
+            {.movement = {std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F}});
+    } catch (const std::invalid_argument&) {
+        rejected_invalid_sequenced_input = true;
+    }
+    assert(rejected_invalid_sequenced_input);
+    assert(character_world.character_input_sequence(first_person) == 1);
+    character_world.set_character_sequenced_input(
+        first_person, 2, {.movement = {}, .heading_degrees = 0.0F});
+    assert(character_world.character_input_sequence(first_person) == 2);
     for (int step = 0; step < 5; ++step) character_world.step(1.0F / 60.0F);
     assert(character_world.character_state(first_person).grounded);
     character_world.set_character_input(
@@ -246,6 +278,11 @@ int main() {
     character_world.destroy_character(first_person);
     assert(!character_world.is_alive(first_person));
     assert(character_world.character_count() == 1);
+    const PhysicsCharacterHandle reused_character = character_world.create_character({});
+    assert(reused_character.index == first_person.index);
+    assert(reused_character.generation != first_person.generation);
+    assert(character_world.character_input_sequence(reused_character) == 0);
+    character_world.destroy_character(reused_character);
     character_world.clear();
     assert(!character_world.is_alive(third_person));
     assert(character_world.character_count() == 0);

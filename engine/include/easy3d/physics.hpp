@@ -216,6 +216,11 @@ public:
     [[nodiscard]] bool is_alive(PhysicsCharacterHandle handle) const noexcept;
     [[nodiscard]] std::size_t character_count() const noexcept;
     void set_character_input(PhysicsCharacterHandle handle, CharacterMotorInput input);
+    void set_character_sequenced_input(PhysicsCharacterHandle handle,
+                                        std::uint64_t sequence,
+                                        CharacterMotorInput input);
+    [[nodiscard]] std::uint64_t character_input_sequence(
+        PhysicsCharacterHandle handle) const;
     [[nodiscard]] CharacterMotorState character_state(PhysicsCharacterHandle handle) const;
     void teleport_character(PhysicsCharacterHandle handle, Vec3 position, float heading_degrees);
 

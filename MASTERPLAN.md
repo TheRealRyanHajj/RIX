@@ -332,7 +332,7 @@ Use **one canonical spelling**: repository `easy3d`, import `easy3d`, native mod
 
 ### PHASE 5 — Responsive 8–32 player multiplayer
 
-- [ ] **5.1** Implement input-sequenced native predicted character motor on client and server.
+- [x] **5.1** Implement input-sequenced native predicted character motor on client and server.
 - [ ] **5.2** Implement server reconciliation and bounded replay, remote interpolation and correction telemetry.
 - [ ] **5.3** Add lag/jitter/loss simulator and test at representative network conditions; document failure behavior.
 - [ ] **5.4** Implement bandwidth budgets, entity prioritization, spatial interest and delta-baseline recovery.

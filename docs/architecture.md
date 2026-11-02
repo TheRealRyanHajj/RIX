@@ -277,6 +277,20 @@ then calls `ExtendedUpdate` with explicit stair/floor distances. Only the
 resulting position, rotation, velocity and ground snapshot cross into scene or
 Python state. No Jolt callback invokes Python.
 
+The prediction path adds a separate nonzero uint64 sequence to that same native
+input state. A character slot accepts only a strictly newer sequence and updates
+its recorded sequence only after ordinary movement/heading/jump validation
+succeeds. Slot generation reuse resets it to zero. The offline unsequenced path
+remains unchanged.
+
+`PredictedCharacterController` gives client and authority roles the same motor
+entry point. A client allocates a monotonic command, applies it immediately and
+retains it in a fixed-capacity deque until explicit acknowledgement. An
+authority accepts externally sequenced immutable commands and keeps no replay
+queue. Queue saturation and uint64 exhaustion fail explicitly. Transport is
+caller-owned at this stage; authoritative state correction and replay are not
+performed until Phase 5.2.
+
 ## Advanced physics resources
 
 Capsule, convex-hull and triangle-mesh settings are converted to Jolt shapes

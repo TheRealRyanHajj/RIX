@@ -1215,6 +1215,28 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("movement"),
              py::arg("heading_degrees"),
              py::arg("jump") = false)
+        .def("set_character_sequenced_input",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::uint64_t sequence,
+                const std::array<float, 3>& movement,
+                const float heading_degrees,
+                const bool jump) {
+                 scene.set_character_sequenced_input(
+                     handle,
+                     sequence,
+                     {movement[0], movement[1], movement[2]},
+                     heading_degrees,
+                     jump);
+             },
+             py::arg("handle"),
+             py::arg("sequence"),
+             py::arg("movement"),
+             py::arg("heading_degrees"),
+             py::arg("jump") = false)
+        .def("character_input_sequence",
+             &easy3d::Scene::character_input_sequence,
+             py::arg("handle"))
         .def("character_state",
              [](const easy3d::Scene& scene, const easy3d::EntityHandle handle) {
                  const easy3d::CharacterMotorState state = scene.character_state(handle);

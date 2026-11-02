@@ -537,6 +537,39 @@ class CharacterController:
             self._entity._handle, tuple(value), heading, jump
         )
 
+    def set_sequenced_input(
+        self,
+        sequence: int,
+        movement: Vec3 | tuple[float, float, float],
+        *,
+        heading_degrees: float = 0.0,
+        jump: bool = False,
+    ) -> None:
+        """Apply one strictly newer prediction input to the native motor."""
+
+        if isinstance(sequence, bool) or not isinstance(sequence, int):
+            raise TypeError("sequence must be an integer")
+        if sequence < 1 or sequence > (1 << 64) - 1:
+            raise ValueError("sequence must be between 1 and 2^64 - 1")
+        if not isinstance(jump, bool):
+            raise TypeError("jump must be a bool")
+        heading = float(heading_degrees)
+        if not math.isfinite(heading):
+            raise ValueError("heading_degrees must be finite")
+        value = Vec3.from_value(movement)
+        self._entity.scene._require_mutable()
+        self._entity.scene._native.set_character_sequenced_input(
+            self._entity._handle, sequence, tuple(value), heading, jump
+        )
+
+    @property
+    def last_input_sequence(self) -> int:
+        """Last sequenced input accepted by the native motor, or zero."""
+
+        return self._entity.scene._native.character_input_sequence(
+            self._entity._handle
+        )
+
     def teleport(
         self,
         position: Vec3 | tuple[float, float, float],

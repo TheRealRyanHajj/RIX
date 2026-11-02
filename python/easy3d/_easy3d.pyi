@@ -344,6 +344,22 @@ class _NativeScene:
         position: tuple[float, float, float],
         rotation: tuple[float, float, float, float],
     ) -> None: ...
+    def set_character_input(
+        self,
+        handle: EntityHandle,
+        movement: tuple[float, float, float],
+        heading_degrees: float,
+        jump: bool = False,
+    ) -> None: ...
+    def set_character_sequenced_input(
+        self,
+        handle: EntityHandle,
+        sequence: int,
+        movement: tuple[float, float, float],
+        heading_degrees: float,
+        jump: bool = False,
+    ) -> None: ...
+    def character_input_sequence(self, handle: EntityHandle) -> int: ...
     def physics_raycast_all(
         self,
         origin: tuple[float, float, float],

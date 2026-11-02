@@ -48,6 +48,11 @@ from .network import ListenServer, Server
 from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, Constraint, PhysicsHit
 from .player import Player
+from .prediction import (
+    CharacterInputCommand,
+    PredictedCharacterController,
+    PredictionRole,
+)
 from .replication import (
     ClientReplication,
     NetworkObjectId,
@@ -94,6 +99,7 @@ __all__ = [
     "Camera",
     "CallbackStats",
     "CharacterController",
+    "CharacterInputCommand",
     "ClientMatchState",
     "ClientReplication",
     "Collider",
@@ -141,6 +147,8 @@ __all__ = [
     "Projection",
     "PointerState",
     "Player",
+    "PredictedCharacterController",
+    "PredictionRole",
     "RendererStats",
     "Rigidbody",
     "ActionState",
