@@ -171,6 +171,12 @@ their last received pose outside the radius. Deltas are lossy at 1 cm position,
 to full float32. ACKs and recovery requests consume reliable bandwidth, and no
 cross-object packet aggregation is implemented yet.
 
+The Phase 5.5 arenas are finite headless loopback rule/integration samples.
+They do not provide rendered weapons, hitboxes/lag compensation, teams beyond
+an integer field, respawn, matchmaking, accounts, persistence, anti-cheat or
+Internet hosting. Their 2/4/8-client passes are correctness evidence, not the
+32-client capacity gate; that belongs to Phase 5.6.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

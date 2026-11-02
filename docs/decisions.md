@@ -1204,3 +1204,16 @@ reconstruction as the candidate baseline. A missing baseline causes a reliable,
 monotonic recovery request and one forced full update. Spatial radius controls
 transform relevance without changing spawn/authority state. This keeps overload
 and loss recoverable without claiming full lifecycle interest management.
+
+## ADR-0042: Arena clients request actions; authority owns all outcomes
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Represent arena health, team and score as server-writable `NetworkVar` fields
+and match timing through the canonical replicated match state. A client may only
+invoke an owner-gated attack request on its own player. The handler validates
+playing phase, live/allowed target, distance, team and remaining health before
+changing damage/score or ending the match. Cooperative and competitive samples
+share this authority rule but remain finite headless integration scenarios, not
+combat/anti-cheat or capacity claims.

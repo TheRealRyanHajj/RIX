@@ -4122,3 +4122,40 @@ MSVC matrices remain the native checkpoint (Debug 17/17, Release 17/17,
 headless 16/16). Phase 5.4: **DONE**. Exact next task: Phase 5.5 — cooperative
 and competitive arena samples with authoritative damage, scoring and match
 state.
+
+## 2026-11-01 — Phase 5.5 authoritative network arenas
+
+Added `examples/08_network_arenas` with finite cooperative and competitive
+real-GNS loopback scenarios for 2–8 clients. Both use one frozen prefab schema,
+server-owned player health/team/score variables, owner-gated bounded reliable
+attack RPC, and the canonical replicated `ServerMatchState`/`ClientMatchState`.
+The authority alone transitions countdown → playing → match end.
+
+The attack handler rejects non-playing requests, self/unknown/wrong-kind
+targets, out-of-range targets, same-team competitive damage and dead targets.
+Cooperative mode requires four valid 25-damage hits on the shared objective,
+despawns it and awards every player one score. Competitive mode requires four
+hits from player zero on distinct-team player one, leaves exactly one player at
+zero health and awards only the attacker. Client mirrors observe `MATCH_END`.
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests/python/test_network_arenas.py -q -s
+.......
+7 passed in 0.56s
+
+build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode cooperative --clients 8
+arena complete: mode=cooperative clients=8 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=True eliminated_players=0
+
+build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode competitive --clients 8
+arena complete: mode=competitive clients=8 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=False eliminated_players=1
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 36%]
+........................................................................ [ 73%]
+....................................................                     [100%]
+196 passed in 22.46s
+```
+
+No native source changed in Phase 5.5. Phase 5.5: **DONE**. Exact next task:
+Phase 5.6 — 8/16/32 simulated clients, measured tick/CPU/RAM/bandwidth/latency
+and correctness with optimization only from observed bottlenecks.

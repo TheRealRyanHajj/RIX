@@ -327,6 +327,18 @@ coherent. Once a client acknowledges a full transform, subsequent values use a
 A missing client baseline requests one reliable recovery and forces the next
 relevant snapshot full.
 
+The finite authoritative arena examples combine these multiplayer layers with
+health, teams, score and match state:
+
+```powershell
+python examples/08_network_arenas/main.py --mode cooperative --clients 4
+python examples/08_network_arenas/main.py --mode competitive --clients 4
+```
+
+Clients can only send owner-gated attack requests. Authority validates playing
+phase, distance, target kind/team and current health before applying damage,
+score and `MATCH_END`.
+
 Run the complete Phase 2 course with:
 
 ```powershell
