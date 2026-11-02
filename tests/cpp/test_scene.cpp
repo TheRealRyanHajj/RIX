@@ -143,6 +143,46 @@ int main() {
         return fail(17, "entity destruction did not release its physics body");
     }
 
+    easy3d::Scene ui_scene("ui");
+    const std::uint64_t panel_id = ui_scene.add_ui_element(
+        {.kind = easy3d::UiElementKind::Panel,
+         .anchor = easy3d::UiAnchor::BottomRight,
+         .x = -16.0F,
+         .y = -16.0F,
+         .width = 240.0F,
+         .height = 80.0F,
+         .color = {0.1F, 0.2F, 0.3F, 0.8F}});
+    const std::uint64_t text_id = ui_scene.add_ui_element(
+        {.kind = easy3d::UiElementKind::Text,
+         .width = 120.0F,
+         .height = 30.0F,
+         .text = "Score: 3",
+         .font_size = 24.0F,
+         .z_index = 1});
+    if (panel_id == text_id || ui_scene.ui_elements().size() != 2 ||
+        ui_scene.ui_element(panel_id).anchor != easy3d::UiAnchor::BottomRight) {
+        return fail(20, "scene UI element creation failed");
+    }
+    easy3d::UiElement replacement = ui_scene.ui_element(text_id);
+    replacement.text = "Score: 4";
+    replacement.visible = false;
+    ui_scene.update_ui_element(text_id, replacement);
+    if (ui_scene.ui_element(text_id).text != "Score: 4" ||
+        ui_scene.ui_element(text_id).visible) {
+        return fail(21, "scene UI element update failed");
+    }
+    ui_scene.remove_ui_element(panel_id);
+    try {
+        (void)ui_scene.ui_element(panel_id);
+        return fail(22, "removed UI element remained accessible");
+    } catch (const easy3d::EngineError&) {
+        // Expected.
+    }
+    ui_scene.clear();
+    if (!ui_scene.ui_elements().empty()) {
+        return fail(23, "scene clear retained UI elements");
+    }
+
     try {
         (void)easy3d::Scene("");
         return fail(11, "empty scene name was accepted");

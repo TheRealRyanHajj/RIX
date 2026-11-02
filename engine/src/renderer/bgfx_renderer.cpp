@@ -11,10 +11,15 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb_truetype.h>
+#include <roboto_regular.ttf.h>
+
 #include "fs_solid_color.sc.bin.h"
 #include "fs_textured.sc.bin.h"
 #include "fs_postprocess.sc.bin.h"
 #include "fs_shadow.sc.bin.h"
+#include "fs_ui.sc.bin.h"
 #include "vs_solid_color.sc.bin.h"
 #include "vs_solid_color_instanced.sc.bin.h"
 #include "vs_textured.sc.bin.h"
@@ -22,6 +27,7 @@
 #include "vs_postprocess.sc.bin.h"
 #include "vs_shadow.sc.bin.h"
 #include "vs_shadow_instanced.sc.bin.h"
+#include "vs_ui.sc.bin.h"
 
 #include <algorithm>
 #include <array>
@@ -45,6 +51,7 @@ namespace {
 constexpr bgfx::ViewId shadow_view = 0;
 constexpr bgfx::ViewId main_view = 1;
 constexpr bgfx::ViewId postprocess_view = 2;
+constexpr bgfx::ViewId ui_view = 3;
 
 struct GpuVertex final {
     float position[3];
@@ -56,6 +63,12 @@ struct GpuVertex final {
 struct PostprocessVertex final {
     float position[3];
     float uv[2];
+};
+
+struct UiVertex final {
+    float position[3];
+    float uv[2];
+    std::uint32_t color;
 };
 
 class GpuMesh final {
@@ -313,6 +326,20 @@ public:
         return handle;
     }
 
+    [[nodiscard]] Handle upload_cached(
+        const std::shared_ptr<const ImageData>& image,
+        const TextureSampler& sampler = {}) {
+        if (!image) {
+            throw EngineError("cannot upload an empty shared image");
+        }
+        const Handle handle = upload_cached(*image, sampler);
+        if (std::none_of(owners_.begin(), owners_.end(),
+                         [&](const auto& owner) { return owner.get() == image.get(); })) {
+            owners_.push_back(image);
+        }
+        return handle;
+    }
+
     void bind(const Handle handle, const bgfx::UniformHandle sampler) const {
         if (handle >= textures_.size()) {
             throw EngineError("invalid GPU texture handle");
@@ -324,6 +351,7 @@ public:
         textures_.clear();
         byte_size_ = 0;
         shared_.clear();
+        owners_.clear();
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return textures_.size(); }
@@ -334,6 +362,7 @@ private:
     std::size_t byte_size_{0};
     std::unordered_map<const ImageData*,
                        std::vector<std::pair<TextureSampler, Handle>>> shared_;
+    std::vector<std::shared_ptr<const ImageData>> owners_;
 };
 
 struct DrawItem final {
@@ -447,12 +476,21 @@ public:
                 .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
                 .end();
+            ui_layout_.begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+                .end();
             mesh_resources_ = std::make_unique<MeshLifetimeManager>(layout_);
             texture_resources_ = std::make_unique<TextureLifetimeManager>();
+            ui_sampler_.wrap_u = TextureWrap::Clamp;
+            ui_sampler_.wrap_v = TextureWrap::Clamp;
             scene_ = scene;
             create_programs();
             create_postprocess_target();
             create_shadow_target();
+            create_font_atlas();
+            bgfx::setViewMode(ui_view, bgfx::ViewMode::Sequential);
             if (geometry_diagnostic) {
                 create_geometry_diagnostic();
             }
@@ -491,6 +529,8 @@ public:
         draw_items_.clear();
         destroy_postprocess_target();
         destroy_shadow_target();
+        ui_font_image_.reset();
+        ui_font_texture_.reset();
         if (texture_resources_) {
             texture_resources_->reset();
             texture_resources_.reset();
@@ -506,6 +546,10 @@ public:
         if (bgfx::isValid(postprocess_program_)) {
             bgfx::destroy(postprocess_program_);
             postprocess_program_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(ui_program_)) {
+            bgfx::destroy(ui_program_);
+            ui_program_ = BGFX_INVALID_HANDLE;
         }
         if (bgfx::isValid(shadow_instanced_program_)) {
             bgfx::destroy(shadow_instanced_program_);
@@ -618,6 +662,7 @@ public:
         if (postprocess_active_) {
             submit_postprocess();
         }
+        submit_ui();
         bgfx::frame();
     }
 
@@ -691,6 +736,11 @@ private:
             fs_shadow_dxbc,
             static_cast<std::uint32_t>(sizeof(fs_shadow_dxbc)),
             "instanced shadow");
+        ui_program_ = make_program(vs_ui_dxbc,
+                                   static_cast<std::uint32_t>(sizeof(vs_ui_dxbc)),
+                                   fs_ui_dxbc,
+                                   static_cast<std::uint32_t>(sizeof(fs_ui_dxbc)),
+                                   "UI");
         material_color_ = bgfx::createUniform("u_materialColor", bgfx::UniformType::Vec4);
         material_params_ = bgfx::createUniform("u_materialParams", bgfx::UniformType::Vec4);
         normal_matrix_ = bgfx::createUniform("u_normalMatrix", bgfx::UniformType::Vec4, 3);
@@ -719,6 +769,256 @@ private:
             !bgfx::isValid(postprocess_params_) || !bgfx::isValid(shadow_sampler_) ||
             !bgfx::isValid(shadow_matrix_uniform_) || !bgfx::isValid(shadow_params_)) {
             throw EngineError("bgfx failed to create Easy3D material uniforms");
+        }
+    }
+
+    void create_font_atlas() {
+        constexpr int atlas_width = 512;
+        constexpr int atlas_height = 512;
+        constexpr float baked_size = 48.0F;
+        std::vector<std::uint8_t> alpha(
+            static_cast<std::size_t>(atlas_width * atlas_height));
+        if (stbtt_BakeFontBitmap(s_robotoRegularTtf,
+                                 0,
+                                 baked_size,
+                                 alpha.data(),
+                                 atlas_width,
+                                 atlas_height,
+                                 32,
+                                 static_cast<int>(font_glyphs_.size()),
+                                 font_glyphs_.data()) <= 0) {
+            throw EngineError("Easy3D could not bake the built-in UI font atlas");
+        }
+        auto image = std::make_shared<ImageData>();
+        image->source_path = "<Easy3D built-in Roboto Regular>";
+        image->width = atlas_width;
+        image->height = atlas_height;
+        image->color_space = TextureColorSpace::Linear;
+        image->rgba8.resize(static_cast<std::size_t>(atlas_width * atlas_height * 4));
+        for (std::size_t index = 0; index < alpha.size(); ++index) {
+            image->rgba8[index * 4] = 255;
+            image->rgba8[index * 4 + 1] = 255;
+            image->rgba8[index * 4 + 2] = 255;
+            image->rgba8[index * 4 + 3] = alpha[index];
+        }
+        ui_font_image_ = std::move(image);
+        ui_font_texture_ = texture_resources_->upload_cached(*ui_font_image_, ui_sampler_);
+    }
+
+    struct UiRect final {
+        float x;
+        float y;
+        float width;
+        float height;
+    };
+
+    [[nodiscard]] UiRect resolve_ui_rect(const UiElement& element) const noexcept {
+        float factor_x = 0.0F;
+        float factor_y = 0.0F;
+        switch (element.anchor) {
+        case UiAnchor::Top: factor_x = 0.5F; break;
+        case UiAnchor::TopRight: factor_x = 1.0F; break;
+        case UiAnchor::Left: factor_y = 0.5F; break;
+        case UiAnchor::Center: factor_x = 0.5F; factor_y = 0.5F; break;
+        case UiAnchor::Right: factor_x = 1.0F; factor_y = 0.5F; break;
+        case UiAnchor::BottomLeft: factor_y = 1.0F; break;
+        case UiAnchor::Bottom: factor_x = 0.5F; factor_y = 1.0F; break;
+        case UiAnchor::BottomRight: factor_x = 1.0F; factor_y = 1.0F; break;
+        case UiAnchor::TopLeft: break;
+        }
+        return {
+            static_cast<float>(width_) * factor_x + element.x - element.width * factor_x,
+            static_cast<float>(height_) * factor_y + element.y - element.height * factor_y,
+            element.width,
+            element.height,
+        };
+    }
+
+    [[nodiscard]] float ui_ndc_x(const float value) const noexcept {
+        return value * 2.0F / static_cast<float>(width_) - 1.0F;
+    }
+
+    [[nodiscard]] float ui_ndc_y(const float value) const noexcept {
+        return 1.0F - value * 2.0F / static_cast<float>(height_);
+    }
+
+    void append_ui_quad(std::vector<UiVertex>& vertices,
+                        const float left,
+                        const float top,
+                        const float right,
+                        const float bottom,
+                        const float u0,
+                        const float v0,
+                        const float u1,
+                        const float v1,
+                        const Color color) const {
+        const float x0 = ui_ndc_x(left);
+        const float x1 = ui_ndc_x(right);
+        const float y0 = ui_ndc_y(top);
+        const float y1 = ui_ndc_y(bottom);
+        const std::uint32_t packed = color.rgba8();
+        vertices.insert(vertices.end(), {
+            {{x0, y0, 0.0F}, {u0, v0}, packed},
+            {{x1, y0, 0.0F}, {u1, v0}, packed},
+            {{x1, y1, 0.0F}, {u1, v1}, packed},
+            {{x0, y0, 0.0F}, {u0, v0}, packed},
+            {{x1, y1, 0.0F}, {u1, v1}, packed},
+            {{x0, y1, 0.0F}, {u0, v1}, packed},
+        });
+    }
+
+    void submit_ui_vertices(
+        const std::vector<UiVertex>& vertices,
+        const std::optional<TextureLifetimeManager::Handle> texture) {
+        if (vertices.empty() ||
+            bgfx::getAvailTransientVertexBuffer(
+                static_cast<std::uint32_t>(vertices.size()), ui_layout_) < vertices.size()) {
+            return;
+        }
+        bgfx::TransientVertexBuffer buffer;
+        bgfx::allocTransientVertexBuffer(
+            &buffer, static_cast<std::uint32_t>(vertices.size()), ui_layout_);
+        std::memcpy(buffer.data, vertices.data(), vertices.size() * sizeof(UiVertex));
+        bgfx::setVertexBuffer(0, &buffer);
+        if (texture.has_value()) {
+            texture_resources_->bind(*texture, texture_sampler_);
+        } else {
+            bgfx::setTexture(0, texture_sampler_, fallback_shadow_texture_);
+        }
+        bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                       BGFX_STATE_BLEND_ALPHA);
+        bgfx::submit(ui_view, ui_program_);
+        ++stats_.draw_calls;
+        ++stats_.ui_draw_calls;
+    }
+
+    [[nodiscard]] float text_width(const std::string& text,
+                                   const float font_size) const noexcept {
+        constexpr float baked_size = 48.0F;
+        const float scale = font_size / baked_size;
+        float line = 0.0F;
+        float maximum = 0.0F;
+        for (std::size_t index = 0; index < text.size(); ++index) {
+            const unsigned char value = static_cast<unsigned char>(text[index]);
+            if (value == '\n') {
+                maximum = std::max(maximum, line);
+                line = 0.0F;
+                continue;
+            }
+            unsigned char glyph = value;
+            if (glyph < 32 || glyph > 126) {
+                glyph = '?';
+                while (index + 1 < text.size() &&
+                       (static_cast<unsigned char>(text[index + 1]) & 0xc0U) == 0x80U) {
+                    ++index;
+                }
+            }
+            line += font_glyphs_[glyph - 32].xadvance * scale;
+        }
+        return std::max(maximum, line);
+    }
+
+    void append_ui_text(std::vector<UiVertex>& vertices,
+                        const UiElement& element,
+                        const UiRect& rect) const {
+        constexpr float baked_size = 48.0F;
+        constexpr float atlas_size = 512.0F;
+        const float scale = element.font_size / baked_size;
+        float origin_x = rect.x;
+        float baseline = rect.y + element.font_size;
+        if (element.kind == UiElementKind::Button) {
+            origin_x = rect.x + (rect.width - text_width(element.text, element.font_size)) * 0.5F;
+            baseline = rect.y + (rect.height + element.font_size * 0.72F) * 0.5F;
+        }
+        float cursor_x = origin_x / scale;
+        float cursor_y = baseline / scale;
+        for (std::size_t index = 0; index < element.text.size(); ++index) {
+            unsigned char value = static_cast<unsigned char>(element.text[index]);
+            if (value == '\n') {
+                cursor_x = origin_x / scale;
+                cursor_y += baked_size * 1.25F;
+                continue;
+            }
+            if (value < 32 || value > 126) {
+                value = '?';
+                while (index + 1 < element.text.size() &&
+                       (static_cast<unsigned char>(element.text[index + 1]) & 0xc0U) == 0x80U) {
+                    ++index;
+                }
+            }
+            stbtt_aligned_quad quad{};
+            stbtt_GetBakedQuad(font_glyphs_.data(),
+                               static_cast<int>(atlas_size),
+                               static_cast<int>(atlas_size),
+                               value - 32,
+                               &cursor_x,
+                               &cursor_y,
+                               &quad,
+                               1);
+            append_ui_quad(vertices,
+                           quad.x0 * scale,
+                           quad.y0 * scale,
+                           quad.x1 * scale,
+                           quad.y1 * scale,
+                           quad.s0,
+                           quad.t0,
+                           quad.s1,
+                           quad.t1,
+                           element.text_color);
+        }
+    }
+
+    void submit_ui() {
+        if (scene_ == nullptr || !scene_->active() || scene_->ui_elements().empty()) {
+            return;
+        }
+        std::vector<const UiElement*> elements;
+        elements.reserve(scene_->ui_elements().size());
+        for (const UiElement& element : scene_->ui_elements()) {
+            if (element.visible) {
+                elements.push_back(&element);
+            }
+        }
+        std::stable_sort(elements.begin(), elements.end(),
+                         [](const UiElement* left, const UiElement* right) {
+                             if (left->z_index != right->z_index) {
+                                 return left->z_index < right->z_index;
+                             }
+                             return left->id < right->id;
+                         });
+        bgfx::touch(ui_view);
+        for (const UiElement* element : elements) {
+            const UiRect rect = resolve_ui_rect(*element);
+            if (element->kind == UiElementKind::Panel ||
+                element->kind == UiElementKind::Sprite ||
+                element->kind == UiElementKind::Button) {
+                std::vector<UiVertex> vertices;
+                vertices.reserve(6);
+                append_ui_quad(vertices,
+                               rect.x,
+                               rect.y,
+                               rect.x + rect.width,
+                               rect.y + rect.height,
+                               0.0F,
+                               0.0F,
+                               1.0F,
+                               1.0F,
+                               element->color);
+                std::optional<TextureLifetimeManager::Handle> texture;
+                if (element->texture) {
+                    texture = texture_resources_->upload_cached(
+                        element->texture, ui_sampler_);
+                }
+                submit_ui_vertices(vertices, texture);
+            }
+            if (element->kind == UiElementKind::Text ||
+                element->kind == UiElementKind::Button) {
+                std::vector<UiVertex> vertices;
+                vertices.reserve(element->text.size() * 6);
+                append_ui_text(vertices, *element, rect);
+                submit_ui_vertices(vertices, ui_font_texture_);
+            }
+            ++stats_.ui_elements;
         }
     }
 
@@ -954,6 +1254,7 @@ private:
                           0,
                           view_extent(width_),
                           view_extent(height_));
+        bgfx::setViewRect(ui_view, 0, 0, view_extent(width_), view_extent(height_));
     }
 
     [[nodiscard]] static glm::mat4 model_matrix(const Transform& transform) {
@@ -1412,6 +1713,7 @@ private:
     bgfx::SwapChain swap_chain_{};
     bgfx::VertexLayout layout_{};
     bgfx::VertexLayout postprocess_layout_{};
+    bgfx::VertexLayout ui_layout_{};
     bgfx::ProgramHandle solid_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle solid_instanced_program_{BGFX_INVALID_HANDLE};
@@ -1419,6 +1721,7 @@ private:
     bgfx::ProgramHandle postprocess_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle shadow_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle shadow_instanced_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle ui_program_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_params_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle normal_matrix_{BGFX_INVALID_HANDLE};
@@ -1448,6 +1751,10 @@ private:
     Camera camera_{};
     LightingState lighting_{};
     std::array<float, 4> camera_position_value_{0.0F, 0.0F, 0.0F, 1.0F};
+    std::array<stbtt_bakedchar, 96> font_glyphs_{};
+    std::shared_ptr<const ImageData> ui_font_image_;
+    std::optional<TextureLifetimeManager::Handle> ui_font_texture_;
+    TextureSampler ui_sampler_{};
     RendererStats stats_{};
     const Scene* scene_{nullptr};
     TextureCache scene_textures_;

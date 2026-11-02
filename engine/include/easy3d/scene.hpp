@@ -65,6 +65,45 @@ struct LightComponent final {
     void validate() const;
 };
 
+enum class UiElementKind {
+    Panel,
+    Sprite,
+    Text,
+    Button,
+};
+
+enum class UiAnchor {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+};
+
+struct UiElement final {
+    std::uint64_t id{0};
+    UiElementKind kind{UiElementKind::Panel};
+    UiAnchor anchor{UiAnchor::TopLeft};
+    float x{0.0F};
+    float y{0.0F};
+    float width{0.0F};
+    float height{0.0F};
+    Color color{};
+    std::shared_ptr<const ImageData> texture;
+    std::string text;
+    Color text_color{};
+    float font_size{24.0F};
+    std::int32_t z_index{0};
+    bool visible{true};
+    bool enabled{true};
+
+    void validate() const;
+};
+
 struct ColliderComponent final {
     PhysicsShape shape{PhysicsShape::Box};
     Vec3 half_extents{0.5F, 0.5F, 0.5F};
@@ -380,6 +419,14 @@ public:
     void add_debug_line(DebugLine line);
     void clear_debug_lines() noexcept;
     [[nodiscard]] const std::vector<DebugLine>& debug_lines() const noexcept;
+    [[nodiscard]] std::uint64_t add_ui_element(
+        UiElement element,
+        const std::optional<std::filesystem::path>& texture = std::nullopt);
+    [[nodiscard]] const UiElement& ui_element(std::uint64_t id) const;
+    void update_ui_element(std::uint64_t id, UiElement element);
+    void remove_ui_element(std::uint64_t id);
+    void clear_ui() noexcept;
+    [[nodiscard]] const std::vector<UiElement>& ui_elements() const noexcept;
 
     [[nodiscard]] Vec3 physics_gravity() const noexcept;
     void set_physics_gravity(Vec3 gravity);
@@ -425,6 +472,9 @@ private:
     World world_;
     Camera camera_;
     std::vector<DebugLine> debug_lines_;
+    std::vector<UiElement> ui_elements_;
+    std::uint64_t next_ui_id_{1};
+    TextureCache ui_texture_cache_;
     std::unique_ptr<PhysicsWorld> physics_;
     std::unordered_map<std::uint64_t, PhysicsEntity> physics_entities_;
     std::unordered_map<std::uint64_t, CharacterEntity> character_entities_;

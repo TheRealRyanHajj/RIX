@@ -4401,3 +4401,98 @@ green unlit cube, cast floor shadows and debug axes, then exited cleanly. This
 is D3D11 evidence on the recorded NVIDIA adapter only; other backends remain
 unverified. Phase 6.1: **DONE**. Exact next task: Phase 6.2 — basic 2D sprites,
 text, HUD anchoring/layout and clickable overlay buttons.
+
+## 2026-11-01 — Phase 6.2 native HUD and 2D overlays
+
+Added scene-owned retained UI elements with monotonic IDs, validation, explicit
+lifetime and native traversal. The fourth ordered bgfx view renders alpha-
+blended solid panels, cached PNG/JPEG sprites and text after the 3D and optional
+postprocess passes. A private RGBA8 atlas is baked once from the pinned bgfx
+Roboto Regular data through its bundled stb_truetype implementation. Printable
+ASCII is supported; unsupported Unicode becomes `?` intentionally.
+
+Added typed `scene.hud` factories for `Panel`, `Sprite`, `Text`, and `Button`,
+nine resize-aware anchor/pivot choices, explicit z-order, mutable retained
+properties, removal/clear invalidation, and horizontal/vertical `Stack` layout.
+Text remeasures when its content or font size changes. Buttons maintain normal,
+hover and pressed colors; the topmost enabled visible hit receives one callback
+on each left-button press edge. Dispatch occurs inside the existing gameplay-
+thread mutation boundary before scheduler phases. SDL logical pointer position
+and delta now scale to framebuffer pixels, matching both native UI rendering
+and the engine's atomic resized viewport extent on high-DPI windows.
+
+Added the public `examples/09_hud` scene with a 3D background, translucent
+panel, text, PNG sprite, button stack, status mutation and clean close callback.
+Renderer stats now include submitted UI element and UI draw counts. ADR-0046,
+API/architecture/known-limit docs and third-party notices record the retained-
+native/Python-callback split and the Roboto/stb licenses.
+
+Failures and corrections:
+
+- No native or Python regression failed during implementation. The first UI
+  automation screenshot captured the previously active Chrome window because
+  the Easy3D window had not been raised. Selecting the exact window ID and
+  invoking its exposed `Raise` action produced the correct live capture; no
+  application code changed for that tooling issue.
+- The first generated-header hygiene check could not cover the two new headers
+  while they were untracked. The same mechanical trailing-whitespace cleanup
+  used for the other shader headers was applied before the final staged
+  `git diff --check`.
+
+Exact verification evidence:
+
+```text
+build\windows-debug\_deps\bgfx_cmake-build\cmake\bgfx\Debug\shaderc.exe ... vs_ui.sc ... --type vertex --platform windows -p s_5_0 --bin2c vs_ui_dxbc
+# exit code 0; DXBC vertex inputs POSITION/COLOR0/TEXCOORD0 reported
+
+build\windows-debug\_deps\bgfx_cmake-build\cmake\bgfx\Debug\shaderc.exe ... fs_ui.sc ... --type fragment --platform windows -p s_5_0 --bin2c fs_ui_dxbc
+# exit code 0; s_texColor sampler reported
+
+build\venv311\Scripts\python.exe -m pytest tests/python/test_ui.py tests/python/test_game.py tests/python/test_scene.py -q
+.........................                                                [100%]
+25 passed in 0.19s
+
+cmake --build --preset windows-debug --parallel 4
+ctest --preset windows-debug --output-on-failure
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.70 sec
+
+cmake --build --preset windows-release --parallel 4
+ctest --preset windows-release --output-on-failure
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 1.75 sec
+
+cmake --build build\windows-headless --config Release --parallel 4
+ctest --test-dir build\windows-headless -C Release --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 1.72 sec
+
+build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
+Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=4058088 sha256=3c630161b535b65f04c432794190238a83ca0258505d8428811882790b90bc6e
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 34%]
+........................................................................ [ 69%]
+...............................................................          [100%]
+207 passed in 31.03s
+
+build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe examples\09_hud\main.py --seconds 2
+Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
+Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
+hud_example: PASS frames=258 ui_elements=6 ui_draw_calls=8
+```
+
+The same example was inspected interactively on the GUI-capable Windows host.
+The native capture visibly showed the postprocessed cube/plane behind crisp
+Roboto labels, translucent panel, sprite and two buttons. Maximizing preserved
+top-left, top-right and bottom-center anchors. The status button updated its
+label, and a real click on the maximized Close button stopped the loop cleanly
+at 8020 frames with six UI elements/eight UI draws. This is D3D11 evidence on
+the recorded NVIDIA adapter only. Phase 6.2: **DONE**. Exact next task: Phase
+6.3 — lightweight playback and positional audio backend selected through an
+ADR.

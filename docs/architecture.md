@@ -140,6 +140,30 @@ retirement, while Easy3D destroys framebuffers, textures, uniforms and programs
 before renderer shutdown. Atomic latest-frame stats expose the features that
 actually became active.
 
+## Retained 2D overlay
+
+The scene owns validated `UiElement` values independently of entity handles.
+Each has a monotonic scene-local ID, kind, nine-point anchor, viewport-pixel
+rectangle, z-order, color and optional immutable image/text state. Scene clear
+releases UI items and their CPU texture-cache references. Python wrappers retain
+callback and layout policy, while the renderer reads one stable native vector
+after the gameplay callback; no Python draw call occurs for an element.
+
+The renderer's fourth ordered bgfx view targets the swap chain after shadow,
+3D, and optional postprocess views. It sorts visible items by `(z_index, id)`,
+builds frame-local triangle lists, alpha-blends panels/sprites/text, and exposes
+separate UI submission counters. PNG/JPEG sprites share the renderer's private
+GPU texture lifetime manager. Text uses stb_truetype once at startup to bake
+printable ASCII from bgfx's pinned Roboto Regular data into one private RGBA8
+atlas; each label submits its glyph quads together.
+
+Button hit testing remains in the friendly Python layer because callbacks are
+Python objects, but it uses the exact anchor/pivot equation and the native
+engine's atomic current framebuffer extent. SDL pointer coordinates and deltas
+are scaled from logical units to framebuffer pixels before entering `Input`.
+Dispatch occurs inside the frame mutation boundary before scheduler phases and
+chooses only the topmost enabled visible button on the press edge.
+
 ## Input ownership and frame boundaries
 
 `Engine` owns one platform-neutral `InputSystem`; it has no SDL dependency and

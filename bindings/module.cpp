@@ -590,6 +590,48 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "unknown";
     };
+    const auto ui_kind = [](const std::string& value) {
+        if (value == "panel") return easy3d::UiElementKind::Panel;
+        if (value == "sprite") return easy3d::UiElementKind::Sprite;
+        if (value == "text") return easy3d::UiElementKind::Text;
+        if (value == "button") return easy3d::UiElementKind::Button;
+        throw std::invalid_argument("UI kind must be panel, sprite, text, or button");
+    };
+    const auto ui_kind_name = [](const easy3d::UiElementKind value) {
+        switch (value) {
+        case easy3d::UiElementKind::Panel: return "panel";
+        case easy3d::UiElementKind::Sprite: return "sprite";
+        case easy3d::UiElementKind::Text: return "text";
+        case easy3d::UiElementKind::Button: return "button";
+        }
+        return "panel";
+    };
+    const auto ui_anchor = [](const std::string& value) {
+        if (value == "top_left") return easy3d::UiAnchor::TopLeft;
+        if (value == "top") return easy3d::UiAnchor::Top;
+        if (value == "top_right") return easy3d::UiAnchor::TopRight;
+        if (value == "left") return easy3d::UiAnchor::Left;
+        if (value == "center") return easy3d::UiAnchor::Center;
+        if (value == "right") return easy3d::UiAnchor::Right;
+        if (value == "bottom_left") return easy3d::UiAnchor::BottomLeft;
+        if (value == "bottom") return easy3d::UiAnchor::Bottom;
+        if (value == "bottom_right") return easy3d::UiAnchor::BottomRight;
+        throw std::invalid_argument("invalid UI anchor");
+    };
+    const auto ui_anchor_name = [](const easy3d::UiAnchor value) {
+        switch (value) {
+        case easy3d::UiAnchor::TopLeft: return "top_left";
+        case easy3d::UiAnchor::Top: return "top";
+        case easy3d::UiAnchor::TopRight: return "top_right";
+        case easy3d::UiAnchor::Left: return "left";
+        case easy3d::UiAnchor::Center: return "center";
+        case easy3d::UiAnchor::Right: return "right";
+        case easy3d::UiAnchor::BottomLeft: return "bottom_left";
+        case easy3d::UiAnchor::Bottom: return "bottom";
+        case easy3d::UiAnchor::BottomRight: return "bottom_right";
+        }
+        return "top_left";
+    };
     const auto physics_shape = [](const std::string& value) {
         if (value == "box") return easy3d::PhysicsShape::Box;
         if (value == "sphere") return easy3d::PhysicsShape::Sphere;
@@ -760,6 +802,7 @@ PYBIND11_MODULE(_easy3d, module) {
         .def_property_readonly("is_running", &easy3d::Engine::is_running)
         .def_property_readonly("frame_count", &easy3d::Engine::frame_count)
         .def_property_readonly("last_frame_seconds", &easy3d::Engine::last_frame_seconds)
+        .def_property_readonly("viewport_size", &easy3d::Engine::viewport_size)
         .def_property_readonly("graphics_preset", [](const easy3d::Engine& engine) {
             return easy3d::graphics_preset_name(engine.config().graphics_preset);
         })
@@ -774,6 +817,8 @@ PYBIND11_MODULE(_easy3d, module) {
                                   stats.visible_instances,
                                   stats.culled_instances,
                                   stats.instanced_draw_calls,
+                                  stats.ui_draw_calls,
+                                  stats.ui_elements,
                                   stats.enhanced_lighting,
                                   stats.shadows,
                                   stats.postprocessing,
@@ -1623,6 +1668,127 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("color"),
              py::arg("depth_test") = true)
         .def("clear_debug_lines", &easy3d::Scene::clear_debug_lines)
+        .def("add_ui_element",
+             [ui_kind, ui_anchor](easy3d::Scene& scene,
+                                  const std::string& kind,
+                                  const std::string& anchor,
+                                  const std::array<float, 2>& position,
+                                  const std::array<float, 2>& size,
+                                  const std::array<float, 4>& color,
+                                  const std::string& text,
+                                  const std::array<float, 4>& text_color,
+                                  const float font_size,
+                                  const std::int32_t z_index,
+                                  const bool visible,
+                                  const bool enabled,
+                                  const std::optional<std::string>& texture) {
+                 easy3d::UiElement element;
+                 element.kind = ui_kind(kind);
+                 element.anchor = ui_anchor(anchor);
+                 element.x = position[0];
+                 element.y = position[1];
+                 element.width = size[0];
+                 element.height = size[1];
+                 element.color = {color[0], color[1], color[2], color[3]};
+                 element.text = text;
+                 element.text_color = {
+                     text_color[0], text_color[1], text_color[2], text_color[3]};
+                 element.font_size = font_size;
+                 element.z_index = z_index;
+                 element.visible = visible;
+                 element.enabled = enabled;
+                 return scene.add_ui_element(
+                     std::move(element),
+                     texture.has_value()
+                         ? std::optional<std::filesystem::path>(*texture)
+                         : std::nullopt);
+             },
+             py::arg("kind"),
+             py::arg("anchor"),
+             py::arg("position"),
+             py::arg("size"),
+             py::arg("color"),
+             py::arg("text") = "",
+             py::arg("text_color") = std::array<float, 4>{1, 1, 1, 1},
+             py::arg("font_size") = 24.0F,
+             py::arg("z_index") = 0,
+             py::arg("visible") = true,
+             py::arg("enabled") = true,
+             py::arg("texture") = std::nullopt)
+        .def("ui_element_info",
+             [ui_kind_name, ui_anchor_name](const easy3d::Scene& scene,
+                                             const std::uint64_t id) {
+                 const easy3d::UiElement& element = scene.ui_element(id);
+                 py::object texture = py::none();
+                 if (element.texture) {
+                     texture = py::cast(element.texture->source_path.string());
+                 }
+                 return py::make_tuple(
+                     ui_kind_name(element.kind),
+                     ui_anchor_name(element.anchor),
+                     py::make_tuple(element.x, element.y),
+                     py::make_tuple(element.width, element.height),
+                     py::make_tuple(element.color.r,
+                                    element.color.g,
+                                    element.color.b,
+                                    element.color.a),
+                     element.text,
+                     py::make_tuple(element.text_color.r,
+                                    element.text_color.g,
+                                    element.text_color.b,
+                                    element.text_color.a),
+                     element.font_size,
+                     element.z_index,
+                     element.visible,
+                     element.enabled,
+                     texture);
+             },
+             py::arg("id"))
+        .def("update_ui_element",
+             [ui_anchor](easy3d::Scene& scene,
+                         const std::uint64_t id,
+                         const std::string& anchor,
+                         const std::array<float, 2>& position,
+                         const std::array<float, 2>& size,
+                         const std::array<float, 4>& color,
+                         const std::string& text,
+                         const std::array<float, 4>& text_color,
+                         const float font_size,
+                         const std::int32_t z_index,
+                         const bool visible,
+                         const bool enabled) {
+                 easy3d::UiElement element;
+                 element.anchor = ui_anchor(anchor);
+                 element.x = position[0];
+                 element.y = position[1];
+                 element.width = size[0];
+                 element.height = size[1];
+                 element.color = {color[0], color[1], color[2], color[3]};
+                 element.text = text;
+                 element.text_color = {
+                     text_color[0], text_color[1], text_color[2], text_color[3]};
+                 element.font_size = font_size;
+                 element.z_index = z_index;
+                 element.visible = visible;
+                 element.enabled = enabled;
+                 scene.update_ui_element(id, std::move(element));
+             },
+             py::arg("id"),
+             py::arg("anchor"),
+             py::arg("position"),
+             py::arg("size"),
+             py::arg("color"),
+             py::arg("text"),
+             py::arg("text_color"),
+             py::arg("font_size"),
+             py::arg("z_index"),
+             py::arg("visible"),
+             py::arg("enabled"))
+        .def("remove_ui_element", &easy3d::Scene::remove_ui_element, py::arg("id"))
+        .def("clear_ui", &easy3d::Scene::clear_ui)
+        .def_property_readonly("ui_element_count", [](const easy3d::Scene& scene) {
+            return scene.ui_elements().size();
+        })
         .def("physics_gravity", [](const easy3d::Scene& scene) {
             const easy3d::Vec3 gravity = scene.physics_gravity();
             return py::make_tuple(gravity.x, gravity.y, gravity.z);

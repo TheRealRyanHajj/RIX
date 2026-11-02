@@ -198,11 +198,13 @@ class Engine:
     @property
     def last_frame_seconds(self) -> float: ...
     @property
+    def viewport_size(self) -> tuple[int, int]: ...
+    @property
     def graphics_preset(self) -> str: ...
     @property
     def renderer_stats(
         self,
-    ) -> tuple[int, int, int, int, bool, bool, bool, bool, int]: ...
+    ) -> tuple[int, int, int, int, int, int, bool, bool, bool, bool, int]: ...
     @property
     def input(self) -> _NativeInput: ...
 
@@ -535,6 +537,55 @@ class _NativeScene:
         depth_test: bool = True,
     ) -> None: ...
     def clear_debug_lines(self) -> None: ...
+    def add_ui_element(
+        self,
+        kind: str,
+        anchor: str,
+        position: tuple[float, float],
+        size: tuple[float, float],
+        color: tuple[float, float, float, float],
+        text: str = "",
+        text_color: tuple[float, float, float, float] = (1, 1, 1, 1),
+        font_size: float = 24,
+        z_index: int = 0,
+        visible: bool = True,
+        enabled: bool = True,
+        texture: str | None = None,
+    ) -> int: ...
+    def ui_element_info(
+        self, id: int
+    ) -> tuple[
+        str,
+        str,
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float, float, float],
+        str,
+        tuple[float, float, float, float],
+        float,
+        int,
+        bool,
+        bool,
+        str | None,
+    ]: ...
+    def update_ui_element(
+        self,
+        id: int,
+        anchor: str,
+        position: tuple[float, float],
+        size: tuple[float, float],
+        color: tuple[float, float, float, float],
+        text: str,
+        text_color: tuple[float, float, float, float],
+        font_size: float,
+        z_index: int,
+        visible: bool,
+        enabled: bool,
+    ) -> None: ...
+    def remove_ui_element(self, id: int) -> None: ...
+    def clear_ui(self) -> None: ...
+    @property
+    def ui_element_count(self) -> int: ...
     def physics_gravity(self) -> tuple[float, float, float]: ...
     def set_physics_gravity(self, gravity: tuple[float, float, float]) -> None: ...
     def step_physics(self, delta_seconds: float) -> None: ...

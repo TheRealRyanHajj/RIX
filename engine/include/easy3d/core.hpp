@@ -7,6 +7,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace easy3d {
 
@@ -56,6 +57,8 @@ struct RendererStats final {
     std::uint64_t visible_instances{0};
     std::uint64_t culled_instances{0};
     std::uint64_t instanced_draw_calls{0};
+    std::uint64_t ui_draw_calls{0};
+    std::uint64_t ui_elements{0};
     bool enhanced_lighting{false};
     bool shadows{false};
     bool postprocessing{false};
@@ -77,6 +80,8 @@ private:
     std::atomic_uint64_t visible_instances_{0};
     std::atomic_uint64_t culled_instances_{0};
     std::atomic_uint64_t instanced_draw_calls_{0};
+    std::atomic_uint64_t ui_draw_calls_{0};
+    std::atomic_uint64_t ui_elements_{0};
     std::atomic_bool enhanced_lighting_{false};
     std::atomic_bool shadows_{false};
     std::atomic_bool postprocessing_{false};
@@ -102,6 +107,7 @@ public:
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] std::uint64_t frame_count() const noexcept;
     [[nodiscard]] double last_frame_seconds() const noexcept;
+    [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> viewport_size() const noexcept;
     [[nodiscard]] RendererStats renderer_stats() const noexcept;
     [[nodiscard]] InputSystem& input() noexcept;
     [[nodiscard]] const InputSystem& input() const noexcept;
@@ -113,6 +119,8 @@ private:
     std::atomic_bool stop_requested_{false};
     std::atomic_uint64_t frame_count_{0};
     std::atomic<double> last_frame_seconds_{0.0};
+    std::atomic_uint32_t viewport_width_{1};
+    std::atomic_uint32_t viewport_height_{1};
     RendererStatsAtomic renderer_stats_;
     InputSystem input_;
     Scene* scene_{nullptr};

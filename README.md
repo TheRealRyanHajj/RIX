@@ -1,10 +1,8 @@
 # Easy3D
 
 Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–2, the complete Phase 3 transport foundation, and Phase
-4.1–4.4 replicated lifecycle, authoritative typed variables, interpolated
-transform snapshots, basic relevance filtering, and authorized bounded RPCs
-are validated.
+native core. Phases 0–5 and the Phase 6 graphics-preset/native-HUD milestones
+are validated for their documented workloads and limits.
 The engine has a native D3D11 renderer, generation-safe scenes and entities,
 shared assets and render components,
 Python gameplay callbacks and utilities, remappable input, and a headless Jolt
@@ -164,6 +162,33 @@ environment probes, cascaded shadows or point-light shadows. Inspect
 `game.renderer_stats.enhanced_lighting`, `.postprocessing`, `.fxaa`, `.shadows`
 and `.shadow_resolution` to distinguish requested settings from features that
 are active on the current adapter.
+
+## Native HUD and 2D overlays
+
+Every scene owns a retained `scene.hud`. Panels, PNG/JPEG sprites, built-in
+Roboto text and buttons are submitted by the native renderer after the 3D and
+postprocess passes:
+
+```python
+status = scene.hud.text("Ready", position=(24, 24), font_size=28)
+icon = scene.hud.sprite("assets/icon.png", anchor="top_right",
+                        position=(-24, 24), size=(64, 64))
+play = scene.hud.button(
+    "Play",
+    anchor="bottom",
+    position=(0, -32),
+    on_click=lambda _: setattr(status, "text", "Playing"),
+)
+```
+
+Nine anchors use the same point as the viewport anchor and the element pivot,
+so `(0, 0)` keeps a centered element centered and a top-right element flush to
+the top-right corner. `HUD.stack("horizontal" | "vertical", ...)` provides a
+small explicit layout group; call `relayout()` after changing child sizes.
+Buttons use the topmost enabled hit at the mouse press edge and may safely
+mutate the active scene in their callback. `RendererStats.ui_elements` and
+`.ui_draw_calls` expose the last native overlay submission. Run
+`python examples/09_hud/main.py` for the complete resizable example.
 
 ## Input and action maps
 

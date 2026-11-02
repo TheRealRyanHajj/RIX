@@ -14,6 +14,8 @@ applicable notices.
 | bimg | `64a34f7441af8f06e40ccab08d76bbf5e59e55b1` | BSD-2-Clause | bgfx image support |
 | LodePNG (bundled by bimg) | bimg pin above | zlib | PNG decoding |
 | stb_image (bundled by bimg) | bimg pin above | MIT (selected alternative) | JPEG decoding |
+| stb_truetype (bundled by bgfx) | bgfx pin above | MIT (selected alternative) | Built-in font atlas rasterization |
+| Roboto Regular font data (bundled by bgfx) | bgfx pin above | Apache-2.0 | Built-in ASCII HUD text |
 | GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Private native math implementation |
 | tinyobjloader | `2945a967c5303b2c8c14174117c45f3302591150` (`v2.0.0rc13`) | MIT | OBJ/MTL parsing |
 | Jolt Physics | `e77f175595e64cb44218cc9d9d56fc365ad0e36a` (`v5.6.0`) | MIT ([text](JoltPhysics.txt)) | Native rigid-body simulation |

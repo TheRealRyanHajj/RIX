@@ -12,6 +12,8 @@ void run_window_loop(const EngineConfig& config,
                      const std::atomic_bool& stop_requested,
                      std::atomic_uint64_t& frame_count,
                      std::atomic<double>& last_frame_seconds,
+                     std::atomic_uint32_t& viewport_width,
+                     std::atomic_uint32_t& viewport_height,
                      RendererStatsAtomic& renderer_stats,
                      InputSystem& input,
                      Engine::FrameCallback frame_callback);

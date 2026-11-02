@@ -231,6 +231,40 @@ one camera-centered orthographic shadow map with 3x3 PCF. Cascades, point/spot
 light shadows, image-based lighting and alpha-tested shadow casters are not in
 this contract.
 
+## HUD, sprites, text, layout, and buttons
+
+Each `Scene` owns one `scene.hud`. `panel()`, `sprite()`, `text()`, and
+`button()` return retained `Panel`, `Sprite`, `Text`, and `Button` objects.
+Position and size are finite viewport-pixel tuples. Size must be positive for
+panels, sprites, and buttons. Color values use the normal Easy3D `[0,1]` RGBA
+contract. Sprites synchronously load the same cached `.png`, `.jpg`, or `.jpeg`
+RGBA8 assets as 3D materials and raise the existing asset exceptions.
+
+`anchor` accepts `top_left`, `top`, `top_right`, `left`, `center`, `right`,
+`bottom_left`, `bottom`, or `bottom_right`. The selected point is both the
+viewport anchor and element pivot. Consequently, a centered element at `(0,0)`
+stays centered after resize; a top-right element at `(-16,16)` stays 16 pixels
+inside that corner. Higher `z_index` values submit later. Equal values retain
+creation order. Alpha blending is source-over and the entire UI view runs after
+the 3D/postprocess view.
+
+`HUD.stack(direction, elements, position=..., anchor=..., spacing=...)` supports
+explicit horizontal or vertical layout. It applies child positions immediately;
+call `Stack.relayout()` after changing child sizes. Text auto-measures again when
+its string or font size changes. The built-in font is Roboto Regular baked once
+per renderer at startup. This milestone guarantees printable ASCII; each
+unsupported Unicode code point renders as `?` rather than corrupting the atlas.
+
+Buttons expose `normal_color`, `hover_color`, `pressed_color`, `enabled`, and an
+optional `on_click(button)` callback. The rising edge of the left mouse button
+selects the highest-z enabled visible button under the pointer and invokes it
+once before that frame's scheduler phases. The callback runs inside the normal
+gameplay-thread mutation boundary and exceptions unwind the native loop. No
+keyboard/controller focus or navigation is implied. `Scene.clear()`,
+`Scene.close()`, `HUD.clear()`, and element `remove()` invalidate retained UI
+wrappers predictably. `RendererStats.ui_elements` and `ui_draw_calls` report the
+last submitted overlay.
+
 ## Input and remappable actions
 
 Each `Game` owns one `game.input` object. Physical control identifiers are
@@ -248,8 +282,9 @@ range. `state()` returns an immutable value/down/pressed/released snapshot.
 Unknown actions raise `IndexError` rather than silently returning an
 unconfigured value.
 
-Mouse position is window-relative; delta and wheel accumulate for the current
-frame and reset at the next native event poll. The current baseline opens one
+Mouse position and delta are window-relative framebuffer pixels; SDL logical
+coordinates are scaled by the current high-DPI pixel ratio. Delta and wheel
+accumulate for the current frame and reset at the next native event poll. The current baseline opens one
 primary SDL gamepad and uses Xbox-style logical face names `a/b/x/y`; axes are
 normalized to `[-1,1]`, while triggers use `[0,1]`.
 

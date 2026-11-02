@@ -61,6 +61,8 @@ void RendererStatsAtomic::store(const RendererStats stats) noexcept {
     visible_instances_.store(stats.visible_instances, std::memory_order_relaxed);
     culled_instances_.store(stats.culled_instances, std::memory_order_relaxed);
     instanced_draw_calls_.store(stats.instanced_draw_calls, std::memory_order_relaxed);
+    ui_draw_calls_.store(stats.ui_draw_calls, std::memory_order_relaxed);
+    ui_elements_.store(stats.ui_elements, std::memory_order_relaxed);
     enhanced_lighting_.store(stats.enhanced_lighting, std::memory_order_relaxed);
     shadows_.store(stats.shadows, std::memory_order_relaxed);
     postprocessing_.store(stats.postprocessing, std::memory_order_relaxed);
@@ -80,6 +82,8 @@ RendererStats RendererStatsAtomic::load() const noexcept {
             visible_instances_.load(std::memory_order_relaxed),
             culled_instances_.load(std::memory_order_relaxed),
             instanced_draw_calls_.load(std::memory_order_relaxed),
+            ui_draw_calls_.load(std::memory_order_relaxed),
+            ui_elements_.load(std::memory_order_relaxed),
             enhanced_lighting_.load(std::memory_order_relaxed),
             shadows_.load(std::memory_order_relaxed),
             postprocessing_.load(std::memory_order_relaxed),
@@ -106,6 +110,8 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     if (!std::isfinite(config_.fps_limit) || config_.fps_limit < 0.0) {
         throw std::invalid_argument("fps_limit must be zero (unlimited) or positive");
     }
+    viewport_width_.store(config_.width);
+    viewport_height_.store(config_.height);
 }
 
 void Engine::run(FrameCallback frame_callback) {
@@ -123,12 +129,16 @@ void Engine::run(FrameCallback frame_callback) {
     frame_count_.store(0);
     last_frame_seconds_.store(0.0);
     renderer_stats_.reset();
+    viewport_width_.store(config_.width);
+    viewport_height_.store(config_.height);
     platform::run_window_loop(
         config_,
         scene_,
         stop_requested_,
         frame_count_,
         last_frame_seconds_,
+        viewport_width_,
+        viewport_height_,
         renderer_stats_,
         input_,
         std::move(frame_callback));
@@ -155,6 +165,10 @@ std::uint64_t Engine::frame_count() const noexcept {
 
 double Engine::last_frame_seconds() const noexcept {
     return last_frame_seconds_.load();
+}
+
+std::pair<std::uint32_t, std::uint32_t> Engine::viewport_size() const noexcept {
+    return {viewport_width_.load(), viewport_height_.load()};
 }
 
 RendererStats Engine::renderer_stats() const noexcept {

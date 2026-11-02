@@ -24,6 +24,8 @@ class RendererStats:
     visible_instances: int = 0
     culled_instances: int = 0
     instanced_draw_calls: int = 0
+    ui_draw_calls: int = 0
+    ui_elements: int = 0
     enhanced_lighting: bool = False
     shadows: bool = False
     postprocessing: bool = False
@@ -144,6 +146,12 @@ class Game:
         def frame_callback(delta_seconds: float) -> None:
             self._callback_active = True
             try:
+                if self._scene is not None:
+                    self._scene.hud._advance(
+                        self._input.pointer.position,
+                        self._input.mouse_button_down("left"),
+                        tuple(self._engine.viewport_size),
+                    )
                 self._scheduler.advance(self._scene, delta_seconds)
             finally:
                 self._callback_active = False

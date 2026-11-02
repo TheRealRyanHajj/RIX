@@ -278,6 +278,22 @@ bgfx compiler, but only reviewed DXBC Shader Model 5 headers are committed and
 runtime-tested. This matches the explicit Windows D3D11 backend. Vulkan,
 Direct3D 12, OpenGL, Metal, and WebGPU shader artifacts are not claimed.
 
+## HUD text and layout are deliberately basic
+
+The built-in Roboto atlas contains printable ASCII only; unsupported Unicode
+code points display as `?`. There is no font-file API, shaping, kerning, bidi,
+fallback font, rich text, clipping/scroll view, rotated UI, nine-slice sprite,
+automatic wrapping, retained nested layout, accessibility tree, or keyboard/
+gamepad focus navigation yet. A `Stack` must be explicitly relaid out after a
+child size changes. Very large labels can exhaust bgfx's transient vertex
+buffer for that frame and be skipped rather than overflowing memory.
+
+HUD units are framebuffer pixels. This keeps rendering and hit testing aligned
+on high-DPI Windows displays, but does not provide DPI-independent sizing; a
+future UI scale policy is required for consistent physical size across mixed-
+DPI monitors. Button callbacks are polled in the Python frame bridge and are
+not available to a graphics-disabled dedicated server loop.
+
 ## Pinned GLM emits CMake policy deprecation warnings
 
 GLM 1.0.1 is pinned by immutable commit and builds successfully, but its

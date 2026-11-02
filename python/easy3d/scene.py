@@ -15,6 +15,7 @@ from .math import Quat, Vec3
 
 if TYPE_CHECKING:
     from .entity import Entity
+    from .ui import HUD
 
 
 _current_scene: ContextVar[Scene | None] = ContextVar("easy3d_current_scene", default=None)
@@ -37,6 +38,8 @@ class Scene:
         self._script_entities: dict[int, Entity] = {}
         self._deferred_destroy: dict[int, Entity] = {}
         self._deferred_clear = False
+        from .ui import HUD
+        self._hud = HUD(self)
 
     @classmethod
     def current(cls) -> Scene:
@@ -108,6 +111,12 @@ class Scene:
     @property
     def debug_line_count(self) -> int:
         return self._native.debug_line_count
+
+    @property
+    def hud(self) -> HUD:
+        """The retained native-rendered overlay owned by this scene."""
+
+        return self._hud
 
     @property
     def gravity(self) -> Vec3:
@@ -278,6 +287,7 @@ class Scene:
                 if first_error is None:
                     first_error = error
         self._native.clear()
+        self._hud._native_cleared()
         owner = self._live_owner()
         notify = None if owner is None else getattr(owner, "_on_entity_destroyed", None)
         if callable(notify):

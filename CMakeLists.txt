@@ -264,6 +264,7 @@ if(EASY3D_ENABLE_GRAPHICS)
         GIT_SHALLOW FALSE
     )
     FetchContent_MakeAvailable(bgfx_cmake)
+    FetchContent_GetProperties(bgfx SOURCE_DIR EASY3D_BGFX_SOURCE_DIR)
     list(APPEND easy3d_core_sources
         engine/src/platform/window_win32.cpp
         engine/src/renderer/bgfx_renderer.cpp
@@ -271,7 +272,6 @@ if(EASY3D_ENABLE_GRAPHICS)
 
     set(EASY3D_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/engine/src/renderer/shaders")
     if(EASY3D_REGENERATE_SHADERS)
-        FetchContent_GetProperties(bgfx SOURCE_DIR EASY3D_BGFX_SOURCE_DIR)
         set(BGFX_SHADER_INCLUDE_PATH "${EASY3D_BGFX_SOURCE_DIR}/src")
         set(EASY3D_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders/dxbc")
         bgfx_compile_shaders(
@@ -284,6 +284,7 @@ if(EASY3D_ENABLE_GRAPHICS)
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_postprocess.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_shadow.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_shadow_instanced.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_ui.sc"
             VARYING_DEF "${EASY3D_SHADER_SOURCE_DIR}/varying.def.sc"
             OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders"
             OUT_FILES_VAR EASY3D_VERTEX_SHADER_HEADERS
@@ -297,6 +298,7 @@ if(EASY3D_ENABLE_GRAPHICS)
                 "${EASY3D_SHADER_SOURCE_DIR}/fs_textured.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/fs_postprocess.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/fs_shadow.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/fs_ui.sc"
             VARYING_DEF "${EASY3D_SHADER_SOURCE_DIR}/varying.def.sc"
             OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders"
             OUT_FILES_VAR EASY3D_FRAGMENT_SHADER_HEADERS
@@ -321,6 +323,8 @@ if(EASY3D_ENABLE_GRAPHICS)
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_shadow.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_shadow_instanced.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_shadow.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_ui.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/fs_ui.sc.bin.h"
         )
     endif()
 else()
@@ -358,6 +362,8 @@ if(EASY3D_ENABLE_GRAPHICS)
     target_compile_definitions(easy3d_core PRIVATE EASY3D_HAS_GRAPHICS=1)
     target_include_directories(easy3d_core PRIVATE
         "${EASY3D_SHADER_INCLUDE_DIR}"
+        "${EASY3D_BGFX_SOURCE_DIR}/3rdparty/stb"
+        "${EASY3D_BGFX_SOURCE_DIR}/examples/common/imgui"
     )
     target_link_libraries(easy3d_core PRIVATE SDL3::SDL3-static bgfx bimg bimg_decode)
 endif()

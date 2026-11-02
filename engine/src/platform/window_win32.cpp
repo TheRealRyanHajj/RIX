@@ -195,6 +195,8 @@ void run_window_loop(const EngineConfig& config,
                      const std::atomic_bool& stop_requested,
                      std::atomic_uint64_t& frame_count,
                      std::atomic<double>& last_frame_seconds,
+                     std::atomic_uint32_t& viewport_width,
+                     std::atomic_uint32_t& viewport_height,
                      RendererStatsAtomic& renderer_stats,
                      InputSystem& input,
                      Engine::FrameCallback frame_callback) {
@@ -231,9 +233,16 @@ void run_window_loop(const EngineConfig& config,
     }
     int pixel_width = 0;
     int pixel_height = 0;
+    int logical_width = 0;
+    int logical_height = 0;
+    if (!SDL_GetWindowSize(window.get(), &logical_width, &logical_height)) {
+        throw EngineError(sdl_error("SDL could not query the logical window size"));
+    }
     if (!SDL_GetWindowSizeInPixels(window.get(), &pixel_width, &pixel_height)) {
         throw EngineError(sdl_error("SDL could not query the window pixel size"));
     }
+    viewport_width.store(static_cast<std::uint32_t>(std::max(pixel_width, 1)));
+    viewport_height.store(static_cast<std::uint32_t>(std::max(pixel_height, 1)));
 
     renderer::BgfxRenderer renderer(native_window,
                                     static_cast<std::uint32_t>(std::max(pixel_width, 1)),
@@ -286,10 +295,14 @@ void run_window_loop(const EngineConfig& config,
                                   event.key.down ? 1.0F : 0.0F);
             }
             if (event.type == SDL_EVENT_MOUSE_MOTION && event.motion.windowID == window_id) {
-                input.add_pointer_motion(event.motion.x,
-                                         event.motion.y,
-                                         event.motion.xrel,
-                                         event.motion.yrel);
+                const float scale_x = static_cast<float>(std::max(pixel_width, 1)) /
+                                      static_cast<float>(std::max(logical_width, 1));
+                const float scale_y = static_cast<float>(std::max(pixel_height, 1)) /
+                                      static_cast<float>(std::max(logical_height, 1));
+                input.add_pointer_motion(event.motion.x * scale_x,
+                                         event.motion.y * scale_y,
+                                         event.motion.xrel * scale_x,
+                                         event.motion.yrel * scale_y);
             }
             if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                  event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
@@ -339,7 +352,12 @@ void run_window_loop(const EngineConfig& config,
             if ((event.type == SDL_EVENT_WINDOW_RESIZED ||
                  event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) &&
                 event.window.windowID == window_id) {
-                if (SDL_GetWindowSizeInPixels(window.get(), &pixel_width, &pixel_height)) {
+                if (SDL_GetWindowSize(window.get(), &logical_width, &logical_height) &&
+                    SDL_GetWindowSizeInPixels(window.get(), &pixel_width, &pixel_height)) {
+                    viewport_width.store(
+                        static_cast<std::uint32_t>(std::max(pixel_width, 1)));
+                    viewport_height.store(
+                        static_cast<std::uint32_t>(std::max(pixel_height, 1)));
                     renderer.resize(static_cast<std::uint32_t>(std::max(pixel_width, 1)),
                                     static_cast<std::uint32_t>(std::max(pixel_height, 1)));
                 }

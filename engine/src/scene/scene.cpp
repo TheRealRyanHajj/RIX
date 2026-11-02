@@ -117,6 +117,32 @@ void LightComponent::validate() const {
     }
 }
 
+void UiElement::validate() const {
+    (void)color.rgba8();
+    (void)text_color.rgba8();
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) ||
+        !std::isfinite(height) || width < 0.0F || height < 0.0F) {
+        throw std::invalid_argument("UI position and size must be finite and non-negative");
+    }
+    if ((kind == UiElementKind::Panel || kind == UiElementKind::Sprite ||
+         kind == UiElementKind::Button) &&
+        (width <= 0.0F || height <= 0.0F)) {
+        throw std::invalid_argument("panel, sprite, and button sizes must be positive");
+    }
+    if (!std::isfinite(font_size) || font_size < 4.0F || font_size > 256.0F) {
+        throw std::invalid_argument("UI font size must be finite and in [4, 256]");
+    }
+    if (text.size() > 4096U) {
+        throw std::invalid_argument("UI text must not exceed 4096 UTF-8 bytes");
+    }
+    if ((kind == UiElementKind::Text || kind == UiElementKind::Button) && text.empty()) {
+        throw std::invalid_argument("text and button elements require non-empty text");
+    }
+    if (kind == UiElementKind::Sprite && !texture) {
+        throw std::invalid_argument("sprite elements require a texture");
+    }
+}
+
 void ColliderComponent::validate() const {
     material.validate();
     if (shape == PhysicsShape::Box &&
@@ -686,6 +712,8 @@ void Scene::clear() noexcept {
     character_entities_.clear();
     world_.clear();
     debug_lines_.clear();
+    ui_elements_.clear();
+    ui_texture_cache_.clear();
     if (physics_) {
         physics_->clear();
     }
@@ -1344,6 +1372,67 @@ void Scene::clear_debug_lines() noexcept {
 
 const std::vector<DebugLine>& Scene::debug_lines() const noexcept {
     return debug_lines_;
+}
+
+std::uint64_t Scene::add_ui_element(
+    UiElement element,
+    const std::optional<std::filesystem::path>& texture) {
+    if (texture.has_value()) {
+        element.texture = ui_texture_cache_.load(*texture, TextureColorSpace::Srgb);
+    }
+    element.id = next_ui_id_++;
+    if (next_ui_id_ == 0) {
+        next_ui_id_ = 1;
+    }
+    element.validate();
+    ui_elements_.push_back(std::move(element));
+    return ui_elements_.back().id;
+}
+
+const UiElement& Scene::ui_element(const std::uint64_t id) const {
+    const auto found = std::find_if(ui_elements_.begin(), ui_elements_.end(),
+                                    [id](const UiElement& element) {
+                                        return element.id == id;
+                                    });
+    if (found == ui_elements_.end()) {
+        throw EngineError("UI element does not exist");
+    }
+    return *found;
+}
+
+void Scene::update_ui_element(const std::uint64_t id, UiElement element) {
+    auto found = std::find_if(ui_elements_.begin(), ui_elements_.end(),
+                              [id](const UiElement& candidate) {
+                                  return candidate.id == id;
+                              });
+    if (found == ui_elements_.end()) {
+        throw EngineError("UI element does not exist");
+    }
+    element.id = id;
+    element.kind = found->kind;
+    element.texture = found->texture;
+    element.validate();
+    *found = std::move(element);
+}
+
+void Scene::remove_ui_element(const std::uint64_t id) {
+    const auto found = std::find_if(ui_elements_.begin(), ui_elements_.end(),
+                                    [id](const UiElement& element) {
+                                        return element.id == id;
+                                    });
+    if (found == ui_elements_.end()) {
+        throw EngineError("UI element does not exist");
+    }
+    ui_elements_.erase(found);
+}
+
+void Scene::clear_ui() noexcept {
+    ui_elements_.clear();
+    ui_texture_cache_.clear();
+}
+
+const std::vector<UiElement>& Scene::ui_elements() const noexcept {
+    return ui_elements_;
 }
 
 Vec3 Scene::physics_gravity() const noexcept {

@@ -1270,3 +1270,22 @@ format, size or framebuffer is unavailable, continue with the nearest usable
 path and report actual activation through renderer statistics and startup logs.
 This makes presets portable requests rather than unsupported guarantees and
 keeps adapter-specific policy out of the Python gameplay layer.
+
+## ADR-0046: Retain overlay data natively; keep Python callback policy thin
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+Store panels, sprites, text and buttons as validated scene-owned native values
+and render them in one ordered bgfx view after postprocessing. Use monotonic
+scene-local IDs, viewport-pixel nine-point anchors and explicit z-order. Share
+the existing image/cache lifetime and bake a private printable-ASCII Roboto
+atlas once with bgfx's pinned stb_truetype dependency. This keeps all per-frame
+geometry submission native without introducing a general widget framework.
+
+Keep button callback references, press-edge dispatch and the small horizontal/
+vertical stack helper in typed Python. Dispatch inside the existing gameplay-
+thread mutation boundary, use the engine's atomic framebuffer extent, and scale
+SDL logical pointer events into framebuffer pixels. This preserves normal Python
+callbacks while keeping hit testing deterministic, resize-aware and independent
+from the renderer's GPU resources.
