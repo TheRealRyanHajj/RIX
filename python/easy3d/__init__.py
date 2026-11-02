@@ -29,7 +29,7 @@ from .components import (
     PhysicsMaterial,
     Rigidbody,
 )
-from . import debug, discovery, network, physics
+from . import debug, discovery, network, physics, replication
 from .discovery import LanDiscoveryAnnouncer, LanDiscoveryBrowser
 from .entity import Entity
 from ._version import __version__
@@ -41,6 +41,13 @@ from .network import ListenServer, Server
 from .primitives import Cube, Model, Plane, Sphere
 from .physics import CollisionEvent, Constraint, PhysicsHit
 from .player import Player
+from .replication import (
+    ClientReplication,
+    NetworkObjectId,
+    PrefabId,
+    PrefabRegistry,
+    ServerReplication,
+)
 from .scene import Scene
 from .scheduler import CallbackStats, SchedulerStats, ScriptCallbackError
 from .utilities import (
@@ -62,6 +69,7 @@ __all__ = [
     "Camera",
     "CallbackStats",
     "CharacterController",
+    "ClientReplication",
     "Collider",
     "CollisionEvent",
     "Constraint",
@@ -82,9 +90,12 @@ __all__ = [
     "ListenServer",
     "MissingAssetError",
     "NetworkError",
+    "NetworkObjectId",
     "PhysicsError",
     "PhysicsMaterial",
     "PhysicsHit",
+    "PrefabId",
+    "PrefabRegistry",
     "MeshRenderer",
     "Model",
     "ModelCache",
@@ -102,6 +113,7 @@ __all__ = [
     "Plane",
     "Scene",
     "Server",
+    "ServerReplication",
     "SchedulerStats",
     "ScriptCallbackError",
     "Sphere",
@@ -119,6 +131,7 @@ __all__ = [
     "debug",
     "discovery",
     "physics",
+    "replication",
     "load_image",
     "load_obj",
     "native_add",

@@ -96,6 +96,14 @@ Treat it as failure-detection policy, not an exact callback deadline or a
 replacement for gameplay-level heartbeat/AFK rules. Abrupt transport failure
 codes can originate in GNS/the OS and are intentionally preserved as integers.
 
+Phase 4.1 replication covers server-owned prefab spawn/despawn and late-join
+lifecycle only. Network-object IDs are stable within one authority session but
+are not persisted across server restart. Destroy replicated entities through
+`ServerReplication.despawn()`; externally destroying a mapped authority entity
+does not synthesize a network despawn. Prefab factories must be deterministic
+about entity type but no component values or transforms are serialized yet.
+There is no client ownership, `NetworkVar`, RPC, relevance or resync protocol.
+
 The listen host's local client still traverses the OS loopback transport; it is
 not a zero-latency shared-memory shortcut. Its client and authority connection
 IDs are separate local namespaces even when their numeric values match. Phase

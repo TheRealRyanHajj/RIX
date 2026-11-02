@@ -385,3 +385,17 @@ confirmation from being mistaken for server-side establishment. GNS
 when its owner polls. Abrupt process tests deliberately use OS termination and
 assert copied disconnect events without assigning stable meaning to backend/OS
 failure codes.
+
+The first replication layer composes existing `Server`/`Client` owners rather
+than changing transport identity. A frozen `PrefabRegistry` is schema: explicit
+prefab ID/name pairs and its declared version form a canonical fingerprint.
+`ServerReplication` is the only network-object ID allocator and uses monotonic
+uint64 values unrelated to generation-qualified scene IDs. It creates and
+destroys authority entities, then emits reliable fixed-size lifecycle frames.
+
+Late join is a begin/spawn/end stream with declared count, schema, fingerprint
+and epoch. Reliable ordering places user callback spawns after the completed
+snapshot. `ClientReplication` validates the stream before declaring sync and
+owns only client-scene replicas. A failed send disconnects the affected peer;
+it never converts partial lifecycle delivery into silent success. This layer
+does not yet serialize component values or grant client authority.

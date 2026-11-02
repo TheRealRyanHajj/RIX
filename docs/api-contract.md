@@ -663,3 +663,33 @@ port, and returns newly validated immutable `DiscoveredServer` values. Its
 remain visible but are not connected automatically. Stats are immutable
 snapshots. Discovery supplies no DNS, IPv6 broadcast, authentication, account
 identity, room directory, relay or cross-subnet guarantee.
+
+## Server-owned replicated lifecycle
+
+`PrefabRegistry(schema_version=..., capacity=...)` maps explicit nonzero 32-bit
+`PrefabId` values and unique 1–64-byte safe UTF-8 names to
+`factory(scene) -> Entity` callables. Its 16-byte fingerprint is computed from
+the schema version and canonical ID/name pairs, independent of registration
+order. Attaching a replicator freezes the non-empty registry. IDs/names cannot
+be duplicated and capacity is finite.
+
+`ServerReplication(server, registry, max_objects=...)` must attach before
+clients connect and preserves the server's existing callbacks. `spawn(prefab)`
+requires an authority scene, invokes its factory, assigns a monotonic nonzero
+64-bit `NetworkObjectId`, and reliably broadcasts the lifecycle. IDs are never
+derived from `Entity.id` and are not reused after despawn. `despawn(id)` sends
+the authoritative removal and destroys the mapped authority entity. Failed
+replication queueing disconnects that peer so a reconnect can rebuild from a
+fresh snapshot instead of silently diverging.
+
+On each post-handshake connection the authority sends snapshot begin, current
+spawns sorted by object ID, and matching end. The begin declares bounded count,
+registry schema and fingerprint. `ClientReplication(client, scene, registry)`
+consumes only `E3DR` lifecycle messages, validates exact framing/order/count and
+creates/destroys client entities. `poll()` returns non-replication network
+events; callers must not also poll the same client independently. Disconnect
+clears replicas. Client-authored `E3DR` messages are rejected by the authority.
+
+Phase 4.1 contains lifecycle only: prefab payload/state, `NetworkVar`, transform
+snapshots, ownership, RPC, relevance, prediction and resynchronization are not
+part of this contract yet.

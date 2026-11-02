@@ -982,3 +982,37 @@ requiring an application disconnect event.
   but two-physical-machine execution remains separately reported evidence.
 - Process transport success does not imply replication, RPC, player identity,
   ownership, prediction or rendered-client integration.
+
+## ADR-0030: Explicit prefab schema and authority-monotonic network IDs
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+
+### Context
+
+Scene entity IDs are generation-qualified local handles and cannot identify the
+same logical object in another scene or a late join. Implicit class names or
+registration order are unstable schema, while partially delivered lifecycle
+updates cannot be allowed to leave one client silently divergent.
+
+### Decision
+
+Require explicit nonzero uint32 prefab IDs plus unique bounded names in a frozen
+registry. Fingerprint the declared schema version and canonical ID/name mapping.
+Let one server attachment allocate monotonically increasing nonzero uint64
+network-object IDs without reuse. Send fixed reliable begin/spawn/end snapshots
+on connect and fixed spawn/despawn updates afterward. Disconnect a peer on
+replication backpressure or invalid lifecycle data so reconnect can reapply a
+complete snapshot. Preserve existing application callbacks and reject
+client-authored lifecycle frames.
+
+### Consequences
+
+- Network IDs remain stable across authority/client scenes and late join but
+  only within one authority session; persistence across server restarts is not
+  claimed.
+- Prefab mapping mismatches fail before client entities are accepted.
+- Lifecycle factories can create typed entities without serializing Python
+  objects or exposing scene handles on the wire.
+- Field state, transforms, ownership, RPCs and relevance require later versioned
+  messages and are intentionally absent from this milestone.

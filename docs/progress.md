@@ -3212,3 +3212,119 @@ Phase 3.8 and the Phase 3 exit gate: **DONE**. Immediate next task: Phase 4.1 �
 define stable network-object IDs, bounded prefab/schema registration and
 server-owned spawn/despawn/late-join state. No entity synchronization is
 claimed by this checkpoint.
+
+## 2026-11-01 — Phase 4.1 stable IDs and server-owned lifecycle (complete)
+
+### Bounded approach
+
+Add a typed `easy3d.replication` layer over reliable Phase 3 messages. Use
+explicit nonzero 32-bit prefab IDs and monotonic nonzero 64-bit network-object
+IDs that are never derived from scene handles and never reused within one
+authority lifetime. A bounded prefab registry maps each explicit ID and safe
+name to a factory and computes an order-independent schema fingerprint from the
+registry's declared schema version and canonical ID/name pairs.
+
+Attach one server replicator to an existing `Server` without creating a second
+authority. It alone allocates IDs, creates prefab entities in the authority
+scene, broadcasts fixed binary spawn/despawn frames, and sends a bounded
+begin/spawn/end snapshot to each post-handshake connection. Failed replication
+queueing disconnects that peer so it can recover from a fresh late-join
+snapshot rather than silently diverging. Preserve pre-existing user callbacks.
+
+The client replicator consumes only fixed-magic lifecycle frames from its
+existing `Client`, validates exact lengths/version/schema/fingerprint/count and
+creates/destroys prefab entities in a client scene. Bound object count and
+snapshot count, reject duplicate/unknown IDs, clear client replicas on
+disconnect, and never accept client-authored spawn/despawn. Test registry
+determinism, non-reuse, callback composition, live lifecycle, late join,
+schema mismatch and malformed/duplicate frames over real loopback. Do not add
+network variables, transform state, RPCs, ownership, prediction or relevance.
+
+### Implemented
+
+- Added typed `NetworkObjectId`, `PrefabId`, `PrefabRegistration`, bounded
+  `PrefabRegistry`, `ReplicatedObject`, `ServerReplication` and
+  `ClientReplication` in `easy3d.replication`, with principal types exported at
+  package root. No Python object serialization or scene handle crosses the wire.
+- Prefab registration uses explicit nonzero uint32 IDs, unique safe names,
+  declared schema version and an order-independent 16-byte canonical
+  fingerprint. Attaching a replicator freezes the non-empty registry.
+- The sole server replicator allocates monotonic nonzero uint64 IDs without
+  reuse, creates/destroys entities through registered authority-scene factories,
+  preserves existing server callbacks and rejects client-authored lifecycle
+  magic. Replication backpressure disconnects only the affected peer.
+- Added a fixed 64-byte-maximum `E3DR` format with exact begin/spawn/despawn/end
+  lengths. Late join declares epoch, object count, schema and fingerprint, then
+  sends current objects in stable ID order. The client validates the complete
+  stream, bounds object count, rejects unknown/duplicate IDs and clears client
+  replicas on disconnect.
+- Added real-loopback coverage for preexisting and live objects, despawn,
+  second-client late join after a removal, callback composition and stable ID
+  equality across different scenes. Added deterministic registry capacity,
+  order/fingerprint, schema mismatch and duplicate-frame tests. The focused
+  suite passed 20 consecutive invocations.
+- Added ADR-0030 plus API/protocol/architecture/known-limit docs. Network vars,
+  transforms, ownership, RPC, relevance, prediction and cross-restart ID
+  persistence remain explicit later work. No dependency/license changed.
+
+### Failure found and corrected
+
+The first focused run reported `1 failed, 4 passed`: registering a duplicate ID
+in an already-full registry reported capacity exhaustion before checking the
+more specific duplicate invariant. Duplicate ID/name validation now precedes
+the capacity check. The focused suite then passed 5/5 and 20 consecutive runs.
+
+### Exact final verification evidence
+
+```text
+build\venv311\Scripts\python.exe -m pytest tests\python\test_replication_lifecycle.py -q
+.....                                                                    [100%]
+5 passed in 0.26s
+
+# The focused command was invoked 20 consecutive times before final packaging.
+20 consecutive replication lifecycle runs passed
+
+build\venv311\Scripts\python.exe -m pytest -q
+........................................................................ [ 49%]
+........................................................................ [ 98%]
+..                                                                       [100%]
+146 passed in 18.28s
+
+ctest --test-dir build\windows-headless -C Debug --output-on-failure
+100% tests passed, 0 tests failed out of 16
+Total Test time (real) = 0.95 sec
+
+ctest --preset windows-debug
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 0.99 sec
+
+ctest --preset windows-release
+100% tests passed, 0 tests failed out of 17
+Total Test time (real) = 0.82 sec
+
+# From the documented Visual Studio x64 developer environment:
+build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
+Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
+size=3929313
+sha256=d1bb744285e5ccc9ab0ee227f33348b2debc0ebae06490c5648b18a4a8d78a54
+Successfully installed easy3d-0.1.0
+
+build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
+# exit code 0, no output
+
+build\venv311\Scripts\python.exe -m pip check
+No broken requirements found.
+
+build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.NetworkObjectId(1)); print(easy3d.PrefabRegistry)"
+0.1.0
+NetworkObjectId(value=1)
+<class 'easy3d.replication.PrefabRegistry'>
+
+git diff --check
+# exit code 0; only Git's existing LF-to-CRLF checkout notices
+```
+
+Phase 4.1: **DONE**. Immediate next task: Phase 4.2 — add bounded typed
+`NetworkVar` registration, dirty tracking, authoritative write checks and
+versioned value serialization on top of this lifecycle. No transform or RPC
+claims are made by this checkpoint.

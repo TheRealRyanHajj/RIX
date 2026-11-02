@@ -223,10 +223,32 @@ backend/OS owns that failure reason. They assert recovery to a disconnected
 application event and bounded process completion. This remains byte transport;
 no entity synchronization, RPC, ownership or authentication format exists yet.
 
+## Implemented in Phase 4.1
+
+Lifecycle replication uses reliable application messages with a 12-byte
+little-endian envelope: magic `E3DR`, 16-bit wire version `1`, 8-bit type, zero
+flags and exact 32-bit payload length. Every lifecycle frame is at most 64
+bytes. Types are snapshot begin (`1`), spawn (`2`), despawn (`3`) and snapshot
+end (`4`).
+
+Begin carries nonzero uint64 epoch, uint32 object count, uint32 prefab-schema
+version and a 16-byte canonical registry fingerprint. Spawn carries nonzero
+uint64 network-object ID plus nonzero uint32 prefab ID. Despawn carries the
+object ID. End repeats the epoch. The server sends begin, current spawns sorted
+by ID, then end to each established peer before later live lifecycle updates.
+
+Clients require exact framing, known types/prefabs, matching schema/fingerprint,
+declared count, matching epoch, unique IDs and configured object bounds. A
+network-object ID is allocated monotonically by one authority and never derived
+from a scene handle or reused in that authority session. Client-authored `E3DR`
+frames are forbidden. This format contains no prefab field state, transform,
+owner, RPC or Python serialization.
+
 ## Not implemented yet
 
-There is no rendered-Game attachment, firewall automation, DNS, replication or
-RPC yet. LAN discovery is IPv4/local-subnet only. Transport encryption also does not
+There is no rendered-Game attachment, firewall automation, DNS, replicated
+field/transform state or RPC yet. LAN discovery is IPv4/local-subnet only.
+Transport encryption also does not
 establish account or player identity; authentication remains a separate
 extension boundary.
 
