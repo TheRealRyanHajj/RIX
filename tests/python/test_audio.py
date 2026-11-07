@@ -6,7 +6,7 @@ import wave
 
 import pytest
 
-from easy3d import AudioSource, Game, Sound, Vec3
+from rix import AudioSource, Game, Sound, Vec3
 
 
 def _wav(path: Path, *, width: int = 2, channels: int = 1) -> None:
@@ -58,6 +58,18 @@ def test_wav_load_cache_metadata_and_playback_controls(tmp_path: Path) -> None:
     source.stop()
     assert not source.playing
     assert game.audio.active_voice_count == 0
+
+
+def test_game_play_sound_is_one_call_and_reuses_audio_cache(tmp_path: Path) -> None:
+    path = tmp_path / "one-call.wav"
+    _wav(path)
+    game = Game()
+    first = game.play_sound(path, volume=0.5)
+    second = game.play_sound(path, position=(1, 0, 0))
+    assert isinstance(first, AudioSource) and isinstance(second, AudioSource)
+    assert game.audio.sound_count == 1
+    assert not first.spatial and second.spatial
+    game.close()
 
 
 def test_audio_rejects_bad_assets_and_cross_game_sounds(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Easy3D Phase 1 first-world scene using only the public Python API."""
+"""RIX Phase 1 first-world scene using only the public Python API."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from easy3d import Camera, Cube, Entity, Game, Light, Model, Plane, Scene, Sphere, debug
+from rix import Camera, Cube, Entity, Game, Light, Model, Plane, Scene, Sphere, debug
 
 
 _CHECKER_PNG = (
@@ -70,7 +70,7 @@ def _write_example_assets(directory: Path) -> tuple[Path, Path]:
 
 
 def run(*, seconds: float | None = None) -> None:
-    with tempfile.TemporaryDirectory(prefix="easy3d-first-world-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rix-first-world-") as temporary:
         texture, model = _write_example_assets(Path(temporary))
         scene = Scene("First world")
         camera = Camera(position=(8.5, 6.0, 11.0), vertical_fov_degrees=52.0)
@@ -109,7 +109,7 @@ def run(*, seconds: float | None = None) -> None:
             )
             debug.axes((-5.0, -0.95, 3.0), size=1.5)
 
-        game = Game("Easy3D — First World", (1280, 720), vsync=True)
+        game = Game("RIX — First World", (1280, 720), vsync=True)
         game.load_scene(scene)
 
         if seconds is not None:

@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-from easy3d import Game, RendererStats
-from easy3d._easy3d import Engine
+from rix import Game, RendererStats
+from rix._rix import Engine
 
 
 def test_game_construction_does_not_initialize_graphics() -> None:

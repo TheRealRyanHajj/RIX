@@ -31,15 +31,23 @@ int main() {
         input.set_control("key:d", 1.0F);
         input.end_frame();
         auto move = input.action_state("move_x");
+        const auto key_pressed = input.control_state("key:d");
         if (!move.down || !move.pressed || move.released || !close(move.value, 1.0F)) {
             return fail(1, "digital action press transition is incorrect");
+        }
+        if (!key_pressed.down || !key_pressed.pressed || key_pressed.released) {
+            return fail(14, "physical control press transition is incorrect");
         }
 
         input.begin_frame();
         input.end_frame();
         move = input.action_state("move_x");
+        const auto key_held = input.control_state("key:d");
         if (!move.down || move.pressed || move.released) {
             return fail(2, "held action transition is incorrect");
+        }
+        if (!key_held.down || key_held.pressed || key_held.released) {
+            return fail(15, "physical control held transition is incorrect");
         }
 
         input.begin_frame();
@@ -47,8 +55,12 @@ int main() {
         input.set_control("gamepad:left_x", 0.6F);
         input.end_frame();
         move = input.action_state("move_x");
+        const auto key_released = input.control_state("key:d");
         if (!close(move.value, 0.5F)) {
             return fail(3, "analog deadzone rescaling is incorrect");
+        }
+        if (key_released.down || key_released.pressed || !key_released.released) {
+            return fail(16, "physical control release transition is incorrect");
         }
 
         input.begin_frame();
@@ -72,6 +84,15 @@ int main() {
         }
         if (!close(input.action_state("look_x").value, 0.8F)) {
             return fail(6, "pointer delta action mapping is incorrect");
+        }
+
+        input.begin_frame();
+        input.set_control("key:space", 1.0F);
+        input.set_control("key:space", 0.0F);
+        input.end_frame();
+        const auto quick_tap = input.action_state("jump");
+        if (quick_tap.down || !quick_tap.pressed || !quick_tap.released) {
+            return fail(17, "same-frame action tap edges were lost");
         }
 
         input.request_pointer_lock(true);
@@ -114,10 +135,10 @@ int main() {
             // Expected.
         }
 
-        std::cout << "easy3d_input_tests: PASS\n";
+        std::cout << "rix_input_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_input_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_input_tests: FAIL: " << error.what() << '\n';
         return 13;
     }
 }

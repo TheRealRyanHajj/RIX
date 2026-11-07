@@ -139,10 +139,18 @@ struct CharacterMotorSettings final {
     float height{1.8F};
     float speed{5.0F};
     float acceleration{30.0F};
-    float air_control{0.25F};
+    float air_acceleration{8.0F};
+    float ground_friction{6.0F};
+    float stop_speed{1.0F};
+    float air_speed_cap{1.5F};
+    // Zero disables the optional total horizontal speed cap.
+    float horizontal_speed_limit{0.0F};
     float jump_speed{5.0F};
     float max_slope_degrees{50.0F};
     float step_height{0.4F};
+    float sprint_multiplier{1.6F};
+    float crouch_height{1.2F};
+    float crouch_speed_multiplier{0.5F};
     std::uint64_t user_data{0};
 };
 
@@ -150,6 +158,8 @@ struct CharacterMotorInput final {
     Vec3 movement{};
     float heading_degrees{0.0F};
     bool jump{false};
+    bool sprint{false};
+    bool crouch{false};
 };
 
 struct CharacterMotorState final {
@@ -158,6 +168,8 @@ struct CharacterMotorState final {
     Vec3 linear_velocity{};
     Vec3 ground_normal{};
     bool grounded{false};
+    bool crouched{false};
+    bool sprinting{false};
 };
 
 struct PhysicsQueryFilter final {
@@ -229,6 +241,11 @@ public:
     void replay_character_input(PhysicsCharacterHandle handle,
                                 CharacterMotorInput input,
                                 float delta_seconds);
+    void set_character_linear_velocity(PhysicsCharacterHandle handle, Vec3 velocity);
+    void set_character_external_motion(PhysicsCharacterHandle handle,
+                                       Vec3 acceleration,
+                                       float yaw_offset_degrees);
+    void set_character_paused(PhysicsCharacterHandle handle, bool paused);
     void teleport_character(PhysicsCharacterHandle handle, Vec3 position, float heading_degrees);
 
     [[nodiscard]] PhysicsConstraintHandle create_constraint(
@@ -241,6 +258,8 @@ public:
     [[nodiscard]] Quat body_rotation(PhysicsBodyHandle handle) const;
     [[nodiscard]] Vec3 body_linear_velocity(PhysicsBodyHandle handle) const;
     void set_body_linear_velocity(PhysicsBodyHandle handle, Vec3 velocity);
+    [[nodiscard]] Vec3 body_angular_velocity(PhysicsBodyHandle handle) const;
+    void set_body_angular_velocity(PhysicsBodyHandle handle, Vec3 radians_per_second);
     void set_body_transform(PhysicsBodyHandle handle, Vec3 position, Quat rotation);
     void add_force(PhysicsBodyHandle handle, Vec3 force);
     void add_impulse(PhysicsBodyHandle handle, Vec3 impulse);

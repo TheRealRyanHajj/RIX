@@ -1,18 +1,30 @@
-"""Two-process direct-IP Easy3D transport sample."""
+"""Two-process direct-IP RIX transport sample."""
 
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import math
 from pathlib import Path
 import sys
 import time
 
-from easy3d import NetworkError, Server, network
+from rix import net as network
+from rix.net import NetworkError, Server
 
 
-REQUEST = b"easy3d phase 3 ping"
-RESPONSE = b"easy3d phase 3 pong"
+REQUEST = b"rix phase 3 ping"
+RESPONSE = b"rix phase 3 pong"
+
+
+def _impairment(name: str):  # type: ignore[no-untyped-def]
+    if name == "none":
+        return nullcontext()
+    profiles = {
+        profile.name: profile
+        for profile in network.REPRESENTATIVE_NETWORK_CONDITIONS
+    }
+    return network.impair_backend(profiles[name])
 
 
 def _marker(path: str | None, text: str) -> None:
@@ -75,22 +87,23 @@ def _server(arguments: argparse.Namespace) -> int:
     deadline = time.monotonic() + arguments.timeout
     result = 0
     try:
-        while time.monotonic() < deadline:
-            server.poll()
-            if invalid_message:
-                result = 3
-                break
-            if arguments.one_shot and had_connection and not server.connections:
-                if exchange_complete:
-                    print("SERVER_DONE exchange=complete", flush=True)
+        with _impairment(arguments.profile):
+            while time.monotonic() < deadline:
+                server.poll()
+                if invalid_message:
+                    result = 3
                     break
-                print("SERVER_PEER_LOST exchange=incomplete", flush=True)
-                result = 4
-                break
-            time.sleep(0.001)
-        else:
-            print("SERVER_TIMEOUT", file=sys.stderr, flush=True)
-            result = 5
+                if arguments.one_shot and had_connection and not server.connections:
+                    if exchange_complete:
+                        print("SERVER_DONE exchange=complete", flush=True)
+                        break
+                    print("SERVER_PEER_LOST exchange=incomplete", flush=True)
+                    result = 4
+                    break
+                time.sleep(0.001)
+            else:
+                print("SERVER_TIMEOUT", file=sys.stderr, flush=True)
+                result = 5
     except KeyboardInterrupt:
         print("SERVER_INTERRUPTED", flush=True)
         result = 0
@@ -115,53 +128,54 @@ def _client(arguments: argparse.Namespace) -> int:
     sent = False
     deadline = time.monotonic() + arguments.timeout
     hold_deadline = float("inf")
-    while time.monotonic() < deadline:
-        for event in client.poll():
-            if event.type is network.EventType.CONNECTED:
-                connected = True
-                hold_deadline = time.monotonic() + arguments.hold_after_connect
-                _marker(
-                    arguments.ready_file,
-                    f"{arguments.address}:{arguments.port}",
-                )
-                print(f"CLIENT_CONNECTED id={event.connection.value}", flush=True)
-            elif event.type is network.EventType.MESSAGE:
-                if event.payload != RESPONSE:
-                    print("CLIENT_INVALID_RESPONSE", file=sys.stderr, flush=True)
-                    return 3
-                print("CLIENT_RECEIVED response=pong", flush=True)
-                client.disconnect("two-process sample complete")
-            elif event.type is network.EventType.DISCONNECTED:
-                print(
-                    f"CLIENT_DISCONNECTED code={event.disconnect_code} "
-                    f"reason={event.reason!r}",
-                    flush=True,
-                )
-                if arguments.expect_disconnect and connected:
-                    print("CLIENT_DONE abrupt_disconnect=observed", flush=True)
-                    return 0
-                if sent and event.disconnect_code == int(network.DisconnectCode.NORMAL):
-                    print("CLIENT_DONE exchange=complete", flush=True)
-                    return 0
-                return 4
+    with _impairment(arguments.profile):
+        while time.monotonic() < deadline:
+            for event in client.poll():
+                if event.type is network.EventType.CONNECTED:
+                    connected = True
+                    hold_deadline = time.monotonic() + arguments.hold_after_connect
+                    _marker(
+                        arguments.ready_file,
+                        f"{arguments.address}:{arguments.port}",
+                    )
+                    print(f"CLIENT_CONNECTED id={event.connection.value}", flush=True)
+                elif event.type is network.EventType.MESSAGE:
+                    if event.payload != RESPONSE:
+                        print("CLIENT_INVALID_RESPONSE", file=sys.stderr, flush=True)
+                        return 3
+                    print("CLIENT_RECEIVED response=pong", flush=True)
+                    client.disconnect("two-process sample complete")
+                elif event.type is network.EventType.DISCONNECTED:
+                    print(
+                        f"CLIENT_DISCONNECTED code={event.disconnect_code} "
+                        f"reason={event.reason!r}",
+                        flush=True,
+                    )
+                    if arguments.expect_disconnect and connected:
+                        print("CLIENT_DONE abrupt_disconnect=observed", flush=True)
+                        return 0
+                    if sent and event.disconnect_code == int(network.DisconnectCode.NORMAL):
+                        print("CLIENT_DONE exchange=complete", flush=True)
+                        return 0
+                    return 4
 
-        if (
-            connected
-            and not sent
-            and not arguments.expect_disconnect
-            and time.monotonic() >= hold_deadline
-        ):
-            status = client.send(REQUEST)
-            if status is not network.SendStatus.QUEUED:
-                print(
-                    f"CLIENT_SEND_FAILED status={status.value}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                return 5
-            sent = True
-            print("CLIENT_SENT request=ping", flush=True)
-        time.sleep(0.001)
+            if (
+                connected
+                and not sent
+                and not arguments.expect_disconnect
+                and time.monotonic() >= hold_deadline
+            ):
+                status = client.send(REQUEST)
+                if status is not network.SendStatus.QUEUED:
+                    print(
+                        f"CLIENT_SEND_FAILED status={status.value}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return 5
+                sent = True
+                print("CLIENT_SENT request=ping", flush=True)
+            time.sleep(0.001)
 
     print("CLIENT_TIMEOUT", file=sys.stderr, flush=True)
     return 6
@@ -169,7 +183,7 @@ def _client(arguments: argparse.Namespace) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Easy3D two-process direct-IP transport sample"
+        description="RIX two-process direct-IP transport sample"
     )
     roles = parser.add_subparsers(dest="role", required=True)
 
@@ -179,6 +193,12 @@ def _parser() -> argparse.ArgumentParser:
     server.add_argument("--timeout", type=float, default=60.0)
     server.add_argument("--peer-timeout", type=float, default=10.0)
     server.add_argument("--one-shot", action="store_true")
+    server.add_argument(
+        "--profile",
+        choices=("none", "lan", "regional", "adverse"),
+        default="none",
+        help="apply process-local native test impairment",
+    )
     server.add_argument("--ready-file", help=argparse.SUPPRESS)
     server.add_argument("--connection-file", help=argparse.SUPPRESS)
 
@@ -189,6 +209,12 @@ def _parser() -> argparse.ArgumentParser:
     client.add_argument("--peer-timeout", type=float, default=10.0)
     client.add_argument("--hold-after-connect", type=float, default=0.0)
     client.add_argument("--expect-disconnect", action="store_true")
+    client.add_argument(
+        "--profile",
+        choices=("none", "lan", "regional", "adverse"),
+        default="none",
+        help="apply process-local native test impairment",
+    )
     client.add_argument("--ready-file", help=argparse.SUPPRESS)
     return parser
 

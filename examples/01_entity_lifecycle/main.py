@@ -1,6 +1,6 @@
 """Generation-safe entity and scene ownership example."""
 
-from easy3d import Entity, Game, InvalidEntityError, Scene
+from rix import Entity, Game, InvalidEntityError, Scene
 
 
 def main() -> None:
@@ -9,7 +9,7 @@ def main() -> None:
         player = Entity("player")
         prop = Entity("prop")
 
-    game = Game("Easy3D scene lifecycle")
+    game = Game("RIX scene lifecycle")
     game.load_scene(world)
     print(f"loaded {world.name!r} with {world.entity_count} entities")
 

@@ -172,6 +172,10 @@ int main() {
     force_world.step(0.5F);
     assert(force_world.body_linear_velocity(force_body).x > 1.4F);
     force_world.set_body_linear_velocity(force_body, {0.0F, 2.0F, 0.0F});
+    force_world.set_body_angular_velocity(force_body, {0.0F, 1.5F, 0.0F});
+    assert(almost_equal(force_world.body_angular_velocity(force_body),
+                        Vec3{0.0F, 1.5F, 0.0F},
+                        1.0e-4F));
     force_world.set_body_transform(force_body, {4.0F, 5.0F, 6.0F}, Quat{});
     assert(almost_equal(force_world.body_position(force_body), Vec3{4.0F, 5.0F, 6.0F}));
 
@@ -208,37 +212,6 @@ int main() {
                                .jump_speed = 5.0F,
                                .max_slope_degrees = 45.0F,
                                .step_height = 0.4F});
-    assert(character_world.character_input_sequence(first_person) == 0);
-    character_world.set_character_sequenced_input(
-        first_person,
-        1,
-        {.movement = {1.0F, 0.0F, 0.0F}, .heading_degrees = 15.0F});
-    assert(character_world.character_input_sequence(first_person) == 1);
-    for (const std::uint64_t rejected_sequence : {std::uint64_t{0}, std::uint64_t{1}}) {
-        bool rejected = false;
-        try {
-            character_world.set_character_sequenced_input(
-                first_person, rejected_sequence, {.movement = {0.0F, 0.0F, -1.0F}});
-        } catch (const std::invalid_argument&) {
-            rejected = true;
-        }
-        assert(rejected);
-        assert(character_world.character_input_sequence(first_person) == 1);
-    }
-    bool rejected_invalid_sequenced_input = false;
-    try {
-        character_world.set_character_sequenced_input(
-            first_person,
-            2,
-            {.movement = {std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F}});
-    } catch (const std::invalid_argument&) {
-        rejected_invalid_sequenced_input = true;
-    }
-    assert(rejected_invalid_sequenced_input);
-    assert(character_world.character_input_sequence(first_person) == 1);
-    character_world.set_character_sequenced_input(
-        first_person, 2, {.movement = {}, .heading_degrees = 0.0F});
-    assert(character_world.character_input_sequence(first_person) == 2);
     for (int step = 0; step < 5; ++step) character_world.step(1.0F / 60.0F);
     assert(character_world.character_state(first_person).grounded);
     character_world.set_character_input(
@@ -258,6 +231,99 @@ int main() {
     for (int step = 0; step < 120; ++step) character_world.step(1.0F / 60.0F);
     assert(character_world.character_state(first_person).grounded);
 
+    // A jump pulse on the first walkable landing frame skips ground friction
+    // and retains horizontal momentum. There is no coyote time or jump buffer.
+    character_world.set_character_input(
+        first_person, {.movement = {1.0F, 0.0F, 0.0F}});
+    for (int step = 0; step < 30; ++step) character_world.step(1.0F / 60.0F);
+    const float momentum_before_hop =
+        character_world.character_state(first_person).linear_velocity.x;
+    assert(momentum_before_hop > 2.9F);
+    character_world.set_character_input(first_person, {.jump = true});
+    character_world.step(1.0F / 60.0F);
+    bool began_falling = false;
+    bool found_landing = false;
+    bool jumped_after_landing = false;
+    CharacterMotorState second_takeoff{};
+    for (int step = 0; step < 180; ++step) {
+        const CharacterMotorState before_step =
+            character_world.character_state(first_person);
+        began_falling = began_falling || before_step.linear_velocity.y < -0.5F;
+        if (began_falling && before_step.grounded) {
+            found_landing = true;
+            character_world.set_character_input(first_person, {.jump = true});
+        } else {
+            character_world.set_character_input(first_person, {});
+        }
+        character_world.step(1.0F / 60.0F);
+        const CharacterMotorState state = character_world.character_state(first_person);
+        if (found_landing && state.linear_velocity.y > 3.0F) {
+            jumped_after_landing = true;
+            second_takeoff = state;
+            break;
+        }
+    }
+    assert(found_landing);
+    assert(jumped_after_landing);
+    assert(second_takeoff.linear_velocity.x > momentum_before_hop * 0.95F);
+
+    // Input magnitude is clamped, eliminating the diagonal speed boost.
+    character_world.set_character_input(first_person, {});
+    for (int step = 0; step < 120; ++step) character_world.step(1.0F / 60.0F);
+    assert(character_world.character_state(first_person).grounded);
+    character_world.set_character_input(
+        first_person, {.movement = {1.0F, 0.0F, 1.0F}});
+    for (int step = 0; step < 30; ++step) character_world.step(1.0F / 60.0F);
+    const CharacterMotorState diagonal = character_world.character_state(first_person);
+    assert(std::sqrt(diagonal.linear_velocity.x * diagonal.linear_velocity.x +
+                     diagonal.linear_velocity.z * diagonal.linear_velocity.z) < 3.1F);
+
+    // Air acceleration fills only the wish-direction projection. Forward input
+    // cannot increase an already-full projection; perpendicular strafing can
+    // add a component and therefore curve/gain speed.
+    character_world.set_character_linear_velocity(first_person, {3.0F, 2.0F, 0.0F});
+    character_world.set_character_input(
+        first_person, {.movement = {1.0F, 0.0F, 0.0F}});
+    character_world.step(1.0F / 60.0F);
+    assert(std::abs(character_world.character_state(first_person).linear_velocity.x - 3.0F) <
+           0.02F);
+    character_world.set_character_linear_velocity(first_person, {3.0F, 2.0F, 0.0F});
+    character_world.set_character_input(
+        first_person, {.movement = {0.0F, 0.0F, 1.0F}});
+    character_world.step(1.0F / 60.0F);
+    const CharacterMotorState air_strafe = character_world.character_state(first_person);
+    assert(air_strafe.linear_velocity.z < -0.1F);
+    assert(std::sqrt(air_strafe.linear_velocity.x * air_strafe.linear_velocity.x +
+                     air_strafe.linear_velocity.z * air_strafe.linear_velocity.z) > 3.0F);
+
+    character_world.teleport_character(first_person, {0.0F, 1.0F, 0.0F}, 0.0F);
+    character_world.set_character_linear_velocity(first_person, {});
+    character_world.set_character_input(first_person, {});
+    for (int step = 0; step < 120; ++step) character_world.step(1.0F / 60.0F);
+    assert(character_world.character_state(first_person).grounded);
+
+    character_world.set_character_input(
+        first_person, {.movement = {1.0F, 0.0F, 0.0F}, .sprint = true});
+    for (int step = 0; step < 30; ++step) character_world.step(1.0F / 60.0F);
+    const CharacterMotorState sprinting = character_world.character_state(first_person);
+    assert(sprinting.sprinting && !sprinting.crouched &&
+           sprinting.linear_velocity.x > 4.5F);
+
+    character_world.set_character_input(first_person, {.crouch = true});
+    character_world.step(1.0F / 60.0F);
+    assert(character_world.character_state(first_person).crouched);
+    const CharacterMotorState crouched = character_world.character_state(first_person);
+    PhysicsBodySettings low_ceiling = character_floor;
+    low_ceiling.position = {crouched.position.x, 1.55F, crouched.position.z};
+    low_ceiling.half_extents = {1.0F, 0.2F, 1.0F};
+    const PhysicsBodyHandle ceiling = character_world.create_body(low_ceiling);
+    character_world.set_character_input(first_person, {});
+    character_world.step(1.0F / 60.0F);
+    assert(character_world.character_state(first_person).crouched);
+    character_world.destroy_body(ceiling);
+    character_world.step(1.0F / 60.0F);
+    assert(!character_world.character_state(first_person).crouched);
+
     const PhysicsCharacterHandle third_person = character_world.create_character(
         CharacterMotorSettings{.mode = CharacterMotorMode::ThirdPerson,
                                .position = {3.0F, 0.0F, 0.0F},
@@ -275,42 +341,28 @@ int main() {
     assert(almost_equal(character_world.character_state(first_person).position,
                         Vec3{-3.0F, 1.0F, 2.0F},
                         1.0e-4F));
-    character_world.correct_character(
-        first_person,
-        {2.0F, 1.0F, 3.0F},
-        Quat::from_euler_degrees({0.0F, 45.0F, 0.0F}),
-        {1.0F, 0.0F, 0.0F});
-    const CharacterMotorState corrected = character_world.character_state(first_person);
-    assert(almost_equal(corrected.position, Vec3{2.0F, 1.0F, 3.0F}, 1.0e-4F));
-    assert(almost_equal(corrected.linear_velocity, Vec3{1.0F, 0.0F, 0.0F}, 1.0e-4F));
-    assert(character_world.character_input_sequence(first_person) == 2);
-    character_world.replay_character_input(
-        first_person,
-        {.movement = {1.0F, 0.0F, 0.0F}, .heading_degrees = 90.0F},
-        1.0F / 60.0F);
-    assert(character_world.character_input_sequence(first_person) == 2);
-    assert(!almost_equal(character_world.character_state(first_person).position,
-                         corrected.position,
-                         1.0e-5F));
-    bool rejected_correction = false;
-    try {
-        character_world.correct_character(
-            first_person,
-            {},
-            {},
-            {501.0F, 0.0F, 0.0F});
-    } catch (const std::invalid_argument&) {
-        rejected_correction = true;
-    }
-    assert(rejected_correction);
     character_world.destroy_character(first_person);
     assert(!character_world.is_alive(first_person));
     assert(character_world.character_count() == 1);
     const PhysicsCharacterHandle reused_character = character_world.create_character({});
     assert(reused_character.index == first_person.index);
     assert(reused_character.generation != first_person.generation);
-    assert(character_world.character_input_sequence(reused_character) == 0);
     character_world.destroy_character(reused_character);
+    const PhysicsCharacterHandle externally_moved = character_world.create_character(
+        CharacterMotorSettings{.mode = CharacterMotorMode::FirstPerson,
+                               .position = {6.0F, 1.0F, 0.0F},
+                               .speed = 2.0F,
+                               .acceleration = 30.0F});
+    character_world.set_character_linear_velocity(
+        externally_moved, {1.0F, 0.0F, 0.0F});
+    character_world.set_character_external_motion(
+        externally_moved, {2.0F, 0.0F, 0.0F}, 45.0F);
+    character_world.step(0.25F);
+    const CharacterMotorState externally_moved_state =
+        character_world.character_state(externally_moved);
+    assert(externally_moved_state.linear_velocity.x > 1.4F);
+    assert(externally_moved_state.position.x > 6.3F);
+    assert(std::abs(externally_moved_state.rotation.y) > 0.25F);
     character_world.clear();
     assert(!character_world.is_alive(third_person));
     assert(character_world.character_count() == 0);
@@ -462,6 +514,6 @@ int main() {
     assert(ccd_world.body_position(continuous).x < 0.0F);
     assert(ccd_world.body_position(discrete).x > 1.0F);
 
-    std::cout << "easy3d_physics_tests: PASS\n";
+    std::cout << "rix_physics_tests: PASS\n";
     return 0;
 }

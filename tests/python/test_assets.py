@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import AssetError, MissingAssetError
-from easy3d.assets import TextureCache, load_image
+from rix import AssetError, MissingAssetError
+from rix.assets import TextureCache, load_image
 
 
 PNG_2X2 = (

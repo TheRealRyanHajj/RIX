@@ -27,7 +27,7 @@ class TemporaryDirectory final {
 public:
     TemporaryDirectory()
         : path_(std::filesystem::temp_directory_path() /
-                ("easy3d_texture_test_" + std::to_string(++sequence_))) {
+                ("rix_texture_test_" + std::to_string(++sequence_))) {
         std::filesystem::create_directories(path_);
     }
 
@@ -109,10 +109,10 @@ int main() {
             return 5;
         }
 
-        std::cout << "easy3d_texture_tests: PASS\n";
+        std::cout << "rix_texture_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_texture_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_texture_tests: FAIL: " << error.what() << '\n';
         return 10;
     }
 }

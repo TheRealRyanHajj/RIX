@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import Collider, Cube, MeshRenderer, Model, Plane, Scene, Sphere, Vec3
+from rix import Collider, Cube, MeshRenderer, Model, Plane, Scene, Sphere, Vec3
 
 
 def test_primitive_entities_and_component_lookup() -> None:
@@ -18,6 +18,9 @@ def test_primitive_entities_and_component_lookup() -> None:
     assert tuple(cube.scale) == pytest.approx((2, 3, 4))
     assert tuple(plane.scale) == pytest.approx((10, 1, 20))
     assert tuple(sphere.scale) == pytest.approx((4, 4, 4))
+    assert cube.get_component(Collider) is not None
+    assert plane.get_component(Collider) is not None
+    assert sphere.get_component(Collider) is not None
 
     renderer = cube.get_component(MeshRenderer)
     assert isinstance(renderer, MeshRenderer)
@@ -64,6 +67,14 @@ def test_model_entity_and_transactional_constructor_failure(tmp_path: Path) -> N
     assert isinstance(renderer, MeshRenderer)
     assert renderer.kind == "model"
     assert renderer.asset == model_path.resolve()
+    model_collider = model.get_component(Collider)
+    assert model_collider is not None
+    assert model_collider.shape == "mesh"
+
+    shorthand = Model(model_path, scene=scene, collider=True)
+    shorthand_collider = shorthand.get_component(Collider)
+    assert shorthand_collider is not None
+    assert shorthand_collider.shape == "mesh"
 
     before = scene.entity_count
     with pytest.raises(ValueError, match="positive"):
@@ -76,9 +87,9 @@ def test_model_entity_and_transactional_constructor_failure(tmp_path: Path) -> N
 
 def test_primitive_collider_convenience_uses_world_meter_dimensions() -> None:
     scene = Scene()
-    cube = Cube(size=(2.0, 4.0, 6.0), collider=True, scene=scene)
-    plane = Plane(size=(10.0, 8.0), collider=True, scene=scene)
-    sphere = Sphere(radius=1.5, collider=True, scene=scene)
+    cube = Cube(size=(2.0, 4.0, 6.0), scene=scene)
+    plane = Plane(size=(10.0, 8.0), scene=scene)
+    sphere = Sphere(radius=1.5, scene=scene)
 
     cube_collider = cube.get_component(Collider)
     plane_collider = plane.get_component(Collider)

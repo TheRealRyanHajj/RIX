@@ -6,7 +6,7 @@ import argparse
 import threading
 import time
 
-from easy3d import Camera, Cube, Game, Light, MeshRenderer, Plane, Scene, Sphere, debug
+from rix import Camera, Cube, Game, Light, MeshRenderer, Plane, Scene, Sphere, debug
 
 
 def main(*, seconds: float = 10.0, preset: str = "medium") -> None:
@@ -34,7 +34,7 @@ def main(*, seconds: float = 10.0, preset: str = "medium") -> None:
                    color=(1.0, 0.85, 0.20), depth_test=False)
 
     game = Game(
-        "Easy3D lighting + camera + debug drawing",
+        "RIX lighting + camera + debug drawing",
         (960, 540),
         vsync=False,
         graphics_preset=preset,  # type: ignore[arg-type]

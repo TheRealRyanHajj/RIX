@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from easy3d import Entity, Game, Scene, ScriptCallbackError
+from rix import Entity, Game, Scene, ScriptCallbackError
 
 
 class BrokenScript(Entity):
@@ -17,7 +17,7 @@ class BrokenScript(Entity):
 def main() -> None:
     fail_fast_scene = Scene("fail-fast scheduler")
     BrokenScript("fail-fast actor", scene=fail_fast_scene)
-    fail_fast_game = Game("Easy3D scheduler fail-fast", fail_fast=True)
+    fail_fast_game = Game("RIX scheduler fail-fast", fail_fast=True)
     fail_fast_game.load_scene(fail_fast_scene)
     try:
         fail_fast_game.run()
@@ -31,7 +31,7 @@ def main() -> None:
 
     tolerant_scene = Scene("tolerant scheduler")
     BrokenScript("tolerant actor", scene=tolerant_scene)
-    tolerant_game = Game("Easy3D scheduler tolerant", fail_fast=False)
+    tolerant_game = Game("RIX scheduler tolerant", fail_fast=False)
     tolerant_game.load_scene(tolerant_scene)
 
     def stop_later() -> None:

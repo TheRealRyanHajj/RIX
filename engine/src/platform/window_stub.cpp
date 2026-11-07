@@ -13,7 +13,7 @@ void run_window_loop(const EngineConfig&,
                      InputSystem&,
                      AudioSystem&,
                      Engine::FrameCallback) {
-    throw EngineError("Easy3D was built without the Windows graphics backend");
+    throw EngineError("RIX was built without the Windows graphics backend");
 }
 
 } // namespace easy3d::platform

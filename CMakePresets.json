@@ -15,10 +15,10 @@
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
         "CMAKE_CONFIGURATION_TYPES": "Debug;Release",
-        "EASY3D_ENABLE_GRAPHICS": "ON",
-        "EASY3D_ENABLE_NETWORKING": "ON",
-        "EASY3D_BUILD_PYTHON": "OFF",
-        "EASY3D_BUILD_BENCHMARKS": "ON",
+        "RIX_ENABLE_GRAPHICS": "ON",
+        "RIX_ENABLE_NETWORKING": "ON",
+        "RIX_BUILD_PYTHON": "OFF",
+        "RIX_BUILD_BENCHMARKS": "ON",
         "BUILD_TESTING": "ON"
       },
       "condition": {

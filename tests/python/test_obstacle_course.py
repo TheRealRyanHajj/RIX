@@ -5,12 +5,12 @@ from pathlib import Path
 import threading
 from types import ModuleType
 
-from easy3d import CharacterController, Collider, Game, Rigidbody
+from rix import CharacterController, Collider, Game, Rigidbody
 
 
 def _course_module() -> ModuleType:
     path = Path(__file__).parents[2] / "examples" / "03_obstacle_course" / "main.py"
-    spec = importlib.util.spec_from_file_location("easy3d_obstacle_course", path)
+    spec = importlib.util.spec_from_file_location("rix_obstacle_course", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-import easy3d
-from easy3d import discovery
+import rix
+from rix.net import discovery
 
 
 def _unused_udp_port() -> int:
@@ -199,7 +199,7 @@ def test_cache_capacity_incompatibility_malformed_input_and_port_collision() -> 
     announcer.start()
     browser.start()
     try:
-        with pytest.raises(easy3d.NetworkError):
+        with pytest.raises(rix.net.NetworkError):
             collision.start()
         found = _exchange(announcer, browser)
         assert len(found) == 1
@@ -242,9 +242,9 @@ def test_cache_capacity_incompatibility_malformed_input_and_port_collision() -> 
 def test_lifecycle_requires_explicit_start(constructor: object, arguments: tuple[object, ...]) -> None:
     if constructor is discovery.LanDiscoveryBrowser:
         owner = discovery.LanDiscoveryBrowser(target_address="127.0.0.1")
-        with pytest.raises(easy3d.NetworkError):
+        with pytest.raises(rix.net.NetworkError):
             owner.refresh()
-        with pytest.raises(easy3d.NetworkError):
+        with pytest.raises(rix.net.NetworkError):
             owner.poll()
     else:
         with pytest.raises(ValueError):
@@ -285,6 +285,6 @@ def test_announcer_caps_work_per_poll() -> None:
         announcer.close()
 
 
-def test_root_exports_are_typed_public_classes() -> None:
-    assert easy3d.LanDiscoveryAnnouncer is discovery.LanDiscoveryAnnouncer
-    assert easy3d.LanDiscoveryBrowser is discovery.LanDiscoveryBrowser
+def test_net_exports_are_typed_public_classes() -> None:
+    assert rix.net.LanDiscoveryAnnouncer is discovery.LanDiscoveryAnnouncer
+    assert rix.net.LanDiscoveryBrowser is discovery.LanDiscoveryBrowser

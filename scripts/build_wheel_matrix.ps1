@@ -53,7 +53,7 @@ try {
         }
 
         $Tag = "cp" + $Version.Replace(".", "")
-        Write-Host "==> Building Easy3D for CPython $Version ($Tag)"
+        Write-Host "==> Building RIX for CPython $Version ($Tag)"
 
         & py "-$Version" -c "import platform, struct, sys; assert sys.implementation.name == 'cpython'; assert struct.calcsize('P') == 8; assert platform.system() == 'Windows'; print(sys.version)"
         Assert-LastCommand "CPython $Version prerequisite check"
@@ -61,7 +61,7 @@ try {
         & py "-$Version" -m pip wheel . --no-deps --wheel-dir $Wheelhouse
         Assert-LastCommand "CPython $Version wheel build"
 
-        $Wheels = @(Get-ChildItem -LiteralPath $Wheelhouse -Filter "easy3d-*-$Tag-$Tag-win_amd64.whl")
+        $Wheels = @(Get-ChildItem -LiteralPath $Wheelhouse -Filter "rix-*-$Tag-$Tag-win_amd64.whl")
         if ($Wheels.Count -ne 1) {
             throw "Expected one $Tag win_amd64 wheel in '$Wheelhouse', found $($Wheels.Count)."
         }
@@ -78,11 +78,11 @@ try {
         & $Python -m pip check
         Assert-LastCommand "CPython $Version dependency check"
 
-        & $Python -c "import easy3d; assert easy3d.engine_version() == easy3d.__version__; assert easy3d.native_add(2, 3) == 5; print(easy3d.__file__, easy3d.engine_version())"
+        & $Python -c "import rix; assert rix.engine_version() == rix.__version__; assert rix.native_add(2, 3) == 5; print(rix.__file__, rix.engine_version())"
         Assert-LastCommand "CPython $Version native import smoke test"
 
         if (-not $SkipTests) {
-            & $Python -m pip install --disable-pip-version-check "pytest==9.2.0" "mypy==1.18.2"
+            & $Python -m pip install --disable-pip-version-check "pytest==9.2.0" "mypy==1.18.2" "pygame-ce==2.5.8"
             Assert-LastCommand "CPython $Version test dependency install"
 
             & $Python -m pytest -q

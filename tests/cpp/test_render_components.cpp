@@ -29,7 +29,7 @@ private:
                                    .time_since_epoch()
                                    .count();
             const auto candidate =
-                root / ("easy3d_render_component_test_" + std::to_string(ticks) + "_" +
+                root / ("rix_render_component_test_" + std::to_string(ticks) + "_" +
                         std::to_string(random()));
             std::error_code error;
             if (std::filesystem::create_directory(candidate, error)) {
@@ -62,6 +62,59 @@ int main() {
             first_component.model || first_component.texture) {
             std::cerr << "primitive components did not share their immutable mesh\n";
             return 1;
+        }
+        if (first_component.texture_settings.pixels_per_unit != 16.0F ||
+            first_component.texture_settings.filter != easy3d::TextureFilter::Nearest ||
+            first_component.texture_settings.mode != easy3d::TextureMode::Auto ||
+            !first_component.texture_settings.hot_reload) {
+            std::cerr << "default texture material settings are incorrect\n";
+            return 8;
+        }
+        if (first_component.material.cull_mode != easy3d::CullMode::Back ||
+            first_component.cull_mode_override != easy3d::CullMode::Back) {
+            std::cerr << "default primitive culling is not backface culling\n";
+            return 11;
+        }
+
+        easy3d::Material back_material;
+        easy3d::Material front_material;
+        front_material.cull_mode = easy3d::CullMode::Front;
+        if (back_material == front_material) {
+            std::cerr << "culling mode was omitted from the material/batch key\n";
+            return 12;
+        }
+        scene.set_render_cull_mode(first, easy3d::CullMode::None);
+        if (scene.render_component(first).material.cull_mode != easy3d::CullMode::None ||
+            scene.render_component(first).cull_mode_override != easy3d::CullMode::None) {
+            std::cerr << "runtime culling mutation did not persist\n";
+            return 13;
+        }
+
+        easy3d::TextureMaterialSettings texture_settings;
+        texture_settings.pixels_per_unit = 32.0F;
+        texture_settings.filter = easy3d::TextureFilter::Linear;
+        texture_settings.mode = easy3d::TextureMode::Atlas;
+        texture_settings.atlas_dimensions = {2.0F, 3.0F, 1.0F};
+        texture_settings.normal_strength = 0.5F;
+        texture_settings.hot_reload = false;
+        scene.set_render_texture(first,
+                                 std::nullopt,
+                                 texture_settings,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 std::nullopt);
+        const easy3d::RenderComponent& configured = scene.render_component(first);
+        if (configured.texture_settings.pixels_per_unit != 32.0F ||
+            configured.texture_settings.filter != easy3d::TextureFilter::Linear ||
+            configured.texture_settings.mode != easy3d::TextureMode::Atlas ||
+            configured.texture_settings.atlas_dimensions !=
+                easy3d::Vec3{2.0F, 3.0F, 1.0F} ||
+            configured.material.normal_strength != 0.5F ||
+            configured.texture_settings.hot_reload) {
+            std::cerr << "texture material settings did not persist\n";
+            return 9;
         }
 
         try {
@@ -111,18 +164,31 @@ int main() {
         }
         const easy3d::EntityHandle model_entity = scene.create_entity("model");
         scene.add_model_renderer(model_entity, model_path, {0.5F, 0.75F, 1.0F, 1.0F});
-        std::filesystem::remove(model_path);
         const easy3d::RenderComponent& model = scene.render_component(model_entity);
         if (model.kind != easy3d::RenderKind::Model || !model.model || model.mesh ||
-            model.model->triangle_count() != 1) {
+            model.model->triangle_count() != 1 || model.cull_mode_override.has_value() ||
+            model.material.cull_mode != easy3d::CullMode::Back) {
             std::cerr << "model render component did not retain its shared model asset\n";
             return 7;
         }
+        const std::filesystem::path retained_model_path = model.model->source_path;
 
-        std::cout << "easy3d_render_component_tests: PASS\n";
+        const easy3d::EntityHandle overridden_model = scene.create_entity("override model");
+        scene.add_model_renderer(overridden_model,
+                                 retained_model_path,
+                                 {},
+                                 easy3d::CullMode::Front);
+        if (scene.render_component(overridden_model).cull_mode_override !=
+            easy3d::CullMode::Front) {
+            std::cerr << "explicit model culling override did not persist\n";
+            return 14;
+        }
+        std::filesystem::remove(model_path);
+
+        std::cout << "rix_render_component_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_render_component_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_render_component_tests: FAIL: " << error.what() << '\n';
         return 10;
     }
 }

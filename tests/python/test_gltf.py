@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from easy3d import (
+from rix import (
     AssetError,
     Collider,
     GltfInfo,
@@ -71,6 +71,7 @@ def _asset(path: Path) -> Path:
         "materials": [
             {
                 "name": "Copper",
+                "doubleSided": True,
                 "pbrMetallicRoughness": {
                     "baseColorFactor": [0.8, 0.2, 0.1, 1],
                     "metallicFactor": 0.3,
@@ -128,6 +129,7 @@ def test_load_gltf_skeleton_clip_sample_and_model_dispatch(tmp_path: Path) -> No
     assert info.parts[0].vertex_count == 3
     assert info.materials[1].metallic == pytest.approx(0.3)
     assert info.materials[1].roughness == pytest.approx(0.7)
+    assert info.materials[1].double_sided is True
     assert info.skeleton is not None
     assert [joint.parent for joint in info.skeleton.joints] == [None, 0]
     assert len(info.animations) == 1

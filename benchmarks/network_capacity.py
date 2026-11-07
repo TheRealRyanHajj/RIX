@@ -1,4 +1,4 @@
-"""Finite real-loopback Easy3D multiplayer capacity benchmark."""
+"""Finite real-loopback RIX multiplayer capacity benchmark."""
 
 from __future__ import annotations
 
@@ -8,10 +8,16 @@ from dataclasses import asdict, dataclass
 import json
 import math
 import os
+from pathlib import Path
 import statistics
+import subprocess
+import sys
 import time
 
-from easy3d import Entity, NetworkError, Scene, Server, network, replication
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import NetworkError, Server
+from rix.net import replication
 
 
 PLAYER = 1
@@ -41,6 +47,15 @@ class CapacityReport:
     bytes_per_second_per_client: float
     transform_frames_queued: int
     transform_frames_budget_deferred: int
+    transport_messages_lost: int = 0
+    transport_queue_rejections: int = 0
+    transport_event_overflows: int = 0
+    client_pending_bytes_peak: int = 0
+    transform_frames_backpressured: int = 0
+    transform_full_snapshots: int = 0
+    transform_delta_snapshots: int = 0
+    transform_snapshot_bytes: int = 0
+    transform_snapshot_mean_bytes: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,8 +180,8 @@ def _pump(server: Server, mirrors: list[replication.ClientReplication], predicat
 def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20) -> CapacityReport:
     if isinstance(client_count, bool) or not isinstance(client_count, int):
         raise TypeError("client_count must be an integer")
-    if client_count not in (8, 16, 32):
-        raise ValueError("client_count must be 8, 16, or 32")
+    if client_count not in (2, 8, 16, 32):
+        raise ValueError("client_count must be 2, 8, 16, or 32")
     if isinstance(ticks, bool) or not isinstance(ticks, int) or ticks < 10:
         raise ValueError("ticks must be an integer of at least 10")
     if (
@@ -265,6 +280,11 @@ def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20)
         last_seen: dict[int, int] = {}
         queued = 0
         deferred = 0
+        backpressured = 0
+        full_snapshots = 0
+        delta_snapshots = 0
+        snapshot_bytes = 0
+        pending_bytes_peak = 0
         cpu_start = time.process_time()
         wall_start = time.perf_counter()
         ordered_players = tuple(players.values())
@@ -284,6 +304,10 @@ def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20)
             flush = owner.flush_transforms(tick)
             queued += flush.queued
             deferred += flush.budget_deferred
+            backpressured += flush.backpressured
+            full_snapshots += flush.full_snapshots
+            delta_snapshots += flush.delta_snapshots
+            snapshot_bytes += flush.bytes_queued
             send_times[flush.sequence] = time.perf_counter()
             server.poll(maximum_events=16384)
             for mirror_index, mirror in enumerate(mirrors):
@@ -302,6 +326,14 @@ def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20)
                             (time.perf_counter() - send_times[sequence]) * 1000.0
                         )
                         last_seen[mirror_index] = sequence
+            pending_bytes_peak = max(
+                pending_bytes_peak,
+                *(
+                    client.metrics.pending_reliable_bytes
+                    + client.metrics.pending_unreliable_bytes
+                    for client in clients
+                ),
+            )
             elapsed_ms = (time.perf_counter() - tick_start) * 1000.0
             if tick > warmup_ticks:
                 durations.append(elapsed_ms)
@@ -335,7 +367,17 @@ def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20)
                     ticks - ticks % 30
                 )
         server_stats = server.stats
-        received = sum(client.stats.bytes_received for client in clients)
+        client_stats = tuple(client.stats for client in clients)
+        received = sum(stats.bytes_received for stats in client_stats)
+        messages_lost = server_stats.messages_lost + sum(
+            stats.messages_lost for stats in client_stats
+        )
+        queue_rejections = server_stats.queue_rejections + sum(
+            stats.queue_rejections for stats in client_stats
+        )
+        event_overflows = server_stats.event_overflows + sum(
+            stats.event_overflows for stats in client_stats
+        )
         rss_end = _rss_bytes()
         return CapacityReport(
             client_count,
@@ -359,6 +401,15 @@ def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20)
             server_stats.bytes_sent / wall_seconds / client_count,
             queued,
             deferred,
+            messages_lost,
+            queue_rejections,
+            event_overflows,
+            pending_bytes_peak,
+            backpressured,
+            full_snapshots,
+            delta_snapshots,
+            snapshot_bytes,
+            snapshot_bytes / queued if queued else 0.0,
         )
     finally:
         for mirror in mirrors:
@@ -374,7 +425,7 @@ def run_capacity(client_count: int, *, ticks: int = 120, warmup_ticks: int = 20)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--clients", type=int, choices=(8, 16, 32))
+    parser.add_argument("--clients", type=int, choices=(2, 8, 16, 32))
     parser.add_argument("--ticks", type=int, default=120)
     parser.add_argument("--warmup-ticks", type=int, default=20)
     parser.add_argument("--json", action="store_true")
@@ -384,11 +435,52 @@ def main() -> None:
         help="exit nonzero if a post-baseline workload budget is exceeded",
     )
     args = parser.parse_args()
-    counts = (args.clients,) if args.clients else (8, 16, 32)
-    reports = [
-        run_capacity(count, ticks=args.ticks, warmup_ticks=args.warmup_ticks)
-        for count in counts
-    ]
+    if args.clients is not None:
+        reports = [
+            run_capacity(
+                args.clients,
+                ticks=args.ticks,
+                warmup_ticks=args.warmup_ticks,
+            )
+        ]
+    else:
+        # A separate process gives every count a clean GNS runtime, allocator,
+        # port lifecycle, and RSS baseline. Sequential in-process runs can
+        # retain backend worker state long enough to make the next dense
+        # all-to-all final drain time out, and the resulting memory figures are
+        # not comparable baselines.
+        reports = []
+        sample = Path(__file__).resolve()
+        for count in (2, 8, 16, 32):
+            child = subprocess.run(
+                [
+                    sys.executable,
+                    str(sample),
+                    "--clients",
+                    str(count),
+                    "--ticks",
+                    str(args.ticks),
+                    "--warmup-ticks",
+                    str(args.warmup_ticks),
+                    "--json",
+                ],
+                cwd=sample.parents[1],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            if child.returncode != 0:
+                raise RuntimeError(
+                    f"{count}-client benchmark process failed:\n"
+                    f"stdout:\n{child.stdout}\nstderr:\n{child.stderr}"
+                )
+            payload = json.loads(child.stdout)
+            if not isinstance(payload, list) or len(payload) != 1:
+                raise RuntimeError(
+                    f"{count}-client benchmark returned an invalid report"
+                )
+            reports.append(CapacityReport(**payload[0]))
     if args.json:
         print(json.dumps([asdict(report) for report in reports], indent=2))
     else:
@@ -402,7 +494,14 @@ def main() -> None:
                 f"server={report.server_bytes_per_second / 1024:.1f}KiB/s "
                 f"per_client={report.bytes_per_second_per_client / 1024:.1f}KiB/s "
                 f"latency_p95={report.observation_latency_p95_ms:.3f}ms "
-                f"deferred={report.transform_frames_budget_deferred}"
+                f"snapshot_mean={report.transform_snapshot_mean_bytes:.1f}B "
+                f"lost/rejected/overflow={report.transport_messages_lost}/"
+                f"{report.transport_queue_rejections}/"
+                f"{report.transport_event_overflows} "
+                f"pending_peak={report.client_pending_bytes_peak}B "
+                f"deferred/backpressured="
+                f"{report.transform_frames_budget_deferred}/"
+                f"{report.transform_frames_backpressured}"
             )
     failures = tuple(
         f"{report.clients} clients: {failure}"

@@ -43,24 +43,75 @@ enum class RenderKind {
     Model,
 };
 
+struct TextureMaterialSettings final {
+    float pixels_per_unit{16.0F};
+    TextureFilter filter{TextureFilter::Nearest};
+    TextureMode mode{TextureMode::Auto};
+    // Atlas rectangles describe a fixed image layout. Keep the dimensions
+    // used to create that layout so later transform changes cannot move face
+    // rectangles into unrelated parts of the image.
+    Vec3 atlas_dimensions{1.0F, 1.0F, 1.0F};
+    float normal_strength{1.0F};
+    bool hot_reload{true};
+
+    void validate() const;
+};
+
 struct RenderComponent final {
     RenderKind kind{RenderKind::Cube};
     std::shared_ptr<const MeshData> mesh;
     std::shared_ptr<const ModelData> model;
     std::shared_ptr<const ImageData> texture;
+    std::shared_ptr<const ImageData> normal_map;
+    std::shared_ptr<const ImageData> roughness_map;
+    std::shared_ptr<const ImageData> metallic_map;
+    std::shared_ptr<const ImageData> emissive_map;
+    std::shared_ptr<const ImageData> ambient_occlusion_map;
     Material material{};
     TextureSampler sampler{};
+    TextureMaterialSettings texture_settings{};
+    // Imported models leave this empty so each material can honor glTF's
+    // doubleSided flag. An explicit user mutation overrides every part.
+    std::optional<CullMode> cull_mode_override;
 };
 
 enum class LightKind {
     Ambient,
     Directional,
+    Point,
+    Spot,
 };
 
 struct LightComponent final {
     LightKind kind{LightKind::Directional};
     Color color{};
     float intensity{1.0F};
+    float range{10.0F};
+    float inner_angle_degrees{30.0F};
+    float outer_angle_degrees{45.0F};
+    bool casts_shadows{false};
+    std::uint16_t shadow_resolution{0};
+    float shadow_bias{0.002F};
+
+    void validate() const;
+};
+
+enum class SkyboxKind {
+    Procedural,
+    Panorama,
+    Cubemap,
+};
+
+struct SkyboxConfig final {
+    SkyboxKind kind{SkyboxKind::Procedural};
+    Color top{0.18F, 0.45F, 0.82F, 1.0F};
+    Color horizon{0.72F, 0.84F, 0.96F, 1.0F};
+    Color bottom{0.08F, 0.10F, 0.16F, 1.0F};
+    float brightness{1.0F};
+    float rotation_degrees{0.0F};
+    std::shared_ptr<const ImageData> panorama;
+    // +X, -X, +Y, -Y, +Z, -Z.
+    std::array<std::shared_ptr<const ImageData>, 6> cubemap{};
 
     void validate() const;
 };
@@ -133,12 +184,32 @@ struct CharacterControllerComponent final {
     float height{1.8F};
     float speed{5.0F};
     float acceleration{30.0F};
-    float air_control{0.25F};
+    float air_acceleration{8.0F};
+    float ground_friction{6.0F};
+    float stop_speed{1.0F};
+    float air_speed_cap{1.5F};
+    float horizontal_speed_limit{0.0F};
     float jump_speed{5.0F};
     float max_slope_degrees{50.0F};
     float step_height{0.4F};
+    float sprint_multiplier{1.6F};
+    float crouch_height{1.2F};
+    float crouch_speed_multiplier{0.5F};
 
     void validate() const;
+};
+
+struct EntityMotion final {
+    Vec3 velocity{};
+    Vec3 acceleration{};
+    // Public angular units are degrees per second and degrees per second squared.
+    Vec3 angular_velocity{};
+    Vec3 angular_acceleration{};
+    float character_yaw_offset_degrees{0.0F};
+    bool paused{false};
+    Vec3 paused_velocity{};
+    Vec3 paused_angular_velocity{};
+    Transform paused_world_transform{};
 };
 
 struct ScenePhysicsQueryHit final {
@@ -187,6 +258,9 @@ public:
     [[nodiscard]] Transform local_transform(EntityHandle handle) const;
     void set_local_transform(EntityHandle handle, Transform transform);
     [[nodiscard]] Transform world_transform(EntityHandle handle) const;
+    void set_world_transform(EntityHandle handle, Transform transform);
+    [[nodiscard]] EntityMotion& motion(EntityHandle handle);
+    [[nodiscard]] const EntityMotion& motion(EntityHandle handle) const;
     [[nodiscard]] std::optional<EntityHandle> entity_parent(EntityHandle handle) const;
     [[nodiscard]] std::vector<EntityHandle> entity_children(EntityHandle handle) const;
     void set_entity_parent(EntityHandle child,
@@ -195,29 +269,63 @@ public:
     void add_primitive_renderer(EntityHandle handle,
                                 RenderKind kind,
                                 Color color = {},
-                                const std::optional<std::filesystem::path>& texture = std::nullopt);
+                                const std::optional<std::filesystem::path>& texture = std::nullopt,
+                                TextureMaterialSettings texture_settings = {},
+                                const std::optional<std::filesystem::path>& normal_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& roughness_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& metallic_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& emissive_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& ambient_occlusion_map = std::nullopt,
+                                CullMode cull_mode = CullMode::Back);
     void add_model_renderer(EntityHandle handle,
                             const std::filesystem::path& path,
-                            Color color = {});
+                            Color color = {},
+                            std::optional<CullMode> cull_mode_override = std::nullopt);
     [[nodiscard]] bool has_render_component(EntityHandle handle) const;
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
+    [[nodiscard]] std::size_t poll_texture_changes() const noexcept;
     void set_render_color(EntityHandle handle, Color color);
     void set_render_lit(EntityHandle handle, bool lit);
+    void set_render_cull_mode(EntityHandle handle, CullMode cull_mode);
     void set_render_surface(EntityHandle handle,
                             float metallic,
                             float roughness,
                             float emission,
                             bool casts_shadows,
                             bool receives_shadows);
+    void set_render_texture(EntityHandle handle,
+                            const std::optional<std::filesystem::path>& texture,
+                            TextureMaterialSettings texture_settings,
+                            const std::optional<std::filesystem::path>& normal_map,
+                            const std::optional<std::filesystem::path>& roughness_map,
+                            const std::optional<std::filesystem::path>& metallic_map,
+                            const std::optional<std::filesystem::path>& emissive_map,
+                            const std::optional<std::filesystem::path>& ambient_occlusion_map);
+    void set_render_image(EntityHandle handle,
+                          std::shared_ptr<const ImageData> texture,
+                          TextureMaterialSettings texture_settings = {});
     void remove_render_component(EntityHandle handle);
     void add_light_component(EntityHandle handle,
                              LightKind kind,
                              Color color = {},
-                             float intensity = 1.0F);
+                             float intensity = 1.0F,
+                             float range = 10.0F,
+                             float inner_angle_degrees = 30.0F,
+                             float outer_angle_degrees = 45.0F,
+                             bool casts_shadows = false,
+                             std::uint16_t shadow_resolution = 0,
+                             float shadow_bias = 0.002F);
     [[nodiscard]] bool has_light_component(EntityHandle handle) const;
     [[nodiscard]] const LightComponent& light_component(EntityHandle handle) const;
     void set_light_color(EntityHandle handle, Color color);
     void set_light_intensity(EntityHandle handle, float intensity);
+    void set_light_properties(EntityHandle handle,
+                              float range,
+                              float inner_angle_degrees,
+                              float outer_angle_degrees,
+                              bool casts_shadows,
+                              std::uint16_t shadow_resolution,
+                              float shadow_bias);
     void remove_light_component(EntityHandle handle);
 
 private:
@@ -236,6 +344,7 @@ private:
             0.0F, 0.0F, 1.0F, 0.0F,
             0.0F, 0.0F, 0.0F, 1.0F};
         mutable bool transform_dirty{true};
+        EntityMotion motion{};
         std::optional<RenderComponent> render_component;
         std::optional<LightComponent> light_component;
     };
@@ -255,7 +364,7 @@ private:
     std::size_t entity_count_{0};
     std::vector<Slot> slots_;
     std::vector<std::uint32_t> free_indices_;
-    TextureCache texture_cache_;
+    mutable TextureCache texture_cache_;
     ModelCache model_cache_;
 };
 
@@ -290,6 +399,17 @@ public:
     [[nodiscard]] Transform local_transform(EntityHandle handle) const;
     void set_local_transform(EntityHandle handle, Transform transform);
     [[nodiscard]] Transform world_transform(EntityHandle handle) const;
+    [[nodiscard]] Vec3 entity_velocity(EntityHandle handle) const;
+    void set_entity_velocity(EntityHandle handle, Vec3 velocity);
+    [[nodiscard]] Vec3 entity_acceleration(EntityHandle handle) const;
+    void set_entity_acceleration(EntityHandle handle, Vec3 acceleration);
+    [[nodiscard]] Vec3 entity_angular_velocity(EntityHandle handle) const;
+    void set_entity_angular_velocity(EntityHandle handle, Vec3 degrees_per_second);
+    [[nodiscard]] Vec3 entity_angular_acceleration(EntityHandle handle) const;
+    void set_entity_angular_acceleration(EntityHandle handle,
+                                         Vec3 degrees_per_second_squared);
+    [[nodiscard]] float entity_character_yaw_offset(EntityHandle handle) const;
+    void reset_entity_motion(EntityHandle handle);
     [[nodiscard]] std::optional<EntityHandle> entity_parent(EntityHandle handle) const;
     [[nodiscard]] std::vector<EntityHandle> entity_children(EntityHandle handle) const;
     void set_entity_parent(EntityHandle child,
@@ -298,29 +418,76 @@ public:
     void add_primitive_renderer(EntityHandle handle,
                                 RenderKind kind,
                                 Color color = {},
-                                const std::optional<std::filesystem::path>& texture = std::nullopt);
+                                const std::optional<std::filesystem::path>& texture = std::nullopt,
+                                TextureMaterialSettings texture_settings = {},
+                                const std::optional<std::filesystem::path>& normal_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& roughness_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& metallic_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& emissive_map = std::nullopt,
+                                const std::optional<std::filesystem::path>& ambient_occlusion_map = std::nullopt,
+                                CullMode cull_mode = CullMode::Back);
     void add_model_renderer(EntityHandle handle,
                             const std::filesystem::path& path,
-                            Color color = {});
+                            Color color = {},
+                            std::optional<CullMode> cull_mode_override = std::nullopt);
     [[nodiscard]] bool has_render_component(EntityHandle handle) const;
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
+    [[nodiscard]] std::size_t poll_texture_changes() const noexcept;
+    [[nodiscard]] const std::optional<SkyboxConfig>& skybox() const noexcept;
+    void set_procedural_skybox(Color top,
+                               Color horizon,
+                               Color bottom,
+                               float brightness = 1.0F,
+                               float rotation_degrees = 0.0F);
+    void set_panorama_skybox(const std::filesystem::path& path,
+                             float brightness = 1.0F,
+                             float rotation_degrees = 0.0F);
+    void set_cubemap_skybox(const std::array<std::filesystem::path, 6>& paths,
+                            float brightness = 1.0F,
+                            float rotation_degrees = 0.0F);
+    void clear_skybox() noexcept;
     void set_render_color(EntityHandle handle, Color color);
     void set_render_lit(EntityHandle handle, bool lit);
+    void set_render_cull_mode(EntityHandle handle, CullMode cull_mode);
     void set_render_surface(EntityHandle handle,
                             float metallic,
                             float roughness,
                             float emission,
                             bool casts_shadows,
                             bool receives_shadows);
+    void set_render_texture(EntityHandle handle,
+                            const std::optional<std::filesystem::path>& texture,
+                            TextureMaterialSettings texture_settings,
+                            const std::optional<std::filesystem::path>& normal_map,
+                            const std::optional<std::filesystem::path>& roughness_map,
+                            const std::optional<std::filesystem::path>& metallic_map,
+                            const std::optional<std::filesystem::path>& emissive_map,
+                            const std::optional<std::filesystem::path>& ambient_occlusion_map);
+    void set_render_image(EntityHandle handle,
+                          std::shared_ptr<const ImageData> texture,
+                          TextureMaterialSettings texture_settings = {});
     void remove_render_component(EntityHandle handle);
     void add_light_component(EntityHandle handle,
                              LightKind kind,
                              Color color = {},
-                             float intensity = 1.0F);
+                             float intensity = 1.0F,
+                             float range = 10.0F,
+                             float inner_angle_degrees = 30.0F,
+                             float outer_angle_degrees = 45.0F,
+                             bool casts_shadows = false,
+                             std::uint16_t shadow_resolution = 0,
+                             float shadow_bias = 0.002F);
     [[nodiscard]] bool has_light_component(EntityHandle handle) const;
     [[nodiscard]] const LightComponent& light_component(EntityHandle handle) const;
     void set_light_color(EntityHandle handle, Color color);
     void set_light_intensity(EntityHandle handle, float intensity);
+    void set_light_properties(EntityHandle handle,
+                              float range,
+                              float inner_angle_degrees,
+                              float outer_angle_degrees,
+                              bool casts_shadows,
+                              std::uint16_t shadow_resolution,
+                              float shadow_bias);
     void remove_light_component(EntityHandle handle);
 
     void add_collider_component(EntityHandle handle, ColliderComponent component);
@@ -333,6 +500,9 @@ public:
     void remove_rigid_body_component(EntityHandle handle);
     [[nodiscard]] Vec3 rigid_body_linear_velocity(EntityHandle handle) const;
     void set_rigid_body_linear_velocity(EntityHandle handle, Vec3 velocity);
+    [[nodiscard]] Vec3 rigid_body_angular_velocity(EntityHandle handle) const;
+    void set_rigid_body_angular_velocity(EntityHandle handle,
+                                         Vec3 degrees_per_second);
     void add_rigid_body_force(EntityHandle handle, Vec3 force);
     void add_rigid_body_impulse(EntityHandle handle, Vec3 impulse);
     void teleport_rigid_body(EntityHandle handle, Vec3 position, Quat rotation);
@@ -345,12 +515,16 @@ public:
     void set_character_input(EntityHandle handle,
                              Vec3 movement,
                              float heading_degrees,
-                             bool jump);
+                             bool jump,
+                             bool sprint,
+                             bool crouch);
     void set_character_sequenced_input(EntityHandle handle,
                                        std::uint64_t sequence,
                                        Vec3 movement,
                                        float heading_degrees,
-                                       bool jump);
+                                       bool jump,
+                                       bool sprint,
+                                       bool crouch);
     [[nodiscard]] std::uint64_t character_input_sequence(EntityHandle handle) const;
     [[nodiscard]] CharacterMotorState character_state(EntityHandle handle) const;
     void correct_character(EntityHandle handle,
@@ -361,7 +535,10 @@ public:
                                 Vec3 movement,
                                 float heading_degrees,
                                 bool jump,
+                                bool sprint,
+                                bool crouch,
                                 float delta_seconds);
+    void set_character_linear_velocity(EntityHandle handle, Vec3 velocity);
     void teleport_character(EntityHandle handle, Vec3 position, float heading_degrees);
     [[nodiscard]] PhysicsConstraintHandle add_fixed_constraint(EntityHandle first,
                                                                EntityHandle second);
@@ -424,6 +601,7 @@ public:
         const std::optional<std::filesystem::path>& texture = std::nullopt);
     [[nodiscard]] const UiElement& ui_element(std::uint64_t id) const;
     void update_ui_element(std::uint64_t id, UiElement element);
+    void set_ui_image(std::uint64_t id, std::shared_ptr<const ImageData> texture);
     void remove_ui_element(std::uint64_t id);
     void clear_ui() noexcept;
     [[nodiscard]] const std::vector<UiElement>& ui_elements() const noexcept;
@@ -475,6 +653,8 @@ private:
     std::vector<UiElement> ui_elements_;
     std::uint64_t next_ui_id_{1};
     TextureCache ui_texture_cache_;
+    TextureCache sky_texture_cache_;
+    std::optional<SkyboxConfig> skybox_{SkyboxConfig{}};
     std::unique_ptr<PhysicsWorld> physics_;
     std::unordered_map<std::uint64_t, PhysicsEntity> physics_entities_;
     std::unordered_map<std::uint64_t, CharacterEntity> character_entities_;

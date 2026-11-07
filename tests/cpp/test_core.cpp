@@ -15,7 +15,7 @@ int main() {
     }
 
     try {
-        easy3d::Engine invalid({"Easy3D", 0, 720, true, 0.0});
+        easy3d::Engine invalid({"RIX", 0, 720, true, 0.0});
         (void)invalid;
         std::cerr << "invalid dimensions were accepted\n";
         return 3;
@@ -41,15 +41,19 @@ int main() {
         return 6;
     }
     if (easy3d::graphics_features(easy3d::GraphicsPreset::Low) !=
-            easy3d::GraphicsFeatures{.enhanced_lighting = false} ||
+            easy3d::GraphicsFeatures{.enhanced_lighting = false,
+                                     .max_directional_lights = 1,
+                                     .max_point_lights = 4,
+                                     .max_spot_lights = 2} ||
         easy3d::graphics_features(easy3d::GraphicsPreset::High).shadow_resolution != 2048 ||
+        easy3d::graphics_features(easy3d::GraphicsPreset::Ultra).max_point_lights != 64 ||
         std::string_view(easy3d::graphics_preset_name(easy3d::GraphicsPreset::Ultra)) !=
             "ultra") {
         std::cerr << "graphics preset mapping failed\n";
         return 7;
     }
 
-    std::cout << "easy3d_core_tests: PASS\n";
+    std::cout << "rix_core_tests: PASS\n";
     return 0;
 }
 

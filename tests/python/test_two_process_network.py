@@ -114,6 +114,53 @@ def test_sample_exchanges_bytes_across_two_processes(tmp_path: Path) -> None:
         _reap(server)
 
 
+def test_sample_recovers_reliably_under_adverse_two_process_impairment(
+    tmp_path: Path,
+) -> None:
+    port = _unused_udp_port()
+    marker = tmp_path / "impaired-server.ready"
+    server = _launch(
+        *_server_arguments(port, marker, one_shot=True),
+        "--profile",
+        "adverse",
+    )
+    try:
+        _wait_ready(server, marker)
+        client = subprocess.run(
+            [
+                sys.executable,
+                "-u",
+                str(SAMPLE),
+                "client",
+                "--address",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--timeout",
+                "15",
+                "--profile",
+                "adverse",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20.0,
+            check=False,
+        )
+        server_stdout, server_stderr = server.communicate(timeout=20.0)
+        assert client.returncode == 0, client.stdout + client.stderr
+        assert server.returncode == 0, server_stdout + server_stderr
+        assert "CLIENT_RECEIVED response=pong" in client.stdout
+        assert "CLIENT_DONE exchange=complete" in client.stdout
+        assert "SERVER_RECEIVED request=ping" in server_stdout
+        assert "SERVER_DONE exchange=complete" in server_stdout
+        assert client.stderr == ""
+        assert server_stderr == ""
+    finally:
+        _reap(server)
+
+
 def test_gameplay_port_collision_leaves_first_process_usable(
     tmp_path: Path,
 ) -> None:
@@ -196,7 +243,7 @@ def test_client_observes_abrupt_server_process_loss(tmp_path: Path) -> None:
             str(client_marker),
         )
         _wait_ready(client, client_marker)
-        server.kill()  # Deliberately bypasses Easy3D's graceful stop path.
+        server.kill()  # Deliberately bypasses RIX's graceful stop path.
         server.communicate(timeout=5.0)
         client_stdout, client_stderr = client.communicate(timeout=22.0)
         assert client.returncode == 0, client_stdout + client_stderr
@@ -208,8 +255,6 @@ def test_client_observes_abrupt_server_process_loss(tmp_path: Path) -> None:
         _reap(server)
         if client is not None:
             _reap(client)
-
-
 def test_server_observes_abrupt_client_process_loss(tmp_path: Path) -> None:
     port = _unused_udp_port()
     server_marker = tmp_path / "client-loss-server.ready"

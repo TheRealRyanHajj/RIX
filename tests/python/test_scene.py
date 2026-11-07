@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import gc
+import weakref
+
 import pytest
 
-from easy3d import Cube, Entity, Game, InvalidEntityError, Scene, Vec3
+from rix import Cube, Entity, Game, InvalidEntityError, Scene, Vec3
 
 
 def test_explicit_scene_context_owns_entities() -> None:
@@ -20,6 +23,24 @@ def test_explicit_scene_context_owns_entities() -> None:
 
 
 def test_entity_requires_explicit_scene_outside_context() -> None:
+    # Prior tests may intentionally abandon a Game involved in a user-created
+    # callback closure. CPython is allowed to defer those cycles; collect them
+    # so this test measures the absence of a live default, not GC scheduling.
+    gc.collect()
+    with pytest.raises(RuntimeError, match="no active scene"):
+        Entity()
+
+
+def test_unreachable_game_callback_adapter_does_not_retain_default_scene() -> None:
+    game = Game("weak callback owner")
+    game.on_update(lambda _dt: None)
+    owner = weakref.ref(game)
+    del game
+
+    # Reference counting should release the Game immediately; collect as a
+    # cross-interpreter guard for unrelated native wrapper cycles.
+    gc.collect()
+    assert owner() is None
     with pytest.raises(RuntimeError, match="no active scene"):
         Entity()
 

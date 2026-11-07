@@ -4,7 +4,9 @@ import time
 
 import pytest
 
-from easy3d import Entity, NetworkError, Scene, Server, network
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import NetworkError, Server
 
 
 def _started_server(**arguments: object) -> Server:

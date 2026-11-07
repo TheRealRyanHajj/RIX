@@ -10,7 +10,9 @@
 #include <pybind11/stl.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -18,8 +20,8 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(_easy3d, module) {
-    module.doc() = "Easy3D native engine core";
+PYBIND11_MODULE(_rix, module) {
+    module.doc() = "RIX native engine core";
 
     const py::exception<easy3d::EngineError> engine_error =
         py::register_exception<easy3d::EngineError>(module, "EngineError");
@@ -31,7 +33,6 @@ PYBIND11_MODULE(_easy3d, module) {
         module, "InvalidEntityError", PyExc_ReferenceError);
     py::register_exception<easy3d::PhysicsError>(module, "PhysicsError", engine_error.ptr());
     py::register_exception<easy3d::NetworkError>(module, "NetworkError", engine_error.ptr());
-
     module.def("engine_version", &easy3d::engine_version);
     module.def("native_add", &easy3d::native_add, py::arg("a"), py::arg("b"));
     const auto network_delivery = [](const std::string& value) {
@@ -404,6 +405,68 @@ PYBIND11_MODULE(_easy3d, module) {
                               image->byte_size(),
                               image->color_space == easy3d::TextureColorSpace::Srgb);
     };
+    const auto assign_rgba8 = [](easy3d::ImageData& image,
+                                 const py::bytes& pixels,
+                                 const std::uint32_t width,
+                                 const std::uint32_t height) {
+        if (width == 0 || height == 0) {
+            throw py::value_error("texture width and height must be positive");
+        }
+        const std::uint64_t expected =
+            static_cast<std::uint64_t>(width) * height * 4U;
+        const std::string bytes = pixels;
+        if (expected > std::numeric_limits<std::size_t>::max() ||
+            bytes.size() != static_cast<std::size_t>(expected)) {
+            throw py::value_error(
+                "RGBA8 data length must equal width * height * 4 bytes");
+        }
+        image.width = width;
+        image.height = height;
+        image.rgba8.assign(bytes.begin(), bytes.end());
+        image.validate();
+    };
+    py::class_<easy3d::ImageData, std::shared_ptr<easy3d::ImageData>>(
+        module, "_DynamicImage")
+        .def(py::init([assign_rgba8](const std::uint32_t width,
+                                    const std::uint32_t height,
+                                    const py::bytes& pixels,
+                                    const bool srgb) {
+                 auto image = std::make_shared<easy3d::ImageData>();
+                 image->source_path = "<RIX Pygame Surface>";
+                 image->color_space = srgb ? easy3d::TextureColorSpace::Srgb
+                                            : easy3d::TextureColorSpace::Linear;
+                 assign_rgba8(*image, pixels, width, height);
+                 return image;
+             }),
+             py::arg("width"),
+             py::arg("height"),
+             py::arg("rgba8"),
+             py::arg("srgb") = true)
+        .def("update",
+             [assign_rgba8](easy3d::ImageData& image,
+                            const std::uint32_t width,
+                            const std::uint32_t height,
+                            const py::bytes& pixels) {
+                 assign_rgba8(image, pixels, width, height);
+                 ++image.revision;
+                 if (image.revision == 0) image.revision = 1;
+             },
+             py::arg("width"),
+             py::arg("height"),
+             py::arg("rgba8"))
+        .def_property_readonly("width", [](const easy3d::ImageData& image) {
+            return image.width;
+        })
+        .def_property_readonly("height", [](const easy3d::ImageData& image) {
+            return image.height;
+        })
+        .def_property_readonly("revision", [](const easy3d::ImageData& image) {
+            return image.revision;
+        })
+        .def("_rgba8", [](const easy3d::ImageData& image) {
+            return py::bytes(reinterpret_cast<const char*>(image.rgba8.data()),
+                             image.rgba8.size());
+        });
     module.def("_load_image_info",
                [image_info](const std::string& path,
                             const easy3d::TextureColorSpace color_space) {
@@ -416,11 +479,18 @@ PYBIND11_MODULE(_easy3d, module) {
         .def("load",
              [image_info](easy3d::TextureCache& cache,
                           const std::string& path,
-                          const easy3d::TextureColorSpace color_space) {
-                 return image_info(cache.load(path, color_space));
+                          const easy3d::TextureColorSpace color_space,
+                          const bool hot_reload) {
+                 return image_info(cache.load(path, color_space, hot_reload));
              },
              py::arg("path"),
-             py::arg("color_space"))
+             py::arg("color_space"),
+             py::arg("hot_reload") = true)
+        .def("poll_changes",
+             [](const easy3d::TextureCache& cache, const std::uint64_t interval_ms) {
+                 return cache.poll_changes(std::chrono::milliseconds(interval_ms));
+             },
+             py::arg("interval_ms") = 0)
         .def("clear", &easy3d::TextureCache::clear)
         .def_property_readonly("size", &easy3d::TextureCache::size);
     const auto model_info = [](const std::shared_ptr<const easy3d::ModelData>& model) {
@@ -434,18 +504,26 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         py::list materials;
         for (const easy3d::ModelMaterial& material : model->materials) {
-            py::object texture = material.diffuse_texture.has_value()
-                                     ? py::cast(material.diffuse_texture->string())
-                                     : py::none();
+            const auto path_or_none = [](const auto& path) -> py::object {
+                return path.has_value() ? py::cast(path->string()) : py::none();
+            };
             materials.append(py::make_tuple(material.name,
                                             py::make_tuple(material.diffuse_color.r,
                                                            material.diffuse_color.g,
                                                            material.diffuse_color.b,
                                                            material.diffuse_color.a),
-                                            texture,
+                                            path_or_none(material.diffuse_texture),
                                             material.metallic,
                                             material.roughness,
-                                            material.emission));
+                                            material.emission,
+                                            path_or_none(material.normal_texture),
+                                            path_or_none(material.roughness_texture),
+                                            path_or_none(material.metallic_texture),
+                                            path_or_none(material.emissive_texture),
+                                            path_or_none(material.ambient_occlusion_texture),
+                                            material.normal_strength,
+                                             material.packed_metallic_roughness,
+                                             material.double_sided));
         }
         return py::make_tuple(model->source_path.string(),
                               model->triangle_count(),
@@ -637,6 +715,52 @@ PYBIND11_MODULE(_easy3d, module) {
         }
         return "unknown";
     };
+    const auto texture_mode = [](const std::string& value) {
+        if (value == "auto") return easy3d::TextureMode::Auto;
+        if (value == "tile") return easy3d::TextureMode::Tile;
+        if (value == "atlas") return easy3d::TextureMode::Atlas;
+        if (value == "sphere") return easy3d::TextureMode::Sphere;
+        if (value == "preserve") return easy3d::TextureMode::Preserve;
+        throw std::invalid_argument(
+            "texture mode must be auto, tile, atlas, sphere, or preserve");
+    };
+    const auto texture_mode_name = [](const easy3d::TextureMode value) {
+        switch (value) {
+        case easy3d::TextureMode::Auto: return "auto";
+        case easy3d::TextureMode::Tile: return "tile";
+        case easy3d::TextureMode::Atlas: return "atlas";
+        case easy3d::TextureMode::Sphere: return "sphere";
+        case easy3d::TextureMode::Preserve: return "preserve";
+        }
+        return "auto";
+    };
+    const auto texture_filter = [](const std::string& value) {
+        if (value == "nearest") return easy3d::TextureFilter::Nearest;
+        if (value == "linear") return easy3d::TextureFilter::Linear;
+        throw std::invalid_argument("texture filter must be nearest or linear");
+    };
+    const auto texture_filter_name = [](const easy3d::TextureFilter value) {
+        return value == easy3d::TextureFilter::Nearest ? "nearest" : "linear";
+    };
+    const auto cull_mode = [](const std::string& value) {
+        if (value == "back") return easy3d::CullMode::Back;
+        if (value == "front") return easy3d::CullMode::Front;
+        if (value == "none") return easy3d::CullMode::None;
+        throw std::invalid_argument("cull mode must be back, front, or none");
+    };
+    const auto cull_mode_name = [](const easy3d::CullMode value) {
+        switch (value) {
+        case easy3d::CullMode::Back: return "back";
+        case easy3d::CullMode::Front: return "front";
+        case easy3d::CullMode::None: return "none";
+        }
+        return "back";
+    };
+    const auto optional_path = [](const std::optional<std::string>& value) {
+        return value.has_value()
+                   ? std::optional<std::filesystem::path>(*value)
+                   : std::nullopt;
+    };
     const auto light_kind = [](const std::string& value) {
         if (value == "ambient") {
             return easy3d::LightKind::Ambient;
@@ -644,12 +768,21 @@ PYBIND11_MODULE(_easy3d, module) {
         if (value == "directional") {
             return easy3d::LightKind::Directional;
         }
-        throw std::invalid_argument("light kind must be ambient or directional");
+        if (value == "point") {
+            return easy3d::LightKind::Point;
+        }
+        if (value == "spot") {
+            return easy3d::LightKind::Spot;
+        }
+        throw std::invalid_argument(
+            "light kind must be ambient, directional, point, or spot");
     };
     const auto light_kind_name = [](const easy3d::LightKind value) {
         switch (value) {
         case easy3d::LightKind::Ambient: return "ambient";
         case easy3d::LightKind::Directional: return "directional";
+        case easy3d::LightKind::Point: return "point";
+        case easy3d::LightKind::Spot: return "spot";
         }
         return "unknown";
     };
@@ -754,6 +887,29 @@ PYBIND11_MODULE(_easy3d, module) {
     };
 
     py::class_<easy3d::InputSystem>(module, "_NativeInput")
+        .def("_begin_frame", &easy3d::InputSystem::begin_frame)
+        .def("_end_frame", &easy3d::InputSystem::end_frame)
+        .def("_set_control",
+             &easy3d::InputSystem::set_control,
+             py::arg("control"),
+             py::arg("value"))
+        .def("_add_pointer_motion",
+             &easy3d::InputSystem::add_pointer_motion,
+             py::arg("x"),
+             py::arg("y"),
+             py::arg("delta_x"),
+             py::arg("delta_y"))
+        .def("_add_wheel",
+             &easy3d::InputSystem::add_wheel,
+             py::arg("x"),
+             py::arg("y"))
+        .def("_set_focused", &easy3d::InputSystem::set_focused)
+        .def("_set_pointer_lock_active",
+             &easy3d::InputSystem::set_pointer_lock_active)
+        .def("_set_gamepad_connected",
+             &easy3d::InputSystem::set_gamepad_connected,
+             py::arg("connected"),
+             py::arg("name") = "")
         .def("bind_action",
              [](easy3d::InputSystem& input,
                 std::string action,
@@ -787,6 +943,12 @@ PYBIND11_MODULE(_easy3d, module) {
             return result;
         })
         .def("control_value", &easy3d::InputSystem::control_value)
+        .def("control_state", [](const easy3d::InputSystem& input,
+                                 const std::string& control) {
+            const easy3d::InputActionState state = input.control_state(control);
+            return py::make_tuple(
+                state.value, state.down, state.pressed, state.released);
+        })
         .def_property_readonly("pointer_state", [](const easy3d::InputSystem& input) {
             const easy3d::PointerState state = input.pointer_state();
             return py::make_tuple(state.x,
@@ -806,6 +968,37 @@ PYBIND11_MODULE(_easy3d, module) {
                                &easy3d::InputSystem::gamepad_connected)
         .def_property_readonly("gamepad_name", &easy3d::InputSystem::gamepad_name)
         .def_property_readonly("action_count", &easy3d::InputSystem::action_count);
+
+    const auto external_viewport_camera = [](const double px,
+                                              const double py,
+                                              const double pz,
+                                              const double qw,
+                                              const double qx,
+                                              const double qy,
+                                              const double qz,
+                                              const double vertical_fov_degrees,
+                                              const double near_plane,
+                                              const double far_plane,
+                                              const bool orthographic,
+                                              const double orthographic_height) {
+        easy3d::Camera camera;
+        camera.position = {static_cast<float>(px),
+                           static_cast<float>(py),
+                           static_cast<float>(pz)};
+        camera.rotation = {static_cast<float>(qw),
+                           static_cast<float>(qx),
+                           static_cast<float>(qy),
+                           static_cast<float>(qz)};
+        camera.vertical_fov_degrees = static_cast<float>(vertical_fov_degrees);
+        camera.near_plane = static_cast<float>(near_plane);
+        camera.far_plane = static_cast<float>(far_plane);
+        camera.projection = orthographic
+            ? easy3d::CameraProjection::Orthographic
+            : easy3d::CameraProjection::Perspective;
+        camera.orthographic_height = static_cast<float>(orthographic_height);
+        camera.validate();
+        return camera;
+    };
 
     py::class_<easy3d::Engine>(module, "Engine")
         .def(py::init([](std::string title,
@@ -830,7 +1023,7 @@ PYBIND11_MODULE(_easy3d, module) {
                  return std::make_unique<easy3d::Engine>(easy3d::EngineConfig{
                      std::move(title), width, height, vsync, fps_limit, preset});
              }),
-             py::arg("title") = "Easy3D",
+             py::arg("title") = "RIX",
              py::arg("width") = 1280,
              py::arg("height") = 720,
              py::arg("vsync") = true,
@@ -856,7 +1049,113 @@ PYBIND11_MODULE(_easy3d, module) {
                  engine.run(std::move(frame_callback));
              },
              py::arg("frame_callback") = py::none())
+        .def("tick",
+             [](easy3d::Engine& engine,
+                const py::object& callback,
+                const double fps_limit) {
+                 easy3d::Engine::FrameCallback frame_callback;
+                 if (!callback.is_none()) {
+                     if (PyCallable_Check(callback.ptr()) == 0) {
+                         throw py::type_error("frame_callback must be callable or None");
+                     }
+                     PyObject* const callback_ptr = callback.ptr();
+                     frame_callback = [callback_ptr](const double delta_seconds) {
+                         py::gil_scoped_acquire acquire;
+                         py::reinterpret_borrow<py::function>(callback_ptr)(delta_seconds);
+                     };
+                 }
+                 py::gil_scoped_release release;
+                 return engine.tick(std::move(frame_callback), fps_limit);
+             },
+             py::arg("frame_callback") = py::none(),
+             py::arg("fps_limit") = -1.0)
         .def("stop", &easy3d::Engine::stop)
+        .def("close", &easy3d::Engine::close)
+        .def("begin_external_window",
+             &easy3d::Engine::begin_external_window,
+             py::arg("native_window"),
+             py::arg("width"),
+             py::arg("height"))
+        .def("resize_external_window",
+             &easy3d::Engine::resize_external_window,
+             py::arg("width"),
+             py::arg("height"))
+        .def("render_external_window", &easy3d::Engine::render_external_window)
+        .def("render_external_offscreen", &easy3d::Engine::render_external_offscreen)
+        .def("readback_external_window_rgba8", [](easy3d::Engine& engine) {
+            const std::vector<std::uint8_t> pixels =
+                engine.readback_external_window_rgba8();
+            return py::bytes(reinterpret_cast<const char*>(pixels.data()), pixels.size());
+        })
+        .def("render_external_viewport_rgba8",
+             [external_viewport_camera](easy3d::Engine& engine,
+                                        const double px,
+                                        const double py,
+                                        const double pz,
+                                        const double qw,
+                                        const double qx,
+                                        const double qy,
+                                        const double qz,
+                                        const double vertical_fov_degrees,
+                                        const double near_plane,
+                                        const double far_plane,
+                                        const bool orthographic,
+                                        const double orthographic_height,
+                                        const std::uint32_t width,
+                                        const std::uint32_t height) {
+                 const std::vector<std::uint8_t> pixels =
+                     engine.render_external_viewport_rgba8(
+                         external_viewport_camera(
+                             px, py, pz, qw, qx, qy, qz,
+                             vertical_fov_degrees, near_plane, far_plane,
+                             orthographic, orthographic_height),
+                         width,
+                         height);
+                 return py::bytes(
+                     reinterpret_cast<const char*>(pixels.data()), pixels.size());
+             })
+        .def("request_external_viewport_rgba8",
+             [external_viewport_camera](easy3d::Engine& engine,
+                                        const double px,
+                                        const double py,
+                                        const double pz,
+                                        const double qw,
+                                        const double qx,
+                                        const double qy,
+                                        const double qz,
+                                        const double vertical_fov_degrees,
+                                        const double near_plane,
+                                        const double far_plane,
+                                        const bool orthographic,
+                                        const double orthographic_height,
+                                        const std::uint32_t width,
+                                        const std::uint32_t height) {
+                 return engine.request_external_viewport_rgba8(
+                     external_viewport_camera(
+                         px, py, pz, qw, qx, qy, qz,
+                         vertical_fov_degrees, near_plane, far_plane,
+                         orthographic, orthographic_height),
+                     width,
+                     height);
+             })
+        .def("poll_external_viewport_rgba8",
+             [](easy3d::Engine& engine,
+                const std::uint64_t request_id) -> py::object {
+                 auto pixels = engine.poll_external_viewport_rgba8(request_id);
+                 if (!pixels.has_value()) return py::none();
+                 return py::bytes(
+                     reinterpret_cast<const char*>(pixels->data()), pixels->size());
+             })
+        .def("wait_external_viewport_rgba8",
+             [](easy3d::Engine& engine, const std::uint64_t request_id) {
+                 const std::vector<std::uint8_t> pixels =
+                     engine.wait_external_viewport_rgba8(request_id);
+                 return py::bytes(
+                     reinterpret_cast<const char*>(pixels.data()), pixels.size());
+             })
+        .def("cancel_external_viewport_rgba8",
+             &easy3d::Engine::cancel_external_viewport_rgba8)
+        .def("end_external_window", &easy3d::Engine::end_external_window)
         .def("set_scene",
              [](easy3d::Engine& engine, easy3d::Scene* scene) {
                  engine.set_scene(scene);
@@ -965,7 +1264,19 @@ PYBIND11_MODULE(_easy3d, module) {
                                   stats.shadows,
                                   stats.postprocessing,
                                   stats.fxaa,
-                                  stats.shadow_resolution);
+                                  stats.shadow_resolution,
+                                  stats.cpu_frame_ms,
+                                  stats.gpu_frame_ms,
+                                  stats.texture_count,
+                                  stats.texture_memory_bytes,
+                                  stats.active_directional_lights,
+                                  stats.active_point_lights,
+                                  stats.active_spot_lights,
+                                  stats.culled_lights,
+                                  stats.shadow_passes,
+                                  stats.active_shadow_casters,
+                                  stats.dropped_shadow_casters,
+                                  stats.shadow_memory_bytes);
         });
 
     py::class_<easy3d::EntityHandle>(module, "EntityHandle")
@@ -1090,38 +1401,130 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("child"),
              py::arg("parent") = std::nullopt,
              py::arg("keep_world") = false)
+        .def("entity_velocity", [](const easy3d::Scene& scene,
+                                     const easy3d::EntityHandle handle) {
+            const easy3d::Vec3 value = scene.entity_velocity(handle);
+            return py::make_tuple(value.x, value.y, value.z);
+        })
+        .def("set_entity_velocity", [](easy3d::Scene& scene,
+                                         const easy3d::EntityHandle handle,
+                                         const std::array<float, 3>& value) {
+            scene.set_entity_velocity(handle, {value[0], value[1], value[2]});
+        })
+        .def("entity_acceleration", [](const easy3d::Scene& scene,
+                                         const easy3d::EntityHandle handle) {
+            const easy3d::Vec3 value = scene.entity_acceleration(handle);
+            return py::make_tuple(value.x, value.y, value.z);
+        })
+        .def("set_entity_acceleration", [](easy3d::Scene& scene,
+                                             const easy3d::EntityHandle handle,
+                                             const std::array<float, 3>& value) {
+            scene.set_entity_acceleration(handle, {value[0], value[1], value[2]});
+        })
+        .def("entity_angular_velocity", [](const easy3d::Scene& scene,
+                                             const easy3d::EntityHandle handle) {
+            const easy3d::Vec3 value = scene.entity_angular_velocity(handle);
+            return py::make_tuple(value.x, value.y, value.z);
+        })
+        .def("set_entity_angular_velocity", [](easy3d::Scene& scene,
+                                                 const easy3d::EntityHandle handle,
+                                                 const std::array<float, 3>& value) {
+            scene.set_entity_angular_velocity(handle, {value[0], value[1], value[2]});
+        })
+        .def("entity_angular_acceleration", [](const easy3d::Scene& scene,
+                                                 const easy3d::EntityHandle handle) {
+            const easy3d::Vec3 value = scene.entity_angular_acceleration(handle);
+            return py::make_tuple(value.x, value.y, value.z);
+        })
+        .def("set_entity_angular_acceleration", [](easy3d::Scene& scene,
+                                                     const easy3d::EntityHandle handle,
+                                                     const std::array<float, 3>& value) {
+            scene.set_entity_angular_acceleration(
+                handle, {value[0], value[1], value[2]});
+        })
+        .def("entity_character_yaw_offset",
+             &easy3d::Scene::entity_character_yaw_offset,
+             py::arg("handle"))
+        .def("reset_entity_motion",
+             &easy3d::Scene::reset_entity_motion,
+             py::arg("handle"))
         .def("add_primitive_renderer",
-             [render_kind](easy3d::Scene& scene,
+             [render_kind, texture_mode, texture_filter, cull_mode, optional_path](easy3d::Scene& scene,
                            const easy3d::EntityHandle handle,
                            const std::string& kind,
                            const std::array<float, 4>& color,
-                           const std::optional<std::string>& texture) {
+                           const std::optional<std::string>& texture,
+                           const double pixels_per_unit,
+                           const std::string& filter,
+                           const std::string& mode,
+                           const std::optional<std::string>& normal_map,
+                           const std::optional<std::string>& roughness_map,
+                           const std::optional<std::string>& metallic_map,
+                           const std::optional<std::string>& emissive_map,
+                           const std::optional<std::string>& ambient_occlusion_map,
+                           const double normal_strength,
+                           const bool hot_reload,
+                            const std::array<float, 3>& atlas_dimensions,
+                            const std::string& culling) {
+                 easy3d::TextureMaterialSettings settings;
+                 settings.pixels_per_unit = static_cast<float>(pixels_per_unit);
+                 settings.filter = texture_filter(filter);
+                 settings.mode = texture_mode(mode);
+                 settings.atlas_dimensions = {atlas_dimensions[0],
+                                              atlas_dimensions[1],
+                                              atlas_dimensions[2]};
+                 settings.normal_strength = static_cast<float>(normal_strength);
+                 settings.hot_reload = hot_reload;
                  scene.add_primitive_renderer(
                      handle,
                      render_kind(kind),
                      {color[0], color[1], color[2], color[3]},
-                     texture.has_value()
-                         ? std::optional<std::filesystem::path>(*texture)
-                         : std::nullopt);
+                     optional_path(texture),
+                     settings,
+                     optional_path(normal_map),
+                     optional_path(roughness_map),
+                     optional_path(metallic_map),
+                     optional_path(emissive_map),
+                      optional_path(ambient_occlusion_map),
+                      cull_mode(culling));
              },
              py::arg("handle"),
              py::arg("kind"),
              py::arg("color"),
-             py::arg("texture") = std::nullopt)
+             py::arg("texture") = std::nullopt,
+             py::arg("pixels_per_unit") = 16.0,
+             py::arg("texture_filter") = "nearest",
+             py::arg("texture_mode") = "auto",
+             py::arg("normal_map") = std::nullopt,
+             py::arg("roughness_map") = std::nullopt,
+             py::arg("metallic_map") = std::nullopt,
+             py::arg("emissive_map") = std::nullopt,
+             py::arg("ambient_occlusion_map") = std::nullopt,
+             py::arg("normal_strength") = 1.0,
+             py::arg("hot_reload") = true,
+              py::arg("atlas_dimensions") = std::array<float, 3>{1.0F, 1.0F, 1.0F},
+              py::arg("cull_mode") = "back")
         .def("add_model_renderer",
-             [](easy3d::Scene& scene,
+             [cull_mode](easy3d::Scene& scene,
                 const easy3d::EntityHandle handle,
                 const std::string& path,
-                const std::array<float, 4>& color) {
+                 const std::array<float, 4>& color,
+                 const std::optional<std::string>& culling) {
                  scene.add_model_renderer(
-                     handle, path, {color[0], color[1], color[2], color[3]});
+                      handle,
+                      path,
+                      {color[0], color[1], color[2], color[3]},
+                      culling.has_value()
+                          ? std::optional<easy3d::CullMode>(cull_mode(*culling))
+                          : std::nullopt);
              },
              py::arg("handle"),
              py::arg("path"),
-             py::arg("color"))
+              py::arg("color"),
+              py::arg("cull_mode") = std::nullopt)
         .def("has_render_component", &easy3d::Scene::has_render_component)
         .def("render_component_info",
-             [render_kind_name](const easy3d::Scene& scene,
+             [render_kind_name, texture_mode_name, texture_filter_name, cull_mode_name](const easy3d::Scene& scene,
                                 const easy3d::EntityHandle handle) {
                  const easy3d::RenderComponent& component =
                      scene.render_component(handle);
@@ -1131,6 +1534,9 @@ PYBIND11_MODULE(_easy3d, module) {
                  } else if (component.texture) {
                      asset = py::cast(component.texture->source_path.string());
                  }
+                 const auto path_or_none = [](const auto& image) -> py::object {
+                     return image ? py::cast(image->source_path.string()) : py::none();
+                 };
                  return py::make_tuple(
                      render_kind_name(component.kind),
                      py::make_tuple(component.material.color.r,
@@ -1143,7 +1549,21 @@ PYBIND11_MODULE(_easy3d, module) {
                      component.material.roughness,
                      component.material.emission,
                      component.material.casts_shadows,
-                     component.material.receives_shadows);
+                     component.material.receives_shadows,
+                     component.texture_settings.pixels_per_unit,
+                     texture_filter_name(component.texture_settings.filter),
+                     texture_mode_name(component.texture_settings.mode),
+                     component.material.normal_strength,
+                     component.texture_settings.hot_reload,
+                     path_or_none(component.normal_map),
+                     path_or_none(component.roughness_map),
+                     path_or_none(component.metallic_map),
+                     path_or_none(component.emissive_map),
+                     path_or_none(component.ambient_occlusion_map),
+                     py::make_tuple(component.texture_settings.atlas_dimensions.x,
+                                    component.texture_settings.atlas_dimensions.y,
+                                     component.texture_settings.atlas_dimensions.z),
+                      cull_mode_name(component.material.cull_mode));
              },
              py::arg("handle"))
         .def("set_render_color",
@@ -1159,6 +1579,14 @@ PYBIND11_MODULE(_easy3d, module) {
              &easy3d::Scene::set_render_lit,
              py::arg("handle"),
              py::arg("lit"))
+        .def("set_render_cull_mode",
+             [cull_mode](easy3d::Scene& scene,
+                         const easy3d::EntityHandle handle,
+                         const std::string& value) {
+                 scene.set_render_cull_mode(handle, cull_mode(value));
+             },
+             py::arg("handle"),
+             py::arg("cull_mode"))
         .def("set_render_surface",
              &easy3d::Scene::set_render_surface,
              py::arg("handle"),
@@ -1167,23 +1595,113 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("emission"),
              py::arg("casts_shadows"),
              py::arg("receives_shadows"))
+        .def("set_render_texture",
+             [texture_mode, texture_filter, optional_path](
+                 easy3d::Scene& scene,
+                 const easy3d::EntityHandle handle,
+                 const std::optional<std::string>& texture,
+                 const double pixels_per_unit,
+                 const std::string& filter,
+                 const std::string& mode,
+                 const std::optional<std::string>& normal_map,
+                 const std::optional<std::string>& roughness_map,
+                 const std::optional<std::string>& metallic_map,
+                 const std::optional<std::string>& emissive_map,
+                 const std::optional<std::string>& ambient_occlusion_map,
+                 const double normal_strength,
+                 const bool hot_reload,
+                 const std::array<float, 3>& atlas_dimensions) {
+                 easy3d::TextureMaterialSettings settings;
+                 settings.pixels_per_unit = static_cast<float>(pixels_per_unit);
+                 settings.filter = texture_filter(filter);
+                 settings.mode = texture_mode(mode);
+                 settings.atlas_dimensions = {atlas_dimensions[0],
+                                              atlas_dimensions[1],
+                                              atlas_dimensions[2]};
+                 settings.normal_strength = static_cast<float>(normal_strength);
+                 settings.hot_reload = hot_reload;
+                 scene.set_render_texture(handle,
+                                          optional_path(texture),
+                                          settings,
+                                          optional_path(normal_map),
+                                          optional_path(roughness_map),
+                                          optional_path(metallic_map),
+                                          optional_path(emissive_map),
+                                          optional_path(ambient_occlusion_map));
+             },
+             py::arg("handle"),
+             py::arg("texture"),
+             py::arg("pixels_per_unit"),
+             py::arg("texture_filter"),
+             py::arg("texture_mode"),
+             py::arg("normal_map") = std::nullopt,
+             py::arg("roughness_map") = std::nullopt,
+             py::arg("metallic_map") = std::nullopt,
+             py::arg("emissive_map") = std::nullopt,
+             py::arg("ambient_occlusion_map") = std::nullopt,
+             py::arg("normal_strength") = 1.0,
+             py::arg("hot_reload") = true,
+             py::arg("atlas_dimensions") = std::array<float, 3>{1.0F, 1.0F, 1.0F})
+        .def("set_render_image",
+             [texture_mode, texture_filter](
+                 easy3d::Scene& scene,
+                 const easy3d::EntityHandle handle,
+                 const std::shared_ptr<easy3d::ImageData>& texture,
+                 const double pixels_per_unit,
+                 const std::string& filter,
+                 const std::string& mode,
+                 const std::array<float, 3>& atlas_dimensions) {
+                 easy3d::TextureMaterialSettings settings;
+                 settings.pixels_per_unit = static_cast<float>(pixels_per_unit);
+                 settings.filter = texture_filter(filter);
+                 settings.mode = texture_mode(mode);
+                 settings.atlas_dimensions = {atlas_dimensions[0],
+                                              atlas_dimensions[1],
+                                              atlas_dimensions[2]};
+                 settings.hot_reload = false;
+                 scene.set_render_image(handle, texture, settings);
+             },
+             py::arg("handle"),
+             py::arg("texture"),
+             py::arg("pixels_per_unit"),
+             py::arg("texture_filter"),
+             py::arg("texture_mode"),
+             py::arg("atlas_dimensions") = std::array<float, 3>{1.0F, 1.0F, 1.0F})
         .def("remove_render_component", &easy3d::Scene::remove_render_component)
         .def("add_light_component",
              [light_kind](easy3d::Scene& scene,
                           const easy3d::EntityHandle handle,
                           const std::string& kind,
                           const std::array<float, 4>& color,
-                          const float intensity) {
+                          const float intensity,
+                          const float range,
+                          const float inner_angle,
+                          const float outer_angle,
+                          const bool casts_shadows,
+                          const std::uint16_t shadow_resolution,
+                          const float shadow_bias) {
                  scene.add_light_component(
                      handle,
                      light_kind(kind),
                      {color[0], color[1], color[2], color[3]},
-                     intensity);
+                     intensity,
+                     range,
+                     inner_angle,
+                     outer_angle,
+                     casts_shadows,
+                     shadow_resolution,
+                     shadow_bias);
              },
              py::arg("handle"),
              py::arg("kind"),
              py::arg("color"),
-             py::arg("intensity"))
+             py::arg("intensity"),
+             py::arg("range") = 10.0,
+             py::arg("inner_angle") = 30.0,
+             py::arg("outer_angle") = 45.0,
+             py::arg("casts_shadows") = false,
+             py::arg("shadow_resolution") = 0,
+             py::arg("shadow_bias") = 0.002)
         .def("has_light_component", &easy3d::Scene::has_light_component)
         .def("light_component_info",
              [light_kind_name](const easy3d::Scene& scene,
@@ -1196,7 +1714,13 @@ PYBIND11_MODULE(_easy3d, module) {
                                     component.color.g,
                                     component.color.b,
                                     component.color.a),
-                     component.intensity);
+                     component.intensity,
+                     component.range,
+                     component.inner_angle_degrees,
+                     component.outer_angle_degrees,
+                     component.casts_shadows,
+                     component.shadow_resolution,
+                     component.shadow_bias);
              },
              py::arg("handle"))
         .def("set_light_color",
@@ -1212,6 +1736,15 @@ PYBIND11_MODULE(_easy3d, module) {
              &easy3d::Scene::set_light_intensity,
              py::arg("handle"),
              py::arg("intensity"))
+        .def("set_light_properties",
+             &easy3d::Scene::set_light_properties,
+             py::arg("handle"),
+             py::arg("range"),
+             py::arg("inner_angle"),
+             py::arg("outer_angle"),
+             py::arg("casts_shadows"),
+             py::arg("shadow_resolution"),
+             py::arg("shadow_bias"))
         .def("remove_light_component", &easy3d::Scene::remove_light_component)
         .def("add_collider_component",
              [physics_shape, collision_layer](
@@ -1336,6 +1869,23 @@ PYBIND11_MODULE(_easy3d, module) {
              },
              py::arg("handle"),
              py::arg("velocity"))
+        .def("rigid_body_angular_velocity",
+             [](const easy3d::Scene& scene,
+                const easy3d::EntityHandle handle) {
+                 const easy3d::Vec3 value =
+                     scene.rigid_body_angular_velocity(handle);
+                 return py::make_tuple(value.x, value.y, value.z);
+             },
+             py::arg("handle"))
+        .def("set_rigid_body_angular_velocity",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& velocity) {
+                 scene.set_rigid_body_angular_velocity(
+                     handle, {velocity[0], velocity[1], velocity[2]});
+             },
+             py::arg("handle"),
+             py::arg("velocity"))
         .def("add_rigid_body_force",
              [](easy3d::Scene& scene,
                 const easy3d::EntityHandle handle,
@@ -1374,10 +1924,17 @@ PYBIND11_MODULE(_easy3d, module) {
                 const float height,
                 const float speed,
                 const float acceleration,
-                const float air_control,
+                const float air_acceleration,
+                const float ground_friction,
+                const float stop_speed,
+                const float air_speed_cap,
+                const float horizontal_speed_limit,
                 const float jump_speed,
                 const float max_slope_degrees,
-                const float step_height) {
+                const float step_height,
+                const float sprint_multiplier,
+                const float crouch_height,
+                const float crouch_speed_multiplier) {
                  easy3d::CharacterMotorMode native_mode;
                  if (mode == "first_person") {
                      native_mode = easy3d::CharacterMotorMode::FirstPerson;
@@ -1394,10 +1951,17 @@ PYBIND11_MODULE(_easy3d, module) {
                       height,
                       speed,
                       acceleration,
-                      air_control,
+                      air_acceleration,
+                      ground_friction,
+                      stop_speed,
+                      air_speed_cap,
+                      horizontal_speed_limit,
                       jump_speed,
                       max_slope_degrees,
-                      step_height});
+                      step_height,
+                      sprint_multiplier,
+                      crouch_height,
+                      crouch_speed_multiplier});
              },
              py::arg("handle"),
              py::arg("mode"),
@@ -1405,10 +1969,17 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("height"),
              py::arg("speed"),
              py::arg("acceleration"),
-             py::arg("air_control"),
+             py::arg("air_acceleration"),
+             py::arg("ground_friction"),
+             py::arg("stop_speed"),
+             py::arg("air_speed_cap"),
+             py::arg("horizontal_speed_limit"),
              py::arg("jump_speed"),
              py::arg("max_slope_degrees"),
-             py::arg("step_height"))
+             py::arg("step_height"),
+             py::arg("sprint_multiplier"),
+             py::arg("crouch_height"),
+             py::arg("crouch_speed_multiplier"))
         .def("has_character_controller_component",
              &easy3d::Scene::has_character_controller_component)
         .def("character_controller_component_info",
@@ -1423,10 +1994,17 @@ PYBIND11_MODULE(_easy3d, module) {
                      component.height,
                      component.speed,
                      component.acceleration,
-                     component.air_control,
+                     component.air_acceleration,
+                     component.ground_friction,
+                     component.stop_speed,
+                     component.air_speed_cap,
+                     component.horizontal_speed_limit,
                      component.jump_speed,
                      component.max_slope_degrees,
-                     component.step_height);
+                     component.step_height,
+                     component.sprint_multiplier,
+                     component.crouch_height,
+                     component.crouch_speed_multiplier);
              },
              py::arg("handle"))
         .def("remove_character_controller_component",
@@ -1436,36 +2014,48 @@ PYBIND11_MODULE(_easy3d, module) {
                 const easy3d::EntityHandle handle,
                 const std::array<float, 3>& movement,
                 const float heading_degrees,
-                const bool jump) {
+                const bool jump,
+                const bool sprint,
+                const bool crouch) {
                  scene.set_character_input(
                      handle,
                      {movement[0], movement[1], movement[2]},
                      heading_degrees,
-                     jump);
+                     jump,
+                     sprint,
+                     crouch);
              },
              py::arg("handle"),
              py::arg("movement"),
              py::arg("heading_degrees"),
-             py::arg("jump") = false)
+             py::arg("jump") = false,
+             py::arg("sprint") = false,
+             py::arg("crouch") = false)
         .def("set_character_sequenced_input",
              [](easy3d::Scene& scene,
                 const easy3d::EntityHandle handle,
                 const std::uint64_t sequence,
                 const std::array<float, 3>& movement,
                 const float heading_degrees,
-                const bool jump) {
+                const bool jump,
+                const bool sprint,
+                const bool crouch) {
                  scene.set_character_sequenced_input(
                      handle,
                      sequence,
                      {movement[0], movement[1], movement[2]},
                      heading_degrees,
-                     jump);
+                     jump,
+                     sprint,
+                     crouch);
              },
              py::arg("handle"),
              py::arg("sequence"),
              py::arg("movement"),
              py::arg("heading_degrees"),
-             py::arg("jump") = false)
+             py::arg("jump") = false,
+             py::arg("sprint") = false,
+             py::arg("crouch") = false)
         .def("character_input_sequence",
              &easy3d::Scene::character_input_sequence,
              py::arg("handle"))
@@ -1484,9 +2074,20 @@ PYBIND11_MODULE(_easy3d, module) {
                      py::make_tuple(state.ground_normal.x,
                                     state.ground_normal.y,
                                     state.ground_normal.z),
-                     state.grounded);
+                     state.grounded,
+                     state.crouched,
+                     state.sprinting);
              },
              py::arg("handle"))
+        .def("set_character_linear_velocity",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                const std::array<float, 3>& velocity) {
+                 scene.set_character_linear_velocity(
+                     handle, {velocity[0], velocity[1], velocity[2]});
+             },
+             py::arg("handle"),
+             py::arg("velocity"))
         .def("correct_character",
              [](easy3d::Scene& scene,
                 const easy3d::EntityHandle handle,
@@ -1509,18 +2110,24 @@ PYBIND11_MODULE(_easy3d, module) {
                 const std::array<float, 3>& movement,
                 const float heading_degrees,
                 const bool jump,
+                const bool sprint,
+                const bool crouch,
                 const float delta_seconds) {
                  scene.replay_character_input(
                      handle,
                      {movement[0], movement[1], movement[2]},
                      heading_degrees,
                      jump,
+                     sprint,
+                     crouch,
                      delta_seconds);
              },
              py::arg("handle"),
              py::arg("movement"),
              py::arg("heading_degrees"),
              py::arg("jump"),
+             py::arg("sprint"),
+             py::arg("crouch"),
              py::arg("delta_seconds"))
         .def("teleport_character",
              [](easy3d::Scene& scene,
@@ -1744,6 +2351,65 @@ PYBIND11_MODULE(_easy3d, module) {
                  }
                  return result;
              })
+        .def("skybox_info", [](const easy3d::Scene& scene) -> py::object {
+            if (!scene.skybox().has_value()) return py::none();
+            const easy3d::SkyboxConfig& sky = *scene.skybox();
+            py::object source = py::none();
+            const char* kind = "procedural";
+            if (sky.kind == easy3d::SkyboxKind::Panorama) {
+                kind = "panorama";
+                source = py::cast(sky.panorama->source_path.string());
+            } else if (sky.kind == easy3d::SkyboxKind::Cubemap) {
+                kind = "cubemap";
+                py::list paths;
+                for (const auto& face : sky.cubemap) {
+                    paths.append(face->source_path.string());
+                }
+                source = std::move(paths);
+            }
+            return py::make_tuple(
+                kind,
+                py::make_tuple(sky.top.r, sky.top.g, sky.top.b, sky.top.a),
+                py::make_tuple(sky.horizon.r, sky.horizon.g,
+                               sky.horizon.b, sky.horizon.a),
+                py::make_tuple(sky.bottom.r, sky.bottom.g,
+                               sky.bottom.b, sky.bottom.a),
+                sky.brightness, sky.rotation_degrees, source);
+        })
+        .def("set_procedural_skybox",
+             [](easy3d::Scene& scene,
+                const std::array<float, 4>& top,
+                const std::array<float, 4>& horizon,
+                const std::array<float, 4>& bottom,
+                const float brightness,
+                const float rotation) {
+                 scene.set_procedural_skybox(
+                     {top[0], top[1], top[2], top[3]},
+                     {horizon[0], horizon[1], horizon[2], horizon[3]},
+                     {bottom[0], bottom[1], bottom[2], bottom[3]},
+                     brightness, rotation);
+             })
+        .def("set_panorama_skybox",
+             [](easy3d::Scene& scene,
+                const std::string& path,
+                const float brightness,
+                const float rotation) {
+                 scene.set_panorama_skybox(path, brightness, rotation);
+             },
+             py::arg("path"), py::arg("brightness") = 1.0,
+             py::arg("rotation") = 0.0)
+        .def("set_cubemap_skybox",
+             [](easy3d::Scene& scene,
+                const std::array<std::string, 6>& paths,
+                const float brightness,
+                const float rotation) {
+                 std::array<std::filesystem::path, 6> native_paths;
+                 std::copy(paths.begin(), paths.end(), native_paths.begin());
+                 scene.set_cubemap_skybox(native_paths, brightness, rotation);
+             },
+             py::arg("paths"), py::arg("brightness") = 1.0,
+             py::arg("rotation") = 0.0)
+        .def("clear_skybox", &easy3d::Scene::clear_skybox)
         .def("camera_info", [](const easy3d::Scene& scene) {
             const easy3d::Camera& camera = scene.camera();
             return py::make_tuple(
@@ -1927,6 +2593,10 @@ PYBIND11_MODULE(_easy3d, module) {
              py::arg("z_index"),
              py::arg("visible"),
              py::arg("enabled"))
+        .def("set_ui_image",
+             &easy3d::Scene::set_ui_image,
+             py::arg("id"),
+             py::arg("texture"))
         .def("remove_ui_element", &easy3d::Scene::remove_ui_element, py::arg("id"))
         .def("clear_ui", &easy3d::Scene::clear_ui)
         .def_property_readonly("ui_element_count", [](const easy3d::Scene& scene) {

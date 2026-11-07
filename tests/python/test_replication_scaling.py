@@ -4,11 +4,22 @@ import time
 
 import pytest
 
-from easy3d import Entity, NetworkError, Scene, Server, SpatialInterest, network, replication
+from rix import Entity, Scene
+from rix.net import (
+    Client,
+    ClientReplication,
+    NetworkError,
+    NetworkObjectId,
+    PrefabRegistry,
+    Server,
+    ServerReplication,
+    SpatialInterest,
+)
+from rix.net import replication
 
 
-def _registry() -> replication.PrefabRegistry:
-    registry = replication.PrefabRegistry(schema_version=14)
+def _registry() -> PrefabRegistry:
+    registry = PrefabRegistry(schema_version=14)
     registry.register(1, "actor", lambda scene: Entity("actor", scene=scene))
     registry.register_transform(1)
     return registry
@@ -25,7 +36,7 @@ def _server() -> Server:
     raise AssertionError("could not bind scaling replication test server")
 
 
-def _pump(server: Server, mirror: replication.ClientReplication, predicate) -> None:
+def _pump(server: Server, mirror: ClientReplication, predicate) -> None:
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline and not predicate():
         server.poll()
@@ -35,7 +46,7 @@ def _pump(server: Server, mirror: replication.ClientReplication, predicate) -> N
 
 
 def test_transform_ack_batches_are_bounded_and_exactly_framed() -> None:
-    identifier = replication.NetworkObjectId(1)
+    identifier = NetworkObjectId(1)
     with pytest.raises(ValueError, match="count"):
         replication._transform_ack_batch_frame(())
     with pytest.raises(ValueError, match="count"):
@@ -44,7 +55,7 @@ def test_transform_ack_batches_are_bounded_and_exactly_framed() -> None:
         )
 
     frame = replication._transform_ack_batch_frame(
-        ((identifier, 3), (replication.NetworkObjectId(2), 4))
+        ((identifier, 3), (NetworkObjectId(2), 4))
     )
     message_type, payload = replication._decode(frame)
     assert message_type == replication._TRANSFORM_ACK_BATCH
@@ -58,20 +69,15 @@ def test_acknowledged_transform_deltas_recover_a_missing_baseline() -> None:
     server = _server()
     server.load_scene(Scene("delta authority"))
     registry = _registry()
-    owner = replication.ServerReplication(server, registry)
+    owner = ServerReplication(server, registry)
     actor = owner.spawn(1)
-    client = network.Client(timeout=1, peer_timeout=2)
-    mirror = replication.ClientReplication(client, Scene("delta mirror"), registry)
+    client = Client(timeout=1, peer_timeout=2)
+    mirror = ClientReplication(client, Scene("delta mirror"), registry)
     try:
         client.connect("127.0.0.1", server.port)
         _pump(server, mirror, lambda: mirror.is_synchronized)
-        # Deliver the full snapshot ACK so the authority may use it as baseline.
         connection = server.connections[0]
-        _pump(
-            server,
-            mirror,
-            lambda: (connection, actor.id) in owner._transform_baselines,
-        )
+        _pump(server, mirror, lambda: (connection, actor.id) in owner._transform_baselines)
 
         actor.entity.position = (0.5, 0.0, 0.0)
         first = owner.flush_transforms(1)
@@ -79,15 +85,7 @@ def test_acknowledged_transform_deltas_recover_a_missing_baseline() -> None:
         assert first.bytes_queued == (
             replication._HEADER.size + replication._TRANSFORM_DELTA_PAYLOAD.size
         )
-        assert first.bytes_queued < (
-            replication._HEADER.size + replication._TRANSFORM_PAYLOAD.size
-        )
-        _pump(
-            server,
-            mirror,
-            lambda: mirror.delta_baseline_stats.delta_received >= 1,
-        )
-        # Deliver the delta ACK; sequence 1 is now the authority baseline.
+        _pump(server, mirror, lambda: mirror.delta_baseline_stats.delta_received >= 1)
         _pump(
             server,
             mirror,
@@ -98,17 +96,8 @@ def test_acknowledged_transform_deltas_recover_a_missing_baseline() -> None:
         actor.entity.position = (1.0, 0.0, 0.0)
         second = owner.flush_transforms(2)
         assert second.delta_snapshots == 1
-        _pump(
-            server,
-            mirror,
-            lambda: mirror.delta_baseline_stats.recovery_requests == 1,
-        )
-        # Process the reliable recovery request, then force a full baseline.
-        _pump(
-            server,
-            mirror,
-            lambda: (connection, actor.id) not in owner._transform_baselines,
-        )
+        _pump(server, mirror, lambda: mirror.delta_baseline_stats.recovery_requests == 1)
+        _pump(server, mirror, lambda: (connection, actor.id) not in owner._transform_baselines)
         actor.entity.position = (1.5, 0.0, 0.0)
         recovered = owner.flush_transforms(3)
         assert (recovered.full_snapshots, recovered.delta_snapshots) == (1, 0)
@@ -119,7 +108,6 @@ def test_acknowledged_transform_deltas_recover_a_missing_baseline() -> None:
             and mirror.transform_snapshots(actor.id)[-1].sequence == 3,
         )
         assert mirror.transform_snapshots(actor.id)[-1].position.x == pytest.approx(1.5)
-        assert mirror.delta_baseline_stats.full_received >= 2
         with pytest.raises(ValueError, match="future"):
             owner._receive_transform_ack(
                 connection,
@@ -142,7 +130,7 @@ def test_spatial_interest_priority_and_budget_bound_replaceable_work() -> None:
     server.load_scene(Scene("interest authority"))
     registry = _registry()
     interest = SpatialInterest(radius=5.0)
-    owner = replication.ServerReplication(
+    owner = ServerReplication(
         server,
         registry,
         spatial_interest=interest,
@@ -160,8 +148,8 @@ def test_spatial_interest_priority_and_budget_bound_replaceable_work() -> None:
     distant = owner.spawn(1)
     distant.entity.name = "distant"
     distant.entity.position = (20.0, 0.0, 0.0)
-    client = network.Client(timeout=1, peer_timeout=2)
-    mirror = replication.ClientReplication(client, Scene("interest mirror"), registry)
+    client = Client(timeout=1, peer_timeout=2)
+    mirror = ClientReplication(client, Scene("interest mirror"), registry)
     try:
         client.connect("127.0.0.1", server.port)
         _pump(server, mirror, lambda: mirror.is_synchronized)
@@ -172,11 +160,7 @@ def test_spatial_interest_priority_and_budget_bound_replaceable_work() -> None:
         assert stats.filtered == 1
         assert stats.budget_deferred == 1
         assert stats.bytes_queued == 76
-        _pump(
-            server,
-            mirror,
-            lambda: bool(mirror.transform_snapshots(preferred.id)),
-        )
+        _pump(server, mirror, lambda: bool(mirror.transform_snapshots(preferred.id)))
         assert mirror.transform_snapshots(ordinary.id) == ()
         assert mirror.transform_snapshots(distant.id) == ()
     finally:

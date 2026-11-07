@@ -1,4 +1,4 @@
-"""Easy3D glTF 2.0 base-pose rendering and skeletal clip sampling example."""
+"""RIX glTF 2.0 base-pose rendering and skeletal clip sampling example."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 
-from easy3d import Camera, Entity, Game, Light, Model, Plane, Scene, load_gltf
+from rix import Camera, Entity, Game, Light, Model, Plane, Scene, load_gltf
 
 
 def _write_asset(directory: Path) -> Path:
@@ -27,7 +27,7 @@ def _write_asset(directory: Path) -> Path:
     )
     (directory / "sample.bin").write_bytes(binary)
     document = {
-        "asset": {"version": "2.0", "generator": "Easy3D example"},
+        "asset": {"version": "2.0", "generator": "RIX example"},
         "buffers": [{"uri": "sample.bin", "byteLength": len(binary)}],
         "bufferViews": [
             {"buffer": 0, "byteOffset": 0, "byteLength": 36},
@@ -103,7 +103,7 @@ def _write_asset(directory: Path) -> Path:
 
 
 def run(*, seconds: float | None = None) -> None:
-    with tempfile.TemporaryDirectory(prefix="easy3d-gltf-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rix-gltf-") as temporary:
         path = _write_asset(Path(temporary))
         imported = load_gltf(path)
         if imported.skeleton is None or not imported.animations:
@@ -139,7 +139,7 @@ def run(*, seconds: float | None = None) -> None:
         with scene:
             ClipSampler()
 
-        game = Game("Easy3D — glTF 2.0", (960, 540), vsync=True)
+        game = Game("RIX — glTF 2.0", (960, 540), vsync=True)
         game.load_scene(scene)
         if seconds is not None:
             threading.Thread(

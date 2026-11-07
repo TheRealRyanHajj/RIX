@@ -1,1389 +1,261 @@
-# Easy3D architectural decisions
+# RIX architectural decisions
 
-## ADR-0001: Phase 0 dependencies use pinned CMake acquisition
+## 2026-11-05 — Collidable geometry and readable default lighting
 
-- **Status:** Accepted for Phase 0
-- **Date:** 2026-11-01
+- World-space `Cube`, `Sphere`, `Plane`, `Model`, and `Billboard` constructors
+  create colliders unless `collider=False` is explicit. Models default to a
+  triangle mesh and accept `True` as `"mesh"`. Parented or universally moving
+  visuals opt out because native static colliders cannot be parented or moved.
+- Automatic scenes use low blue ambient, an elevated warm shadow-casting key
+  directed through the initial camera octant, and a nearly horizontal cool
+  fill across the opposite X/Z octant. A custom directional light atomically replaces both,
+  so this readability rig does not contaminate authored lighting.
 
-### Context
+## 2026-11-05 — RIX identity and Pygame ownership
 
-The approved plan permits either a vcpkg manifest or pinned CMake integration. This machine has no vcpkg or Conan installation, while editable Python builds need one reproducible entry point.
+- `rix`/`rix._rix` are authoritative; the deprecated `easy3d` facade aliases
+  modules in `sys.modules` and never loads a second `.pyd`.
+- Pygame owns application lifecycle, timing, queue consumption, polling, and
+  default audio. RIX's external session does not initialize or pump SDL3.
+- Direct GPU mode makes bgfx the sole presenter. Pygame drawing uses an explicit
+  uploaded overlay Surface; display flip/update is prohibited.
+- Surface mode makes Pygame the sole presenter. Full-window output uses bgfx's
+  supported BLIT_DST/READ_BACK flow synchronously. Independent Viewports use
+  request-owned staging textures and pixel buffers, a bounded pending queue,
+  cached output, and explicit blocking/nonblocking refresh behavior. Native
+  storage is not reclaimed until bgfx reports the completion frame.
+- Surface pixel memory is always copied and revisioned. Automatic per-frame
+  upload is rejected to avoid hidden full-frame copies.
+- Internal `easy3d` C++ namespaces/include paths and legacy CMake target names
+  remain implementation details for now; renaming them provides no public
+  value and would create needless ABI/source churn.
 
-### Decision
+## ADR-0001: Pin native dependencies through CMake
 
-Use CMake `FetchContent` with immutable upstream Git commit hashes for SDL3, bgfx and its required companion repositories. Use scikit-build-core's declared build-system requirements for pybind11. Keep dependency targets private to the native implementation and expose no third-party types in the public core header.
+All third-party source revisions are immutable. Native dependencies stay
+private behind RIX types and are not installed as public SDK components.
 
-### Consequences
+## ADR-0002: Support Windows D3D11 first
 
-- A clean checkout can configure without installing a separate dependency manager, provided Git and network access are available.
-- First configure is slower and requires access to the pinned upstream repositories.
-- Updating any dependency is an explicit reviewed pin change with license-notice review.
-- This does not alter future entity, physics, or multiplayer architecture.
+SDL3 owns the native window and bgfx owns rendering. D3D11 is the supported
+backend. Interactive graphics claims require a real Windows desktop check.
 
-## ADR-0002: D3D11 is explicit; interactive graphics are not automated
+## ADR-0003: Keep renderer lifecycle on the window thread
 
-- **Status:** Accepted for Phase 0
-- **Date:** 2026-11-01
+Window creation, event polling, bgfx submission, resize/reset, and teardown run
+on the gameplay/window thread. This makes ownership deterministic and avoids
+cross-thread SDL/bgfx shutdown races.
 
-### Decision
+## ADR-0004: Use world-scoped generational entity handles
 
-Phase 0 requests bgfx `Direct3D11` explicitly and fails with an `EngineError` if
-that backend cannot initialize. The SDL window and bgfx device exist only for
-the duration of `Engine.run()`, with bgfx shutdown occurring before the HWND is
-destroyed and SDL quits. GPU/window checks remain manual or explicitly invoked
-visible diagnostics; neither pytest nor CTest registers them.
+Public wrappers never expose storage addresses. World ID, slot index, and
+generation reject stale and cross-scene access.
 
-### Consequences
-
-- CI cannot report a graphical pass merely because non-GPU tests pass.
-- `Game` construction and all default unit tests remain display-independent.
-- Backend fallback/selection is deferred until it is tested rather than making
-  an unsupported Vulkan or OpenGL claim.
-
-## ADR-0003: Keep bgfx rendering on the SDL window thread in Phase 0
-
-- **Status:** Accepted for Phase 0
-- **Date:** 2026-11-01
-
-### Context
-
-Easy3D supplies an SDL-owned Win32 `HWND` to bgfx and owns the event loop. Phase
-0 has no render-job system, and bgfx supports selecting single-threaded mode by
-calling `bgfx::renderFrame()` before `bgfx::init()`.
-
-### Decision
-
-Initialize, reset, present, and shut down bgfx on the SDL/window thread. Preserve
-the complete `bgfx::Init::swapChain` defaults when retaining the descriptor for
-resize resets; a standalone `bgfx::SwapChain` intentionally starts with sentinel
-formats and is not a complete primary swap-chain configuration.
-
-### Consequences
-
-- Win32 window, D3D11 device, swap-chain, and SDL event ownership have one clear
-  thread-affinity rule.
-- The Phase 0 implementation avoids a renderer thread that provides no current
-  scheduling benefit.
-- A future render-thread architecture requires a deliberate lifecycle redesign
-  and new resize/shutdown tests; this choice does not constrain entity, physics,
-  or multiplayer state ownership.
-
-## ADR-0004: Record VS 2026 validation without raising the intended minimum
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-The plan names Visual Studio 2022/MSVC v143 as the baseline. The machine became
-equipped with Visual Studio Build Tools 2026 v18.11.3, MSVC 19.51, and Windows
-SDK 10.0.26100.0, but not the older compiler.
-
-### Decision
-
-Use the installed toolchain to complete Phase 0 validation and document its
-exact versions. Keep Visual Studio 2022/MSVC v143 as the intended minimum rather
-than claiming it was tested or unnecessarily increasing the project minimum.
-
-### Consequences
-
-- Debug/Release and Python 3.11 evidence is genuine for MSVC 19.51.
-- Compatibility with the VS 2022 baseline remains a documented validation limit
-  until that compiler runs the same presets and tests.
-
-## ADR-0005: World-scoped generational entity handles
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Entity wrappers must survive ordinary Python reference patterns without exposing
-native pointers, and recycled native storage must never make a destroyed wrapper
-silently refer to a new entity. Future network identity must remain separate
-from process-local storage identity.
-
-### Decision
-
-Each native `World` receives a nonzero 64-bit runtime ID and owns reusable entity
-slots. `EntityHandle` stores world ID, 32-bit slot index, and nonzero 32-bit
-generation. Destroy and scene-clear operations advance generations before reuse.
-All state access validates the full handle. Python `Entity` wrappers retain their
-owning `Scene`; `Game` owns at most one active scene and scene ownership is
-exclusive between games.
-
-### Consequences
-
-- Stale and cross-world references fail with `InvalidEntityError` rather than
-  aliasing memory or crashing.
-- Slot reuse is O(1), while entity enumeration is currently O(slot capacity).
-- `Entity.id` is generation-qualified only within its scene and is explicitly
-  not a future network ID.
-- World mutation is gameplay-thread-only until later scheduler/threading work
-  adds explicit synchronization boundaries.
-
-## ADR-0006: Easy3D math boundary with private GLM transform implementation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-GLM is the locked internal math dependency, but beginner-facing APIs must not
-leak third-party types. Entity vector component edits such as
-`entity.position.x += 1` must persist rather than mutate detached temporaries.
-Euler angles also have multiple valid representations for one orientation.
-
-### Decision
-
-Pin GLM 1.0.1 by commit and link it privately. Native Easy3D `Vec2`, `Vec3`,
-`Quat`, and `Transform` values own the C++ API boundary. Python exposes
-Easy3D-owned value types; entity local position, Euler rotation, and scale use
-live proxy instances whose component setters write through to native state.
-Native transform slots store quaternion rotation, local TRS, hierarchy links,
-cached world matrices, and recursive dirty state.
-
-Local matrices use translation × rotation × scale in a right-handed, +Y-up,
--Z-forward convention. Reparenting preserves local transforms by default and
-offers explicit keep-world decomposition. Euler angles are a degree-based facade;
-orientation equality is quaternion-based because Euler triples are not unique.
-
-### Consequences
-
-- No GLM object appears in Python or stable Easy3D headers.
-- Cached descendant transforms recompute only after ancestor/local changes.
-- Direct component mutation on entity vector properties is persistent.
-- Keep-world TRS decomposition cannot represent arbitrary shear exactly; future
-  APIs must not imply general affine/shear support without changing storage.
-
-## ADR-0007: Backend-neutral mesh data and reviewed D3D11 shader artifacts
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Phase 1.3 requires genuine indexed GPU geometry and deterministic resource
-lifetime without leaking bgfx handles into beginner or stable native APIs. The
-pinned bgfx CMake integration can build `shaderc`, but enabling it adds roughly
-690 shader-tool dependency compilation steps per fresh configuration, including
-SPIR-V, glslang, and Tint code not needed by the current D3D11 runtime.
-
-### Decision
-
-Keep `MeshData`, `Material`, and related values backend-neutral. A private
-`BgfxRenderer` owns a mesh lifetime manager, programs, uniforms, and submission.
-Normal Windows builds consume reviewed Shader Model 5 DXBC headers committed
-beside Easy3D-owned `.sc` sources. `EASY3D_REGENERATE_SHADERS=ON` explicitly
-builds the immutable-pinned bgfx `shaderc` and regenerates those headers for
-review. Only the supported D3D11 profile is generated at this stage.
-
-The Phase 1.3 geometry scene is an opt-in native diagnostic, not a hidden default
-world or a substitute for the Phase 1.4 camera and Phase 1.7 render components.
-
-### Consequences
-
-- Clean editable, Debug, and Release runtime builds avoid compiling unused
-  shader tooling while remaining independent of a globally installed compiler.
-- Source changes require explicit regeneration and review of deterministic
-  binary-header diffs.
-- GPU buffers and shaders cannot escape the renderer lifetime, and shutdown
-  orders all releases before bgfx/device destruction.
-- Additional renderer backends require their own generated artifacts and
-  runtime evidence before they can be claimed.
-
-## ADR-0008: Camera matrices use an Easy3D-owned column-major boundary
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Camera projection must be independently testable without exposing GLM or bgfx
-types. D3D and OpenGL-family backends also differ in normalized depth range, and
-high-DPI SDL windows distinguish logical dimensions from drawable pixel size.
-
-### Decision
-
-Expose Easy3D-owned `Camera` and `Matrix4` native values. Matrices are
-column-major; coordinates are right-handed, +Y up, and camera-forward -Z.
-Perspective projection takes vertical FOV; orthographic projection takes a
-fixed vertical height. Both take explicit near/far planes, aspect, and a
-renderer-capability `homogeneous_depth` choice. The D3D path maps depth to
-`[0,1]`; homogeneous depth maps to `[-1,1]`.
-
-The renderer retains current pixel width/height and calculates aspect on every
-geometry submission after SDL size events. Python exposes the same native math
-through a typed standalone `Camera`; entity/component attachment is deferred
-until that ownership API exists.
-
-### Consequences
-
-- GLM remains private while native and Python tests can inspect exact matrices.
-- Resizing changes horizontal projection without distorting vertical FOV or
-  orthographic height.
-- A camera can be configured and validated before scene components are added,
-  without inventing implicit global-camera ownership.
-- Multi-camera render targets are not claimed.
-
-## ADR-0009: Canonical CPU texture cache with private GPU resources
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Texture decoding and sharing must work through stable Easy3D types without
-exposing bgfx handles. Color-space choice changes GPU interpretation, while
-sampler choice changes sampling rather than decoded bytes. A future asset
-scheduler will need deterministic keys and thread-safe access.
-
-### Decision
-
-Decode `.png`, `.jpg`, and `.jpeg` through the immutable-pinned bimg decoder to
-engine-owned RGBA8 `ImageData`. The shared CPU `TextureCache` key is a canonical
-absolute path plus linear/sRGB intent; Windows keys are case-folded. Cache
-access is mutex-protected and synchronous. Missing files use a distinct
-`MissingAssetError`; malformed and unsupported inputs use `AssetError`.
-
-Keep min/mag/mip filtering and U/V wrapping in backend-neutral
-`TextureSampler`. The private bgfx manager maps those values and sRGB intent to
-creation flags, owns move-only handles, and releases all textures before
-programs and renderer shutdown. Runtime builds consume reviewed Shader Model 5
-textured-shader headers generated from committed Easy3D shader sources.
-
-UV `(0,0)` addresses the first/top-left decoded texel, with U rightward and V
-downward. This matches the supported D3D11 path and is now part of the mesh
-contract.
-
-### Consequences
-
-- Repeated canonical path/color-space requests share decoded storage; sampler
-  variants do not duplicate CPU pixels.
-- GPU resources remain private and cannot outlive the renderer.
-- Clearing a cache drops its ownership but not outstanding shared references.
-- Loading is intentionally synchronous; asynchronous scheduling and eviction
-  policy remain later asset-system work.
-- Other renderer backends must explicitly adapt or transform the documented UV
-  convention and receive independent shader/runtime validation.
-
-## ADR-0010: Convert tinyobjloader output into immutable Easy3D model assets
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-OBJ support must preserve the engine's public type boundary, share parsed mesh
-resources, work in a future headless server/tool process, and provide predictable
-behavior for incomplete normals and broad MTL syntax.
-
-### Decision
-
-Pin tinyobjloader `v2.0.0rc13` by immutable commit and link it privately. Convert
-every successful parse into Easy3D-owned immutable `ModelData`, `ModelPart`,
-`ModelMaterial`, and `MeshData`. Triangulate faces and group parts by both OBJ
-shape and material. Normalize supplied normals; when a triangle has incomplete
-normals, generate one flat geometric normal and unique vertices. Flip OBJ V into
-the existing top-left texture convention.
-
-Cache models strongly by canonical absolute OBJ path, with Windows case folding.
-The implemented MTL surface is deliberately narrow: diffuse color/alpha and one
-diffuse texture. Resolve texture paths against the OBJ directory and fail on
-missing MTL/texture/material references instead of silently substituting a
-default. Retain non-fatal parser warnings on `ModelData`.
-
-### Consequences
-
-- Repeated model instances can share one parsed model and its mesh arrays; GPU
-  handle sharing attaches to these resources with Phase 1.7 components.
-- OBJ parsing remains usable in graphics-disabled/headless builds.
-- Smooth shading requires source normals; absent normals are visibly flat.
-- Advanced MTL fields, relative-to-nested-MTL texture roots, glTF, animation,
-  and PBR are explicitly outside this milestone.
-
-## ADR-0011: Native scene traversal with guarded Phase 1 mutation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Phase 1.7 must render Python-created entities without a per-entity Python call on
-every frame. `Engine.run()` releases the GIL while the native window loop is
-active, so uncontrolled mutation from another Python thread would race native
-renderer traversal before the Phase 2 gameplay scheduler exists.
-
-### Decision
-
-Store a singleton optional `RenderComponent` in each native world slot. Built-in
-primitive components share process-lifetime immutable meshes; model and image
-components retain shared cache allocations. A loaded `Game` keeps the Python
-`Scene` alive and gives `Engine` a non-owning native pointer. The renderer walks
-the active scene, reads native world transforms, and caches GPU meshes by
-immutable resource identity and textures by image identity plus sampler.
-
-Reject public Python scene/entity/component mutation while the owning game is
-running. Scene changes remain legal before and after a run. This is an explicit
-temporary boundary, not a claim that gameplay must be static forever; Phase 2
-will introduce ordered mutation/update phases.
-
-### Consequences
-
-- Rendering does not cross the Python/native boundary per entity or per frame.
-- CPU and GPU geometry are shared across primitive/model instances and released
-  under existing renderer/world ownership rules.
-- The non-owning native pointer is safe under `Game` because its `_scene`
-  reference is strong and replacement/unload are rejected during a run.
-- Runtime animation and gameplay mutation are deferred until the scheduler can
-  serialize them against native traversal.
-
-## ADR-0012: Scene-value camera, native baseline lights, and transient debug lines
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Phase 1.8 needs a beginner-facing camera and lighting surface without coupling
-view state to an entity-component design that later gameplay/editor work may
-need to refine. Lighting must remain entirely native per frame, behave correctly
-under transform hierarchy and non-uniform scale, and preserve useful output for
-existing scenes. Debug visualization should not retain avoidable GPU resources.
-
-### Decision
-
-Store one validated `Camera` value and persistent `DebugLine` array on `Scene`.
-Store singleton ambient/directional `LightComponent` values on world entity
-slots. Ambient lights accumulate; the first enabled directional light uses the
-entity's world-space local -Z direction. A default contribution remains for a
-light kind until an explicit component of that kind exists.
-
-Add `Material::lit` and pass inverse-transpose normal rows plus material and
-lighting uniforms into reviewed Shader Model 5 solid/textured shaders. Render
-debug lines unlit in depth-tested and overlay batches using bgfx transient
-vertex buffers. Python camera assignment is copy-in/copy-out, and all public
-mutation retains the Phase 1 running-game guard.
-
-### Consequences
-
-- Existing no-light scenes remain visible while explicit lights have simple,
-  deterministic semantics.
-- Non-uniform scaling does not corrupt Lambert normals, and unlit materials
-  provide a basic emissive/debug presentation without claiming a full material
-  model.
-- Only one directional light contributes; shadows, PBR/specular response,
-  transparent sorting, and multi-light selection are later rendering work.
-- Debug lines consume no persistent GPU handles but remain CPU-persistent until
-  cleared. A later diagnostics system can add per-frame lifetimes and shapes.
-- Cameras are scene values rather than entities for now; future multi-camera or
-  editor requirements require a separate reviewed ownership decision.
-
-## ADR-0013: Conservative bounds culling and compatibility-keyed instancing
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Phase 1.9 must reduce avoidable CPU/GPU submission while retaining correct
-transforms, lighting normals, resource sharing, and a measurable public result.
-Exact oriented-box culling is unnecessary for the initial static-scene target,
-while unconditionally instancing non-uniform scale would invalidate the existing
-inverse-transpose normal transform.
-
-### Decision
-
-Cache each immutable mesh's local AABB and derive a conservative world-space
-bounding sphere from its center, extents, hierarchy transform, and scale. Build
-six normalized planes from projection × view using the active backend's depth
-convention, then reject only spheres wholly outside a plane.
-
-Group visible mesh parts by GPU mesh handle, complete material value, and GPU
-texture handle. Groups of at least two with uniform absolute XYZ scale use a
-transient bgfx instance buffer containing one column-major model matrix per
-instance and dedicated instanced vertex programs. Other groups retain the exact
-single-draw path. Publish coherent latest-frame draw/visibility/instancing
-counters through a sequence-protected atomic store.
-
-### Consequences
-
-- Frustum testing is cheap and conservative; edge objects may remain visible,
-  but visible objects are not intentionally rejected.
-- Common static primitives collapse to one draw per compatibility group, while
-  material/texture differences correctly split batches.
-- Non-uniform scale remains correct at the cost of individual submission.
-- Batches are rebuilt each frame and use transient memory. Persistent instance
-  buffers, spatial trees, occlusion culling, and parallel visibility remain
-  possible later optimizations after profiling.
-- Renderer counters count mesh parts, not high-level entities, and are suitable
-  for diagnostics rather than gameplay synchronization.
-
-## ADR-0014: Platform-neutral input state with SDL-owned event translation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Input must support SDL keyboard, mouse, and gamepad events without exposing SDL
-types to the stable native or Python APIs. `Engine.run()` releases the GIL, so
-pointer-lock requests and diagnostic reads can race the window loop unless the
-ownership boundary is explicit. Focus loss must not leave controls stuck.
-
-### Decision
-
-`Engine` owns a mutex-protected, platform-neutral `InputSystem` built in both
-graphics and headless configurations. Controls use canonical `device:name`
-identifiers and feed remappable scalar actions with scale and deadzone values.
-The SDL window thread alone owns SDL objects, translates events, opens one
-primary gamepad, applies relative mouse mode, and resolves action transitions
-after event polling.
-
-Pointer lock is a declarative request plus a separately reported applied state.
-Focus loss zeros held controls and drops the applied lock; focus gain can
-reapply the retained request. Python receives immutable snapshots and never an
-SDL event pointer.
-
-### Consequences
-
-- Action-map and focus behavior are unit-testable without a window or GPU.
-- Monitoring threads can safely inspect input while the native loop owns event
-  production, though deterministic gameplay reads wait for Phase 2.2 callbacks.
-- Physical scancode identifiers are layout-position based; text entry will be
-  a separate API when UI work requires it.
-- One primary gamepad is sufficient for the initial gameplay milestone.
-  Multi-gamepad assignment, rumble, sensors, and controller UI labels remain
-  later extensions.
-
-## ADR-0015: Python lifecycle callbacks execute inside the native frame boundary
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Python gameplay must mutate the native scene without racing renderer traversal.
-Moving SDL to a background thread would weaken platform ownership and introduce
-cross-thread scene access. Holding the GIL for the whole native window loop
-would block monitoring and stop requests.
-
-### Decision
-
-Keep SDL event polling, gameplay scheduling, and rendering serial on the thread
-that calls `Game.run()`. Pybind releases the GIL while the native loop works and
-reacquires it only for a frame callback placed after input polling and before
-renderer submission. `Game` records the callback thread/scope, and scene
-mutation permits that exact boundary while rejecting other running-game access.
-
-The Python scheduler owns `awake`/`start` state, a clamped fixed-step
-accumulator, catch-up limits, render hooks, exception policy, and per-hook
-profiles. Destroy and clear operations queue to phase boundaries; normal
-property/component/camera writes apply immediately because native traversal is
-not concurrent.
-
-### Consequences
-
-- SDL remains on its owning thread, Python scripts have the GIL, and renderer
-  traversal cannot overlap script mutation.
-- Python callback cost directly affects frame time and is therefore measured.
-- Fail-fast errors unwind C++ RAII normally; tolerant mode quarantines a broken
-  script after logging its traceback.
-- The scheduler defines ordering, not deterministic arbitrary Python behavior.
-- Physics and networking must insert their owned stages into this boundary or
-  communicate through queues; they must not invoke Python from worker threads.
-
-## ADR-0016: Caller-owned utilities use explicit clock domains
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Timers and interpolation become ambiguous once render frames, fixed simulation
-ticks, headless servers, pause behavior, and real elapsed time coexist. A global
-utility manager would also hide ownership and complicate scene teardown.
-
-### Decision
-
-Keep `StateMachine`, `Timer`, `Cooldown`, `EventBus`, and `Tween` as pure-Python,
-caller-owned objects. Timing objects declare `wall`, `render`, or `simulation`
-ownership and reject incompatible advancement. Wall time is explicitly polled;
-render/simulation time is explicitly advanced by its owning callback. Event
-dispatch remains synchronous and deterministic, with stable priority order and
-bounded recursion. State transitions reject callback reentrancy.
-
-### Consequences
-
-- Utilities run in headless tests without SDL, bgfx, a scene, or native setup.
-- Pause and time-scale policy remains explicit at the call site instead of
-  leaking wall time into deterministic fixed-step mechanics.
-- There is no implicit global bus or timer lifecycle to leak across worlds.
-- Later engine-managed conveniences can wrap these primitives without changing
-  their timing and exception semantics.
-
-## ADR-0017: Lazy per-scene Jolt worlds behind Easy3D handles
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Physics must work in headless servers, stay independent of renderer lifetime,
-reject stale/cross-world references and advance on simulation time rather than
-render time. Creating Jolt's default buffers for every render-only scene would
-also impose avoidable memory cost.
-
-### Decision
-
-Pin Jolt 5.6.0 by immutable commit and statically link a CPU-only baseline-SSE2
-build. Register Jolt process support once, but lazily give each used `Scene` an
-independent `PhysicsWorld`. Keep Jolt types private behind Pimpl and expose
-world/generation-checked Easy3D body handles. Begin with Jolt's single-threaded
-job system so `PhysicsSystem::Update` completes on the simulation thread before
-the scheduler proceeds. Step after Python `fixed_update` using the exact fixed
-delta; scene clear owns body teardown.
-
-### Consequences
-
-- Physics tests run without SDL/bgfx/GPU and scenes that never use physics do
-  not allocate a physics system or its temporary buffer.
-- Different scenes have independent gravity, bodies, capacities and handles.
-- Baseline CPU compatibility is favored over AVX-specific optimization.
-- The initial single-threaded job backend is safe and predictable but not a
-  final performance claim; parallelism requires an owned engine job adapter.
-- Easy3D-owned component/handle layers can extend this foundation without ever
-  leaking Jolt objects into Python.
-
-## ADR-0018: Entity-owned physics components and solver transform precedence
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Python gameplay needs safe collider/body facades without exposing Jolt objects.
-Entity lifetime, body lifetime and transform ownership must remain unambiguous,
-especially when render callbacks and fixed simulation ticks run at different
-rates.
-
-### Decision
-
-Store collider and optional rigid-body configuration in a scene-owned native
-table keyed by generation-qualified entity ID. A collider creates one Jolt body;
-attaching or removing rigid-body motion replaces it transactionally. Static and
-kinematic entity pose changes push to Jolt. Dynamic bodies own their entity pose
-after every physics step, and scripts must use an explicit teleport operation
-for discontinuous changes. Reject parenting of physics entities until moving
-parent transforms have a defined conversion policy.
-
-Expose immutable construction-time box/sphere geometry and material values,
-plus dynamic velocity, force, impulse and teleport operations. Keep trigger
-event delivery and queries in Phase 2.6 rather than implying callbacks from
-sensor configuration alone.
-
-### Consequences
-
-- Destroying an entity deterministically destroys its body and stale Python
-  facades fail through the entity handle checks.
-- Render-frame scripts cannot accidentally fight a dynamic solver body through
-  ordinary transform assignment.
-- Primitive `collider=True` remains beginner-friendly while rigid-body motion is
-  explicit and inspectable.
-- Runtime shape/material reconfiguration, physics parenting and advanced shapes
-  remain intentional future APIs rather than unsafe partial behavior.
-
-## ADR-0019: Snapshot physics queries and deferred contact dispatch
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Jolt contact listeners may run while bodies are locked and, with a future job
-system, from worker threads. Calling Python or mutating scene state there would
-violate GIL/thread ownership and can deadlock. Query collectors likewise contain
-Jolt IDs and temporary storage that must not escape the native call.
-
-### Decision
-
-Convert query collectors synchronously into immutable Easy3D snapshots with
-generation-checked entity identity, explicit filtering and deterministic sort
-orders. Contact listeners copy a bounded native event record only. Drain those
-records after each completed fixed physics step and pose sync, then dispatch
-per-recipient Python snapshots through the normal scheduler callback path.
-
-### Consequences
-
-- Python never runs from a Jolt callback and never retains a Jolt body pointer.
-- Collision and trigger callbacks share lifecycle, profiling, exception and
-  deferred-mutation rules with other gameplay hooks.
-- Query results remain safe after the native collector is destroyed; normal
-  entity stale-handle checks still apply if a result is retained too long.
-- Event queue exhaustion is an explicit `PhysicsError`, not unbounded memory
-  growth or silent loss.
-
-## ADR-0020: Jolt virtual characters with native command/state boundaries
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Player collision, grounded state, slopes, steps and jumping must run at the
-fixed physics rate and later support authoritative/predicted commands. A Python
-transform loop would duplicate collision logic and make network reconciliation
-unsafe, while exposing Jolt objects would break the engine boundary.
-
-### Decision
-
-Own `CharacterVirtual` motors inside each `PhysicsWorld` behind
-generation-checked handles. Python submits bounded movement/heading/jump
-commands and reads copied state only. Use a bottom-aligned capsule plus a
-smaller inner body on the character layer. Run `ExtendedUpdate` before the
-rigid-body update, with explicit acceleration, air control, jump, slope and
-step settings. First-person follows command heading; third-person faces
-movement. Scene pose synchronization occurs only after the native step.
-
-### Consequences
-
-- Character movement remains headless and no Jolt callback enters Python.
-- The input/state boundary gained sequence numbers and bounded replay in Phase
-  5 without replacing the collision motor.
-- Characters participate in normal queries, body collision, sensors and copied
-  contact events through their inner body.
-- Camera pitch/offset/obstruction remain explicit game-side behavior.
-- Runtime resizing/tuning and character parenting require future transactional
-  APIs rather than implicit shape mutation.
-
-## ADR-0021: Construction-time advanced shapes, owned joints, and opt-in CCD
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Advanced collision must cover authored static levels, dynamic convex objects,
-fast projectiles and basic connected bodies without leaking Jolt allocation or
-lifetime rules. Concave moving meshes and an unbounded joint catalogue would
-expand the first correctness milestone beyond testable ownership semantics.
-
-### Decision
-
-Add capsules, bounded convex hulls and static OBJ triangle meshes as immutable
-collider construction data. Bake model scale once at body creation. Expose
-linear-cast CCD as a dynamic rigid-body option. Own fixed and distance
-constraints in the physics world behind generation handles and mirror endpoint
-ownership in `Scene`; endpoint replacement/destruction cascades constraint
-removal.
-
-### Consequences
-
-- Headless tests exercise actual mesh/hull/capsule solver contacts, joint
-  invariants and a discrete-versus-linear-cast tunneling control.
-- Static concave levels and ordinary ropes/welds need no user C++.
-- Runtime shape edits rebuild components explicitly rather than mutating solver
-  data beneath active contacts.
-- Compound, moving concave, hinge/slider/motor/breakable APIs remain scoped
-  follow-up work and are not implied by this milestone.
-
-## ADR-0022: Bounded polled transport boundary with deterministic simulation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-The socket backend will eventually own native callbacks and possibly a worker
-thread, while Python gameplay and scenes have a single owning thread. Transport
-pressure, malformed sizes and callback bursts cannot be allowed to create
-unbounded memory growth or enter Python from an uncontrolled native thread.
-Loss and latency behavior also need repeatable tests before a platform socket
-dependency is introduced.
-
-### Decision
-
-Define a dependency-neutral `NetworkTransport` data-plane interface around
-opaque 64-bit connection IDs, copied transport events, explicit delivery intent
-and send status. Cross the worker/gameplay boundary through a mutex-protected
-FIFO queue with a fixed capacity; surface overflow as `NetworkError`. Provide a
-seeded, manually advanced two-endpoint datagram simulator implementing the same
-interface. Keep address/listen/connect creation on future concrete transports
-and higher-level client/server owners rather than forcing backend lifecycle into
-the data plane.
-
-### Consequences
-
-- Queue capacity, payload size, loss, delay, ordering, disconnect and statistics
-  are testable headlessly with no renderer or network access.
-- Future GameNetworkingSockets callbacks copy bounded data and return; Python
-  observes it only when the gameplay thread polls.
-- A connection ID is local opaque transport state, not a replicated entity ID
-  or authenticated player identity.
-- The simulator deliberately does not implement retransmission, encryption,
-  sockets, protocol framing or authority. Those capabilities are not implied by
-  a reliable delivery label and remain later milestones.
-
-## ADR-0023: Static direct-IP GameNetworkingSockets backend
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-GameNetworkingSockets needs generated Protobuf messages and cryptographic
-primitives. Mixing an arbitrary host `protoc` with a different runtime risks
-wire/runtime incompatibility, and adding OpenSSL solely for Windows expands the
-redistributable and audit surface. The library also owns process-global state,
-while Easy3D objects may overlap in lifetime.
-
-### Decision
-
-Fetch immutable GameNetworkingSockets 1.6.1 and Protobuf 5.29.3 revisions and
-build their static libraries together as C++17. Generate messages with the
-matching source-built `protoc`. Use the supported Windows BCrypt provider for
-AES/SHA and upstream Donna code for Curve25519/Ed25519; disable ICE/WebRTC,
-tools, examples and upstream tests. Keep all backend types private and own
-initialization through a mutex-protected process reference count. Validate the
-backend with exact-byte reliable socket-pair round trips in native and Python
-tests. MSVC is the supported Windows toolchain; a MinGW build remains a
-diagnostic path after encountering an upstream GCC 15 Protobuf `musttail`
-failure.
-
-### Consequences
-
-- The dependency graph, generated-code/runtime pairing and license inventory
-  are reproducible from a clean checkout.
-- Easy3D does not redistribute OpenSSL or expose third-party socket handles.
-- Multiple runtime owners shut down safely only after the last owner leaves.
-- This milestone proves backend operation, not a public listener/client API,
-  wire handshake, identity, authentication or replication.
-
-## ADR-0024: Fixed bounded three-message connection handshake
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-The live transport needs to reject incompatible or malicious peers before any
-gameplay schema is decoded. Protobuf is a private dependency of the selected
-transport and does not by itself define Easy3D compatibility, roles, resource
-limits or safe disconnect diagnostics. A server also needs evidence that a
-client received and retained the negotiated limit before treating it as ready.
-
-### Decision
-
-Use an Easy3D-owned 12-byte little-endian envelope with fixed magic, wire-format
-version, message type, zero reserved flags and exact payload length. Cap every
-handshake frame at 512 bytes. Exchange a client hello, server acceptance and
-client confirmation over reliable transport messages. Each peer declaration
-contains exact application protocol/schema versions, an explicit client/server
-role and a message-size limit; negotiate the smaller limit and cap declarations
-at 1 MiB. Encode rejections as stable numeric disconnect codes with 1–256 bytes
-of validated UTF-8 text that excludes control characters. Treat local API
-misuse as a programming error, but convert every untrusted parse/state failure
-into a bounded rejection.
-
-### Consequences
-
-- Compatibility and resource bounds are established before application data.
-- The server does not reach established state until it verifies the client's
-  confirmation of the accepted limit.
-- The codec is independent of GameNetworkingSockets, addresses and clocks, so
-  it can be tested deterministically and reused by future transports.
-- Wire-format or schema evolution requires an explicit versioned policy; format
-  1 intentionally supports exact matches only.
-- Transport encryption does not authenticate a player identity, and the
-  handshake does not claim authentication, discovery, sockets or replication.
-
-## ADR-0025: Poll-owned asynchronous direct-IP client
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-GNS connection transitions arrive through native callbacks, while Easy3D
-gameplay and Python have a single owning thread. Letting callbacks enter Python
-would make scene mutation timing uncontrolled. A blocking `connect()` would
-also freeze a game loop and make timeout/cancellation behavior difficult to
-compose. DNS and discovery introduce policy and attack surfaces separate from
-the direct-IP foundation.
-
-### Decision
-
-Make `NetworkClient`/`easy3d.network.Client` an asynchronous, single-owner
-direct numeric IPv4/IPv6 endpoint. `connect()` creates one GNS connection and
-returns; `poll()` alone runs GNS callbacks, copies at most 256 messages, drives
-the Phase 3.3 reliable handshake, enforces one monotonic connection/handshake
-deadline, reports queue overflow, and drains events. Use per-connection GNS user
-data to route callbacks to native state, clearing it before close/destruction.
-Publish Python callbacks only while the Python caller processes polled events.
-Invalidate the opaque local connection ID on close, preserve stable Easy3D
-disconnect codes and retain unknown backend codes as integers. Expose both
-application counters and GNS observational ping/rate/queue metrics.
-
-### Consequences
-
-- No native callback calls Python or mutates scene/gameplay state.
-- Games must poll regularly; timeout and callback progress intentionally follow
-  that owning-thread pump.
-- Numeric addresses keep this milestone deterministic and bounded. DNS, LAN
-  discovery and firewall guidance remain explicit later work.
-- The client is usable against a compatible peer, but the public authoritative
-  listener and headless server remain Phase 3.5 rather than a hidden test API.
-
-## ADR-0026: Poll-owned native listener with a Python fixed-rate headless owner
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-A dedicated server must accept multiple peers and run the same Python gameplay
-lifecycle/native physics used by a game without creating SDL or bgfx. GNS
-listener callbacks arrive through process-global callback pumping, incomplete
-handshakes can consume resources, and `CloseListenSocket` ungracefully closes
-accepted connections. Python must remain on one deterministic gameplay thread,
-while an operator or test still needs to request shutdown from another thread.
-
-### Decision
-
-Give `NetworkServer` one numeric direct-IP listener, one poll group, a bounded
-peer map and a shared bounded application event queue. Count handshaking peers
-against the configured maximum. Give every peer a monotonic local ID, Phase 3.3
-server handshake, deadline and negotiated payload cap; publish it only after
-client confirmation. Route callbacks through inherited per-connection GNS user
-data, clear that pointer before close, and keep `poll()` as the sole callback/
-message pump. Close accepted peers before the listener so remote clients retain
-the stable server-stop reason.
-
-Compose the native transport in Python with the existing `SimulationScheduler`
-and exclusive `Scene` ownership. `run()` paces exact fixed ticks, `step()` is a
-deterministic one-tick seam, and callbacks execute only on the caller. A
-thread-safe event is the sole cross-thread operation used by `stop()`; no other
-concurrent server calls are supported.
-
-### Consequences
-
-- Dedicated simulation and physics run in graphics-disabled builds without an
-  `Engine`, window, input owner or renderer device.
-- Pre-handshake peers are bounded, timed out and invisible to gameplay.
-- Python server logic uses the same lifecycle/order as single-player scripts;
-  callback exceptions remain visible rather than being swallowed by native
-  worker code.
-- This is an authoritative dedicated role only. Listen hosts, discovery,
-  player identity, replication and cross-process sample guarantees remain
-  later milestones.
-
-## ADR-0027: Compose listen hosts from isolated authority and client roles
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-A listen host needs local client behavior and authoritative simulation in one
-process. Reusing the authority scene directly from the local client would run
-scripts/physics twice, create host-only callback paths and blur transport IDs
-with future player/network-object identity. A special in-process data path
-would also make host behavior differ from remote direct-IP clients.
-
-### Decision
-
-Compose `ListenServer` from the existing public `Server` and `Client`. Bind the
-authority first, then synchronously establish one ordinary loopback client
-before returning readiness. The authority alone owns the scene, scheduler and
-fixed tick. Pump the client after each completed authority tick. Tag all
-composed events with an explicit authority/client role and `local_host` flag;
-keep each child's opaque connection namespace intact even when numeric values
-match. Additional clients remain ordinary server peers and are tagged as
-non-host. Reuse the server's thread-safe stop request and clean up both roles on
-partial startup failure.
-
-### Consequences
-
-- Listen hosts exercise the same GNS queues and handshake as remote clients;
-  there is no privileged shared-memory protocol path.
-- Authoritative scripts and physics execute exactly once per host tick.
-- Role tags, not integer equality, determine which transport owns a connection
-  ID. This does not yet create player identity or network-object ownership.
-- Rendered `Game` attachment, discovery, replication and host prediction remain
-  later milestones.
-
-## ADR-0028: Polled bounded UDP query/response for opt-in LAN discovery
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-LAN browsing is useful before the user knows a direct address, but it is not
-gameplay transport, authentication or a reason to introduce a service thread.
-Broadcast input is untrusted, Windows firewall and adapter policy vary, and a
-naive listener/cache can be flooded. GNS remains the supported direct-IP data
-plane and already performs the compatibility handshake after connection.
-
-### Decision
-
-Implement an explicitly started, caller-polled IPv4 UDP control plane in the
-typed Python package. A browser broadcasts a fixed, random-nonce query from an
-ephemeral port; an announcer on a configured discovery port returns one bounded
-unicast response containing its instance ID, game port, exact protocol/schema
-versions and safe UTF-8 name. Cap datagrams, names, work per poll, per-source
-response rate state, response windows, result TTL and cache capacity. Require
-the source discovery port and current nonce, but make no authentication claim.
-Never auto-connect, resolve DNS, change firewall state or route discovery.
-
-### Consequences
-
-- Discovery can be enabled or omitted without changing dedicated/listen server
-  or client transport ownership.
-- Low-frequency socket work remains on the Python owning thread; gameplay bytes
-  continue through the native bounded GNS backend.
-- Limited/directed broadcast can be blocked by firewalls, VPNs, guest-network
-  isolation and routers. Numeric direct IP is the documented fallback.
-- IPv6 discovery, mDNS/directory/relay services, authentication and
-  separate-machine evidence are not implied by this local IPv4 milestone.
-
-## ADR-0029: Process-boundary transport gate with explicit peer liveness
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Same-interpreter loopback proves protocol behavior but not extension loading,
-socket ownership or teardown across real process boundaries. Abrupt process
-loss cannot use Easy3D's graceful close reason, and the upstream connected-peer
-timeout needs an engine-owned policy separate from handshake deadlines. Tests
-must also distinguish client confirmation from the server's later validated
-establishment event.
-
-### Decision
-
-Ship one public-API-only command with independent server/client roles and a
-fixed bounded request/reply. Add finite positive `peer_timeout` configuration to
-the native client and listener, mapped to GNS `TimeoutConnected`, with a
-10-second default and no process-global mutation. In integration tests, publish
-separate bind, client-connected and server-connected markers; terminate the
-opposite process only after the relevant establishment marker. Bound and reap
-every subprocess. Treat backend/OS abrupt-failure codes as observational while
-requiring an application disconnect event.
-
-### Consequences
-
-- Clean exchange, gameplay-port collision and abrupt loss in both directions
-  exercise the installed native extension across Windows processes.
-- Peer timeout is a liveness policy, not an exact callback deadline; polling and
-  backend scheduling remain part of observation latency.
-- The sample can be run on a LAN with numeric addressing and firewall policy,
-  but two-physical-machine execution remains separately reported evidence.
-- Process transport success does not imply replication, RPC, player identity,
-  ownership, prediction or rendered-client integration.
-
-## ADR-0030: Explicit prefab schema and authority-monotonic network IDs
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Scene entity IDs are generation-qualified local handles and cannot identify the
-same logical object in another scene or a late join. Implicit class names or
-registration order are unstable schema, while partially delivered lifecycle
-updates cannot be allowed to leave one client silently divergent.
-
-### Decision
-
-Require explicit nonzero uint32 prefab IDs plus unique bounded names in a frozen
-registry. Fingerprint the declared schema version and canonical ID/name mapping.
-Let one server attachment allocate monotonically increasing nonzero uint64
-network-object IDs without reuse. Send fixed reliable begin/spawn/end snapshots
-on connect and fixed spawn/despawn updates afterward. Disconnect a peer on
-replication backpressure or invalid lifecycle data so reconnect can reapply a
-complete snapshot. Preserve existing application callbacks and reject
-client-authored lifecycle frames.
-
-### Consequences
-
-- Network IDs remain stable across authority/client scenes and late join but
-  only within one authority session; persistence across server restarts is not
-  claimed.
-- Prefab mapping mismatches fail before client entities are accepted.
-- Lifecycle factories can create typed entities without serializing Python
-  objects or exposing scene handles on the wire.
-- Field state, transforms, ownership, RPCs and relevance require later versioned
-  messages and are intentionally absent from this milestone.
-
-## ADR-0031: Frozen typed field schema with authority-only dirty state
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Declare each network variable in the prefab registry with explicit uint16 ID,
-name, wire type, default and byte bound, and include it in the fingerprint.
-Normalize authority assignments through the wire codec, increment a per-field
-uint64 version only on change, and flush reliable full-field updates. Client
-mirrors are read-only and require newer versions. Stream and uniquely account
-all current fields in late-join snapshots. This favors bounded correctness and
-schema diagnostics before delta compression, ownership or transforms.
-
-## ADR-0032: Replaceable fixed transform stream with bounded interpolation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Transforms update more frequently than reliable gameplay fields. Encoding them
-as ordinary `NetworkVar` values would add per-field overhead and let a missing
-intermediate sample block newer visual state. Client interpolation needs ordered
-ticks, bounded storage and a clear policy for packet reordering. Initial
-relevance must reduce traffic without making reliable object state disappear.
-
-### Decision
-
-Add one fixed float32 local position/quaternion/scale frame to the frozen prefab
-schema. The authority supplies a nondecreasing uint64 tick; each flush assigns a
-monotonic sequence and uses unreliable delivery. Clients normalize validated
-quaternions, retain a fixed-capacity history, drop older/duplicate samples,
-replace newer same-tick samples, and interpolate at an explicit render tick
-without extrapolation. An optional per-connection predicate suppresses only
-transform sends. Late join receives the current relevant baseline. Bound the
-per-client history and authority sends per flush, and expose counters rather
-than disconnecting on replaceable queue pressure.
-
-### Consequences
-
-- Lifecycle and authoritative field state remain reliable and independent of
-  transient transform loss or relevance.
-- Local transforms are coherent with current unparented multiplayer actors;
-  parent-space replication policy remains future work.
-- The predicate is a policy seam, not spatial interest management or a scale
-  claim. Prediction, reconciliation, baseline ACK/resync and bandwidth priority
-  remain Phase 5 work.
-
-## ADR-0033: Frozen directional RPC schema with server ownership gate
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-### Context
-
-Remote calls must not become arbitrary Python dispatch or transfer gameplay
-authority merely because transport delivery is reliable. Stable cross-process
-registration, bounded arguments, replay defense, ownership enforcement and
-rate policy must be decided before user handlers run.
-
-### Decision
-
-Fingerprint explicit per-prefab RPC IDs/names, one direction, delivery,
-primitive positional argument bounds, optional owner requirement and one-second
-rate limit. Send only object/RPC IDs, a caller-monotonic sequence and typed
-length-prefixed values. Resolve handlers exclusively from the frozen registry.
-Disconnect malformed, unknown, wrong-direction, replayed and ownership-tampered
-calls. Drop rate excess with counters. Keep owner assignment authority-local,
-require an established connection, and clear it on disconnect. Execute handlers
-only from the existing client/server poll path.
-
-### Consequences
-
-- Reliable delivery is an ordering/delivery choice, never an authorization
-  grant; unreliable RPCs still pass the same schema and authority checks.
-- Handler code remains responsible for gameplay predicates such as distance,
-  cooldown, match phase and target visibility.
-- Primitive positional arguments are intentionally narrow. Decorator sugar,
-  richer value types, replicated ownership transfer and RPC response/future
-  abstractions can build on this stable schema later.
-
-## ADR-0034: Scheduler-scoped script role guards
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Lifecycle authority is scheduler state, not an entity flag or transport-ID
-guess. Each scheduler has one explicit role and sets a context-local value only
-while invoking a callback. Method decorators declare server/client-only hooks;
-unmarked hooks remain shared and offline schedulers execute neither guarded
-role. Listen hosts retain one server scheduler and a transport-only local
-client, preventing accidental duplicate authority execution.
-
-## ADR-0035: Match clocks are replicated authority tick deadlines
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Represent match timing as a server-owned finite phase machine plus signed-int64
-simulation deadline, round and monotonic revision in ordinary reliable
-`NetworkVar` fields. Clients derive display time but cannot transition or tick
-the state. Explicit authority advancement preserves game-defined pause policy,
-uses the existing complete late-join snapshot, and avoids divergent wall clocks
-or a second listen-host timer.
-
-## ADR-0036: Live replication begins only after snapshot queue completion
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Transport establishment and replication readiness are distinct. Maintain an
-authority-local ready set populated only after begin/current state/end are
-successfully queued. Send lifecycle, values, transforms and RPCs only to that
-set; remove peers on disconnect. This handles batched native connection events
-without allowing a live spawn to overtake a not-yet-started snapshot, while
-reliable channel order preserves updates queued after snapshot end.
-
-## ADR-0037: Explicit resync reuses the complete snapshot protocol
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Use a reliable type-8 control carrying only a caller-monotonic sequence. Validate
-replay and a minimum request interval, remove the requester from live readiness,
-and queue the ordinary complete snapshot before restoring it. Client snapshot
-begin destroys/recreates mirrors. Permit only exact idempotent same-version
-field duplicates across the boundary; reject older or conflicting versions.
-This restores coherent current state without client-authored patches or a
-second serialization format.
-
-## ADR-0038: Character prediction sequences terminate in the native motor
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Use one nonzero monotonic uint64 command sequence per character and validate it
-inside the Jolt-backed motor before mutating input. Keep the existing
-unsequenced path for offline games. A typed client facade applies commands
-immediately and retains a fixed-capacity acknowledgement queue; the authority
-feeds received commands through the identical native path without retaining a
-client replay queue. Do not hide transport, corrections or replay in the Phase
-5.1 facade. This makes duplicate/stale rejection authoritative and client/server
-motor parity testable while leaving reconciliation policy explicit for 5.2.
-
-## ADR-0039: Reconcile one virtual character, never an implicit world rollback
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-An authority correction carries a strictly newer server tick, acknowledged
-input sequence and complete native character pose/velocity. Restore that state,
-discard the acknowledged queue prefix and replay the bounded suffix through the
-same motor update routine used by the live fixed step. Replay queries the current
-collision world but does not call `PhysicsSystem::Update` or rewind bodies,
-scripts and contacts. Measure pre-snap position error and replay work. Keep
-remote actors on the existing bounded transform history with an explicit delay
-wrapper and telemetry. This provides deterministic motor parity without making
-an unsupported whole-world rollback claim.
-
-## ADR-0040: Separate deterministic packet traces from real GNS impairment
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Keep `SimulatedLink` seeded, manually clocked and packet-level, including loss
-of messages marked reliable. Define named synthetic condition profiles that can
-instantiate it. For retransmission/ordering evidence, map the same profiles to
-GameNetworkingSockets' official fake-send lag/jitter/loss globals inside one
-non-overlapping process scope and reset unconditionally. This preserves exact
-unit traces without pretending to reimplement GNS reliability, while making the
-global/test-only risk explicit. Profile results are regression evidence, not
-Internet quality or capacity guarantees.
-
-## ADR-0041: Budget only replaceable transforms and delta from ACKed state
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Never discard lifecycle, values, match state or RPCs to satisfy a transform
-budget. Refill per-connection transform tokens from explicit simulation ticks,
-order relevant entities by finite application plus distance priority, and defer
-over-budget frames. Delta only against a snapshot acknowledged by that client.
-Quantize position/quaternion/scale differences into int16 and retain the exact
-reconstruction as the candidate baseline. A missing baseline causes a reliable,
-monotonic recovery request and one forced full update. Spatial radius controls
-transform relevance without changing spawn/authority state. This keeps overload
-and loss recoverable without claiming full lifecycle interest management.
-
-## ADR-0042: Arena clients request actions; authority owns all outcomes
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Represent arena health, team and score as server-writable `NetworkVar` fields
-and match timing through the canonical replicated match state. A client may only
-invoke an owner-gated attack request on its own player. The handler validates
-playing phase, live/allowed target, distance, team and remaining health before
-changing damage/score or ending the match. Cooperative and competitive samples
-share this authority rule but remain finite headless integration scenarios, not
-combat/anti-cheat or capacity claims.
-
-## ADR-0043: Capacity is a declared workload; transform ACK state is replaceable
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Measure 8/16/32 real loopback connections in one process with one moving object
-per client and dense all-to-all transform fan-out. Record aggregate loop cost,
-process CPU/RSS, application bytes, observation latency and final all-replica
-correctness, then set explicit gates from the first correct baseline. Do not
-present the aggregate loop as a dedicated-server-only or 60 Hz result.
-
-Optimize the measured control-path bottleneck by retaining only the newest
-pending transform ACK per object and coalescing up to 256 entries in one bounded
-type-12 datagram. ACK batches are unreliable and replaceable: loss preserves an
-older safe baseline and a later ACK restores delta efficiency. Baseline
-recovery remains reliable. Cache delta construction only when connections
-reference the identical immutable baseline object, so divergent histories
-cannot be merged merely because their sequence numbers match.
-
-## ADR-0044: Soak loss recovery separately from deterministic clean shutdown
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Use a finite real-loopback soak with the declared adverse GNS impairment for
-reliable owner-gated input bursts, application rate limiting, rotating client
-disconnects, reliable despawn, reconnect and complete replication resync. Reset
-the process-global impairment only after every cycle is coherent, then stop the
-still-populated replicated server and require every client to clear.
-
-On native server stop, all connections become inactive before queued Python
-disconnect callbacks run. Intersect replication's ready recipients with the
-native active connection set before user teardown callbacks. This preserves
-normal single-peer leave broadcasts while preventing despawn broadcasts to
-already-inactive peers during whole-server shutdown.
-
-## ADR-0045: Presets request features; runtime capabilities decide activation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Expose four immutable quality presets instead of independent renderer toggles.
-Low retains the baseline path, Medium adds enhanced direct-light materials and
-an HDR/tone-map/FXAA pass, and High/Ultra add one directional shadow map at
-2048/4096 pixels. Keep material controls intentionally small and describe the
-shader as a metallic/roughness approximation, not full PBR.
-
-Create optional render targets only after querying bgfx capabilities. If a
-format, size or framebuffer is unavailable, continue with the nearest usable
-path and report actual activation through renderer statistics and startup logs.
-This makes presets portable requests rather than unsupported guarantees and
-keeps adapter-specific policy out of the Python gameplay layer.
-
-## ADR-0046: Retain overlay data natively; keep Python callback policy thin
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Store panels, sprites, text and buttons as validated scene-owned native values
-and render them in one ordered bgfx view after postprocessing. Use monotonic
-scene-local IDs, viewport-pixel nine-point anchors and explicit z-order. Share
-the existing image/cache lifetime and bake a private printable-ASCII Roboto
-atlas once with bgfx's pinned stb_truetype dependency. This keeps all per-frame
-geometry submission native without introducing a general widget framework.
-
-Keep button callback references, press-edge dispatch and the small horizontal/
-vertical stack helper in typed Python. Dispatch inside the existing gameplay-
-thread mutation boundary, use the engine's atomic framebuffer extent, and scale
-SDL logical pointer events into framebuffer pixels. This preserves normal Python
-callbacks while keeping hit testing deterministic, resize-aware and independent
-from the renderer's GPU resources.
-
-## ADR-0047: Use SDL3 output with an Easy3D-owned bounded PCM mixer
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Reuse the already pinned SDL3 runtime solely for default-device lifecycle and
-its native pull callback. Keep decoded sound data, voice cursors, resampling,
-mixing and positional policy in a platform-neutral C++ `AudioSystem`, including
-graphics-disabled builds. This adds no dependency or license surface, keeps the
-audio thread out of Python, permits deterministic sample-level unit tests, and
-leaves a narrow adapter seam for a different platform device API later.
-
-Constrain the first import contract to bounded, whole-file, uncompressed PCM16
-WAV. Mix to 48 kHz stereo float with linear interpolation, distance attenuation
-and equal-power pan relative to the active camera. Treat device availability as
-optional: a playback failure logs and disables audio but must not prevent the
-window from running. Streaming codecs, authored buses/effects and HRTF remain a
-future separately specified milestone rather than hidden transitive features.
-
-## ADR-0048: Convert a bounded cgltf subset into Easy3D-owned model and pose data
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Keep cgltf 1.15 as a private, immutable-pinned, header-only parser and convert
-validated glTF 2.0/GLB input immediately into the existing Easy3D-owned mesh and
-material representation. Bake scene-node transforms into static base-pose
-geometry so the current renderer and collider paths need no dependency types or
-new resource lifetime. Preflight container, declared-buffer and actual external-
-buffer sizes before allocation; reject required extensions and unsupported
-animation constructs with path-bearing `AssetError` diagnostics.
-
-Represent at most one skin as a bounded joint hierarchy with local bind TRS and
-inverse-bind matrices. Represent translation, quaternion rotation and scale
-channels as bounded LINEAR/STEP clips and sample them deterministically in the
-native core. Expose typed immutable Python metadata and pose sampling, while
-explicitly leaving GPU skin deformation, morph targets, cubic splines, multiple
-skins and embedded material-image rendering outside this milestone. This makes
-the imported contract useful and testable without implying a skinned renderer.
-
-## ADR-0049: Compose diagnostics from production snapshots and gate both typing layers
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Do not add a parallel asset validator or profiler subsystem. Structured asset
-reports call the production synchronous loader and preserve caught native error
-type/message plus successful metadata. The runtime overlay is a normal script
-entity retaining existing native HUD elements and reading atomic renderer plus
-immutable scheduler snapshots at a bounded interval. This keeps diagnostics on
-the same validation, ownership and thread boundaries as the systems they report.
-
-Treat typing as an executable contract. Pin mypy in the developer extra, compile
-a representative documented consumer under strict settings, and compare the
-installed pybind runtime with `_easy3d.pyi` using stubtest. Allowlist only the
-implementation metaclass and non-constructible generic-signature artifacts that
-pybind11 exposes to introspection. Run both gates from pytest so future binding
-changes cannot omit stubs unnoticed.
-
-## ADR-0050: Single-source release version and keep compatibility domains explicit
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Store the final numeric engine/package version once in root `VERSION`. Let the
-scikit-build-core regex provider create Python distribution metadata, let CMake
-create the native version header, and read the installed distribution metadata
-for `easy3d.__version__`. Test that Python metadata, the public package and the
-native core agree. This removes hand-synchronized version literals without
-making a VCS checkout or tag a runtime dependency.
-
-Keep engine release, application protocol, application schema, registry
-fingerprint and internal wire-format versions as separate exact boundaries.
-Do not imply native ABI stability: consumers install a complete ABI-tagged
-wheel and never mix native files across artifacts. Pre-1.0 patch releases
-preserve documented behavior; minor releases may break it only with migration
-notes. Private distribution uses immutable, hashed, versioned artifacts and
-requires an explicit owner action rather than an automated public upload.
-
-## ADR-0051: Cache transform deltas by value and bypass redundant wire revalidation
-
-- **Status:** Accepted
-- **Date:** 2026-11-01
-
-Key the server's per-flush delta cache by object ID, baseline sequence and all
-baseline transform components. Object identity is insufficient because packet
-timing can create distinct immutable snapshots with identical reconstruction
-state; component/sequence equality shares only byte-equivalent delta work and
-keeps divergent quantization histories separate.
-
-Construct transform math values through private replication-only helpers after
-the bounded wire decoder has already checked frame size, finite full-frame
-components or bounded integer deltas, and a validated baseline. Preserve
-normalization plus zero-quaternion/zero-scale rejection. Public `Vec3` and
-`Quat` constructors keep their complete type/finite contract. This targeted
-boundary removes measured duplicate validation from dense fan-out without
-weakening untrusted packet checks or changing the public math API.
+## ADR-0005: Own the math and asset boundary
+
+RIX value types and immutable asset records form the API. GLM,
+tinyobjloader, cgltf, bimg, and bgfx types remain private.
+
+## ADR-0006: Use native traversal with guarded Python callbacks
+
+Native code owns traversal and fixed stepping. Python callbacks run at explicit
+safe points with deferred snapshots and bounded catch-up behavior.
+
+## ADR-0007: Give each scene a lazy Jolt world
+
+Physics resources are scene-owned RIX handles. Contacts are queued as
+immutable snapshots; characters, constraints, and bodies never leak Jolt
+objects to Python.
+
+## ADR-0008: Keep beginner conveniences compositional
+
+Default scenes, primitives, players, gameplay helpers, and UI use the same
+production components and native resources as explicit code. Defaults are
+context-local, owned, and removable.
+
+## ADR-0009: Remove networking from the product
+
+The transport, GameNetworkingSockets/Protobuf dependency chain, protocol,
+client/server wrappers, LAN discovery, replication, remote calls, match state,
+prediction/reconciliation, online examples, benchmarks, and tests were removed
+as one breaking simplification. Local character movement retains ordinary
+jump, sprint, crouch, slope, and step behavior but no longer carries sequence
+or correction state.
+
+The resulting engine has a smaller build graph and a narrower security and
+maintenance surface. Reintroducing online functionality requires a separate
+approved design rather than compatibility shims in the core.
+
+This decision was superseded by ADR-0015 after the separately approved
+2026-11-06 multiplayer/state-system goal.
+
+## ADR-0015: Restore networking as an optional layered subsystem
+
+RIX restores the previously verified GameNetworkingSockets transport without
+reverting the Pygame/package overhaul. Native transport, Session messaging, and
+replicated game state are separate testable layers. `rix.net` is the coherent
+public namespace; single-player code does not need to import it, and headless
+messaging must not initialize graphics. Unsafe pickle/object deserialization is
+forbidden. Direct IP and LAN discovery are implemented; hosted relay, NAT
+traversal, and generic rollback are not claimed.
+
+## ADR-0010: One persistent frame step for managed and manual loops
+
+`Game.run()` and `Game.tick()` share a native `WindowSession` frame step. The
+manual API does not recreate SDL/bgfx per frame and does not implement a second
+Python simulation clock. Native input, scheduler callbacks, fixed physics,
+render submission, presentation, and counters therefore retain one ordering.
+
+Manual code may mutate the active scene only between ticks on the owning
+gameplay thread. Recursive tick, concurrent managed/manual control, and closing
+inside a frame are errors. A context-managed manual loop is the preferred form
+because it deterministically tears down a partially completed session.
+
+## ADR-0011: Beginner helpers compose existing ownership
+
+Scene-free raycasts delegate to `rix.physics`; attached health is the
+existing `Health`; managed weapons use `HitscanWeapon`; one-call audio uses the
+game's `Audio` cache; and animations use `Tween`. Managed registrations are
+cancellable handles and entity-owned registrations end with entity or scene
+attachment lifetime. Standalone manual APIs remain supported.
+
+## ADR-0012: Preserve input intent across clock boundaries
+
+Native action state retains both edges when a control is pressed and released
+within one SDL polling frame. The built-in `Player` samples the jump edge on
+the render update and keeps a one-shot request until the next fixed simulation
+tick. General `Game.on_input` callbacks also dispatch during render update so
+interaction edges do not disappear on a frame with no fixed tick. Held
+movement, sprint, and crouch remain fixed-step reads. This avoids lost input
+intent when render FPS exceeds physics Hz without advancing physics from
+variable-rate Python code.
+
+## ADR-0013: Use simple projection-based character movement
+
+The automatic `Player` latches a jump press edge until one fixed tick consumes
+it, but never resubmits a held button. The native motor has no coyote or jump
+buffer timers. A jump succeeds only on a walkable grounded tick and skips ground
+friction on that exact takeoff tick, making bunny hopping a timing mechanic.
+
+Ground and air acceleration fill only the velocity projection along normalized
+wish direction. Air movement caps that projection rather than total horizontal
+speed and applies no friction, permitting strafe turns and emergent speed gain
+without a special momentum-preservation branch. Grounded non-jump movement uses
+Source-style friction before acceleration. Sprint and crouch only change wish
+speed; an optional explicit horizontal cap is disabled by default.
+
+## ADR-0014: Treat texture filenames as declarative material inputs
+
+Primitive constructors resolve one texture filename into deterministic mapping,
+generation, companion-map discovery, sampler, and color-space state before the
+native scene mutation. Missing local PNGs are generated once with a sidecar;
+existing files and user-owned metadata are never rewritten. Cube atlases use
+`rix-cube-cross-v1`; ordinary cube/plane surfaces tile; spheres use their
+authored spherical UVs; imported models preserve authored UVs.
+
+If a generated PNG pair is deleted while its sidecars remain, both sidecars are
+validated before either PNG is recreated. Compatible RIX-owned sidecars are
+refreshed to the new pixel dimensions; incompatible or malformed metadata fails
+without a partial image write, while valid user-owned metadata remains intact.
+
+Cube atlas rectangles are derived once from the positive world dimensions used
+to create or attach the atlas. The dimensions travel with the native render
+component instead of being recomputed from every transform. This preserves the
+PNG's face identity under runtime/parent nonuniform scale. Conflict checks
+compare normalized face regions, so a uniform resolution/density change is
+compatible while a different cuboid proportion is rejected.
+
+Native `ImageData` objects remain stable while their decoded contents and
+revision advance during hot reload. GPU cache entries key on that stable object
+and sampler, replacing the handle in place when the revision changes. This
+updates every sharer without reconstructing entities or growing one GPU entry
+per reload. Albedo/emissive data is sampled as sRGB; normal, roughness,
+metallic, and AO data remains linear. D3D11 normal maps use the DirectX green
+channel convention. Tangent reconstruction also multiplies by the model
+determinant sign so supported mirrored transforms preserve the normal-map basis.
+
+Map discovery uses a neutral scalar factor of one for roughness, metallic, and
+emission when the caller omits the scalar. With no map, the established scalar
+defaults remain `0.5`, `0`, and `0`. GPU texture entries retain weak CPU owners;
+expired entries are destroyed after frame submission rather than accumulating
+until renderer shutdown.
+
+## ADR-0015: Model face visibility as retained material state
+
+Face culling belongs to each render material and its shadow submission, not to
+generated geometry or collision shapes. RIX's CCW front winding maps back,
+front, and no-cull modes to D3D11 through bgfx, with a front/back swap for
+mirrored world transforms. Cull mode is part of the instancing compatibility
+key, so instances share a draw only when their effective state matches.
+
+The high-level `double_sided` property is an alias for no culling. Conflicting
+explicit alias and `cull_mode` values fail immediately. Imported models resolve
+explicit override before glTF `doubleSided` before the back-cull fallback; an
+override deliberately applies across all parts. Shadow passes follow the same
+effective cull decision as the visible material. Back-face lighting reverses
+the final reconstructed normal through `gl_FrontFacing`, including the
+normal-mapped path, without adding shader permutations.
+
+## ADR-0016: Fixed-budget forward lights and scene-owned fullscreen skies
+
+RIX uses one bounded forward-light array instead of hidden per-light draw
+passes or an unbounded shader interface. Presets cap directional/point/spot
+sources at `1/4/2`, `2/16/8`, `4/32/16`, and `4/64/32`; deterministic native
+culling and priority decide admission. The initial shadow budget is one source
+of each direct kind, keeping cost and telemetry predictable while the public
+API can describe more lights than a frame admits.
+
+Point shadows store normalized radial distance in six R32F cubemap faces. The
+D3D11 path resolves overlapping casters with a minimum blend into a white-cleared
+face instead of attaching an incompatible per-face 2D depth target; sampling
+then compares receiver distance with the selected cubemap direction. Spotlights
+use a rotated cone bounding box for conservative frustum relevance.
+
+Skyboxes are scene resources, not entities: they have no transform hierarchy,
+physics, collision, or gameplay identity. Fullscreen ray reconstruction keeps
+the sky translation-invariant without cube geometry and submits into the main
+post-processing target. Missing sky generation has its own sidecar identity
+and never uses AutoTexture density. Generated cubemap faces evaluate one
+directional gradient so shared edges agree rather than assigning unrelated face
+colors.
+
+## ADR-0017: Convert display-authored colors at the HDR boundary
+
+Python-facing material, light, and procedural-sky colors are authored as sRGB
+display values. When the renderer uses its linear floating-point post-process
+target, it converts those values to linear light before shading; the final
+post-process pass remains responsible for tone mapping and display encoding.
+The direct-to-backbuffer fallback retains its existing display-space behavior.
+Texture albedo and emissive inputs continue to use hardware sRGB decoding, so
+they are not manually converted a second time.
+
+## ADR-0018: Make motion universal, world-space, and fixed-step
+
+Every native entity slot owns linear/angular velocity and acceleration, even
+without physics components. Linear motion uses world units and angular motion
+uses degrees at the Python boundary. Ordinary entities use semi-implicit Euler
+on the existing fixed clock; world-axis rotation deltas avoid Euler drift and
+parented results are converted back to local transforms.
+
+Jolt remains authoritative for rigid bodies and characters. Motion transfers
+when ownership changes, acceleration is additive to gravity, and teleporting
+preserves state unless explicitly reset. Characters retain upright collision,
+so only yaw angular motion is accepted. Facing is always an explicit command:
+velocity, acceleration, and collision response never rotate an entity.
+
+`Player` separates character tuning (`move_speed`, `move_acceleration`) from
+universal entity vectors and exposes camera-aware view axes separately from
+body-facing axes. The rename is intentionally breaking before 1.0; rejected
+legacy scalar calls provide direct migration guidance rather than guessing.
+
+## ADR-0019: Require an isolated deterministic contract before rollback
+
+RIX does not treat arbitrary Python, ordinary entities, or Jolt simulation as
+cross-process deterministic. A future rollback system must operate on an
+application-supplied fixed-tick model with canonical bounded byte snapshots,
+complete restore, registered ticked inputs, stable digests, deterministic
+random state, deferred side effects, and bounded history/replay. Independent
+process digest/replay/resynchronization tests are a release prerequisite.
+
+The full contract is `docs/rollback-contract.md`. The current native character
+prediction path is intentionally narrower and is not described as rollback.

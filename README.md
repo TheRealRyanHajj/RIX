@@ -1,832 +1,307 @@
-# Easy3D
+# RIX — High-performance 3D for Pygame and Python
 
-Easy3D is a private, Windows-first 3D framework with a Python API and a C++20
-native core. Phases 0–6 are complete at the private `0.1.0` checkpoint and are
-validated for their documented workloads and limits.
-The engine has a native D3D11 renderer, generation-safe scenes and entities,
-shared assets and render components,
-Python gameplay callbacks and utilities, remappable input, and a headless Jolt
-physics foundation with rigid bodies, queries, events, character motors,
-advanced shapes, joints, and CCD.
+RIX is the private, Windows-first 3D extension for Pygame Community Edition.
+Pygame remains the application layer—window, event loop, timing, Surfaces,
+sprites, fonts, menus, and ordinary audio—while RIX supplies native C++20
+D3D11 rendering, Jolt physics, 3D scenes, lights, models, and controllers
+through a typed Python API. Standalone RIX remains supported.
 
-The product and technical source of truth is [MASTERPLAN.md](MASTERPLAN.md).
-Validation evidence and environment-specific limitations are recorded in
-[docs/progress.md](docs/progress.md) and [docs/known-issues.md](docs/known-issues.md).
-Release compatibility, migration and private wheel distribution are documented
-in [docs/release.md](docs/release.md) and [CHANGELOG.md](CHANGELOG.md).
+RIX includes optional native multiplayer for Pygame-only, RIX 3D, standalone,
+and headless programs. `rix.net` provides safe named messages, direct-IP and
+LAN connections, dedicated/listen servers, registered replication and RPCs.
+No hosted matchmaking, arbitrary NAT traversal, or managed relay service is
+claimed.
 
-## Prerequisites
+## Requirements
 
-- Windows 10 or 11 x64
-- Visual Studio Build Tools with **Desktop development with C++**, an x64 MSVC
-  toolset, and a Windows 10/11 SDK. Visual Studio 2022/MSVC v143 is the intended
-  minimum; the recorded Phase 0 run used Build Tools 2026/MSVC 19.51.
-- CPython 3.11, 3.12 or 3.13 x64. Each interpreter has an independently built
-  and clean-installed `win_amd64` wheel; other Python versions are unverified.
-- Git, CMake 3.26+, and Ninja 1.11+
-- Network access on the first configure to fetch immutable dependency commits
+- Windows 10 or 11, x64
+- Python 3.11, 3.12, or 3.13
+- Pygame Community Edition 2.5.8 for the Pygame integration extra
+- Visual Studio 2022 Build Tools or newer with Desktop development with C++
+- CMake 3.26+ and Ninja (pip can provide Ninja for editable builds)
+- Git and internet access for the first CMake dependency fetch
 
-No global vcpkg, SDL, or bgfx installation is required.
+The supported compiler is MSVC. Run native build commands from an x64 Native
+Tools command prompt, or import the Visual Studio developer environment into
+PowerShell.
 
 ## Developer setup
 
-Open a PowerShell prompt where the x64 MSVC compiler is available (for example
-the **Developer PowerShell** installed with Visual Studio) and run from the
-repository root:
-
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
-python -c "import easy3d; print(easy3d.engine_version())"
+python -m pip install -e '.[pygame,dev]'
+python -c "import rix; print(rix.engine_version())"
 python -m pytest -q
 ```
 
-The editable install performs the CMake native build. A direct native build is
-also available:
+If CMake selects MinGW from a regular terminal, open an x64 Visual Studio
+developer shell and repeat the editable install.
+
+The verified multiplayer/state-system release evidence is recorded in
+[the Phase 16 completion report](docs/phase16-report.md).
+
+For the standalone native targets:
 
 ```powershell
 cmake --preset windows-debug
 cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
+ctest --preset windows-debug
 ```
 
-The presets use Ninja Multi-Config and therefore require `cl.exe` to be on
-`PATH`. They do not install or alter global software.
+## Migrating from Easy3D
 
-Do not run the editable build from a shell that selects MinGW. Verify
-`Get-Command cl.exe` resolves inside Visual Studio's x64 developer environment
-before running pip; MSVC is the supported Windows compiler.
+The distribution and native extension were renamed without resetting version
+history: use `import rix` and `rix._rix`. The temporary `easy3d` facade emits a
+`DeprecationWarning` and forwards to the exact same Python classes and native
+module; it is not a second engine. Replace imports such as
+`from easy3d import Cube` with `from rix import Cube`.
 
-## Windows wheel matrix
+## First game
 
-Private binary wheels are produced and tested for CPython 3.11, 3.12 and 3.13
-on Windows x64. A consumer installing one of these wheels does not need CMake,
-MSVC, Ninja or network access:
-
-```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --no-index --find-links C:\private\easy3d-wheels easy3d==0.1.0
-.\.venv\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-```
-
-Release builders run from an x64 Visual Studio developer PowerShell:
-
-```powershell
-.\scripts\build_wheel_matrix.ps1
-```
-
-The script rejects unverified interpreter entries, creates ABI-specific wheels,
-installs each one into a clean generated environment, runs `pip check`, performs
-a native import/version smoke test and, by default, runs the complete Python
-test and typing suite. `-SkipTests` is intended only for a metadata-only rebuild
-after that exact source revision has already passed the full matrix. Every wheel
-contains `LICENSE`, `LICENSES/THIRD_PARTY.md`, `_easy3d.pyi` and `py.typed`.
-
-## Interactive graphics smoke test
-
-Run this only from an interactive Windows desktop session with a D3D11-capable
-graphics driver:
-
-```powershell
-python examples/00_window/main.py
-```
-
-A resizable slate-blue window should appear. Resize it, then close it with the
-window close control or Escape. The console logs the selected bgfx renderer and
-PCI vendor/device IDs. This is a manual GPU test and is deliberately excluded
-from `pytest` and CTest.
-
-For a short visible open/close lifecycle diagnostic (still requiring a real
-Windows desktop/GPU), run `python tests/manual/window_lifecycle.py`.
-
-To exercise the Phase 1 indexed mesh path, build the native preset and run:
-
-```powershell
-cmake --build --preset windows-release --target easy3d_geometry_lifecycle
-.\build\windows-release\Release\easy3d_geometry_lifecycle.exe
-```
-
-The ten-second diagnostic renders a vertex-colored triangle, solid-color cube
-and UV sphere above a nearest-filtered sRGB checker-textured plane with
-asymmetric UV corner markers, using
-indexed GPU buffers and depth testing. It is manual
-and deliberately excluded from CTest. The D3D11 shader headers are reviewed
-build inputs generated from the adjacent `.sc` sources. Maintainers can rebuild
-them using the pinned bgfx compiler with
-`cmake --preset windows-debug -DEASY3D_REGENERATE_SHADERS=ON`.
-
-## Scene and entity lifecycle
-
-Entities belong to an explicit scene, either through a context or a `scene=`
-argument:
+### Add 3D to Pygame
 
 ```python
-from easy3d import Entity, Game, Scene
+import pygame
+import rix
 
-world = Scene("main")
-with world:
-    player = Entity("player")
-    prop = Entity("prop")
+pygame.init()
+screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+clock = pygame.time.Clock()
+world = rix.World(screen)
+rix.Cube(world, color="orange", angular_velocity=(0, 45, 0), collider=False)
 
-game = Game("My Game")
-game.load_scene(world)
+while world.running:
+    dt = clock.tick(60) / 1000
+    for event in pygame.event.get():
+        world.handle_event(event)
+    world.update(dt)
+    world.render()
+
+world.close()  # release bgfx before pygame destroys the HWND
+pygame.quit()
 ```
 
-Run `python examples/01_entity_lifecycle/main.py` for creation, destruction,
-stale-handle rejection, unload, and cleanup. See
-[docs/api-contract.md](docs/api-contract.md) for the implemented contract.
+Direct GPU mode makes RIX the only presenter: do not call
+`pygame.display.flip()` or `update()`. For existing software-display projects,
+use `World(screen, mode="surface")`; `world.render()` then returns a Surface for
+Pygame to blit and flip. See [the ownership and integration guide](docs/pygame-integration-plan.md).
+For a before/after conversion that keeps an existing event loop, sprites,
+fonts, controls, mixer, and UI, see [the Pygame migration guide](docs/guides/migrating-a-pygame-project.md).
 
-Renderable entities use the same explicit scene ownership:
+Install without the optional Pygame dependency using `.[dev]` when only the
+standalone API is needed.
+
+### Standalone RIX
 
 ```python
-from easy3d import Cube, Game, Plane, Scene
+from rix import Cube, Game, Light, Plane, Player
 
-world = Scene("world")
-with world:
-    Plane(size=(20, 20), color=(0.25, 0.3, 0.35))
-    Cube(position=(0, 0.5, 0), color=(0.2, 0.75, 0.95))
-
-game = Game("My World")
-game.load_scene(world)
+game = Game("My RIX Game", (1280, 720), vsync=True)
+Plane(y=-0.5, size=30, collider=True)
+Cube(position=(0, 0.5, 0), color="orange", physics=True)
+Light("directional", rotation=(-45, -30, 0), intensity=1.0)
+Player(position=(0, 0.1, 6), controller="first_person")
 game.run()
 ```
 
-Run `python tests/manual/render_components.py` for the visible Phase 1.7
-primitive/OBJ diagnostic or `python tests/manual/lighting_debug.py` for the
-Phase 1.8 lighting, scene-camera, and native debug-line diagnostic. Public scene
-mutation while `Game.run()` is accepted only from lifecycle callbacks on the
-gameplay thread; other threads remain rejected during native traversal.
-
-Run `python examples/02_first_world/main.py` for a complete Phase 1 scene with
-transformed primitives, a decoded texture, loaded OBJ/MTL geometry, lights,
-debug axes, and explicit teardown. Add `--seconds 5` for an automated close.
-
-`Camera` is available as a typed perspective/orthographic configuration with
-position/Euler rotation, `look_at`, basis vectors, configurable vertical FOV or
-orthographic height, near/far planes, and view/projection matrix queries. Assign it with
-`scene.camera = camera`. `Light("ambient", ...)` and
-`Light("directional", ...)` create native light components; render entities are
-lit by default and accept `lit=False` for emissive-style unlit color. Persistent
-native debug lines are available through `easy3d.debug.line` and
-`easy3d.debug.axes`.
-
-The renderer conservatively culls transformed mesh bounds and hardware-instances
-matching shared meshes/materials/textures when their scale is uniform. Read the
-latest completed frame through `game.renderer_stats`.
-
-## Graphics quality presets
-
-Select a capability-checked renderer profile with
-`Game(graphics_preset="low" | "medium" | "high" | "ultra")`. `medium` is the
-default. Low preserves the original direct-lighting path. Medium adds the
-metallic/roughness lighting variant, an HDR intermediate target, tone mapping,
-gamma correction and FXAA. High adds a 2048-pixel directional shadow map;
-Ultra raises it to 4096 pixels. Unsupported render-target formats or texture
-sizes fall back at startup instead of preventing window creation.
-
-`MeshRenderer` exposes `metallic`, `roughness`, `emission`, `casts_shadows` and
-`receives_shadows`. These are deliberately small material controls rather than
-a full authored PBR workflow: this release has no image-based lighting,
-environment probes, cascaded shadows or point-light shadows. Inspect
-`game.renderer_stats.enhanced_lighting`, `.postprocessing`, `.fxaa`, `.shadows`
-and `.shadow_resolution` to distinguish requested settings from features that
-are active on the current adapter.
-
-## Native HUD and 2D overlays
-
-Every scene owns a retained `scene.hud`. Panels, PNG/JPEG sprites, built-in
-Roboto text and buttons are submitted by the native renderer after the 3D and
-postprocess passes:
+Or use a manual standalone loop over the same native scheduler:
 
 ```python
-status = scene.hud.text("Ready", position=(24, 24), font_size=28)
-icon = scene.hud.sprite("assets/icon.png", anchor="top_right",
-                        position=(-24, 24), size=(64, 64))
-play = scene.hud.button(
-    "Play",
-    anchor="bottom",
-    position=(0, -32),
-    on_click=lambda _: setattr(status, "text", "Playing"),
-)
+import rix
+
+with rix.Game() as game:
+    cube = rix.Cube(color="blue", collider=False)
+    while game.running:
+        dt = game.tick(60)
+        cube.ry += 90 * dt
 ```
 
-Nine anchors use the same point as the viewport anchor and the element pivot,
-so `(0, 0)` keeps a centered element centered and a top-right element flush to
-the top-right corner. `HUD.stack("horizontal" | "vertical", ...)` provides a
-small explicit layout group; call `relayout()` after changing child sizes.
-Buttons use the topmost enabled hit at the mouse press edge and may safely
-mutate the active scene in their callback. `RendererStats.ui_elements` and
-`.ui_draw_calls` expose the last native overlay submission. Run
-`python examples/09_hud/main.py` for the complete resizable example.
+Default player controls are WASD or arrows to move, mouse to look, Space to
+jump, Shift to sprint, Ctrl to crouch, and Escape to release pointer capture.
+All actions are remappable through `game.input.bind(...)`.
 
-## Diagnostics and typing
+Built-in world geometry is collidable by default. Use `collider=False` for a
+decorative, parented, or universal-motion visual; use `physics=True` for a
+dynamic body or a kinematic rigid body for a scripted moving obstacle.
 
-Validate supported assets without parsing exception strings:
-
-```python
-from easy3d import diagnose_asset
-
-report = diagnose_asset("assets/character.glb")
-if not report.ok:
-    print(report.error_type, report.error_message)
-else:
-    print(report.summary, report.warnings)
-```
-
-`AssetDiagnostic` reports the detected kind, resolved path, counts/dimensions,
-importer warnings, and the exact captured Easy3D exception type/message. The
-check is synchronous and uses the real importer/decoder, so a successful report
-is meaningful and can warm native caches.
-
-Attach `DebugOverlay(game, scene=scene)` before `game.run()` to show smoothed
-FPS, frame time, entity/culling/draw/UI counts, scheduler overruns, callback
-maximum, dropped simulation time, and actually active graphics features through
-the native HUD. Run `python examples/12_diagnostics/main.py --seconds 3` for an
-annotated finite example.
-
-The wheel contains `py.typed` and the native extension stub. Developer tests run
-both strict mypy consumer coverage and `mypy.stubtest` runtime/stub parity; run
-them directly with `python -m mypy` and the command recorded in the API contract.
-
-## Native WAV and positional audio
-
-Each `Game` owns an `Audio` cache and native mixer. Load uncompressed 16-bit
-mono/stereo WAV files once, then start ordinary or camera-relative voices:
-
-```python
-sound = game.audio.load("assets/chime.wav")
-effect = game.audio.play(sound, volume=0.8)
-engine = game.audio.play(
-    game.audio.load("assets/engine.wav"),
-    loop=True,
-    position=(3, 0, -2),
-    minimum_distance=1,
-    maximum_distance=30,
-)
-engine.position = moving_entity.world_position
-```
-
-The SDL3 device adapter requests 48 kHz stereo float output. The mixer converts
-source rates, mixes/clips concurrent voices, applies distance attenuation and
-equal-power left/right panning against the active scene camera, and retires
-completed voices. `game.audio.available` is true only while a device is active;
-device failure is reported but does not prevent a graphics window from running.
-Run `python examples/10_audio/main.py` with headphones for the moving-source
-example.
-
-## Input and action maps
-
-Keyboard, mouse, and the primary SDL gamepad feed a thread-safe snapshot owned
-by each `Game`. Bind named actions with digital controls or scaled/deadzoned
-axes:
-
-```python
-from easy3d import Binding, Game
-
-game = Game("Input example")
-game.input.bind(
-    "move_x",
-    Binding("key:d"),
-    Binding("key:a", scale=-1),
-    Binding("gamepad:left_x", deadzone=0.2),
-)
-game.input.bind("jump", "key:space", "gamepad:a")
-game.input.pointer_lock_requested = True
-```
-
-Use `state`, `value`, `down`, `pressed`, and `released` for actions. Raw helpers
-cover keys, mouse buttons, gamepad buttons/axes, pointer position/delta/wheel,
-focus, and gamepad identity. Focus loss clears held controls and releases active
-relative mouse mode; the requested lock is restored on focus gain. Run
-`python tests/manual/input_diagnostic.py --seconds 10 --pointer-lock` for a
-timed native diagnostic.
-
-## Script lifecycle and timing
-
-Subclass any `Entity` or primitive and define the hooks you need:
-
-```python
-class Spinner(Cube):
-    def awake(self):
-        self.speed = 45.0
-
-    def fixed_update(self, dt):
-        pass
-
-    def update(self, dt):
-        self.rotation.y += self.speed * dt
-
-    def on_destroy(self):
-        print("removed")
-```
-
-`awake` runs once after registration, `start` once on first activation,
-`fixed_update` on the fixed simulation clock, then `update` and `late_update`
-once per rendered frame. Destruction and scene clear requested from a callback
-commit after the current phase. `game.scheduler_stats` reports fixed ticks,
-dropped catch-up time, overruns, and per-hook call timing. Development defaults
-to fail-fast callback errors; pass `fail_fast=False` to quarantine a failing
-script and inspect `game.script_errors`.
-
-## Gameplay utilities
-
-The standalone utility layer has no window, renderer, or scene dependency:
-
-```python
-from easy3d import ClockDomain, Cooldown, EventBus, StateMachine, Tween
-
-states = StateMachine()
-states.add_state("idle")
-states.add_state("running", on_update=lambda dt: print(dt))
-states.add_transition("idle", "running", "move")
-states.start("idle")
-states.trigger("move")
-
-fire = Cooldown(0.25, time_domain=ClockDomain.SIMULATION)
-events = EventBus()
-hit_subscription = events.subscribe("hit", lambda damage: print(damage))
-fade = Tween(0.0, 1.0, 0.5, autostart=True,
-             time_domain=ClockDomain.RENDER)
-```
-
-Advance simulation timers/cooldowns from `fixed_update`, render tweens/timers
-from `update`, and wall-clock objects with `poll()`. Mixing clock domains raises
-instead of silently changing gameplay timing. State callbacks cannot reenter
-the same machine; event listeners are synchronous, priority ordered, and safe
-to add/remove while a snapshot is being dispatched.
-
-## Physics components
-
-Each `Scene` lazily owns an isolated Jolt Physics world. Gravity is already a
-typed scene property and the scheduler advances initialized worlds exactly once
-after every `fixed_update` phase:
-
-```python
-from easy3d import Collider, Entity, PhysicsMaterial, Rigidbody, Scene
-
-scene = Scene("physics")
-scene.gravity = (0, -9.81, 0)
-floor = Entity("floor", scene=scene)
-floor.add_component(Collider, half_extents=(5, 0.5, 5),
-                    material=PhysicsMaterial(friction=0.8))
-
-ball = Entity("ball", scene=scene)
-ball.position = (0, 3, 0)
-ball.add_component(Collider, shape="sphere", radius=0.5)
-body = ball.add_component(Rigidbody, mass=2.0)
-body.add_impulse((2, 0, 0))
-```
-
-`Cube`, `Plane`, and `Sphere` also accept `collider=True` for a matching static
-collider. Add a `Rigidbody` to make it dynamic or kinematic. Distances are
-meters, mass is kilograms, force is newtons, impulse is newton-seconds, and
-velocity is meters/second. Dynamic transforms are solver-owned; use
-`body.teleport(...)` for an explicit discontinuity. `easy3d.physics` provides
-nearest/all raycasts, sphere/capsule casts, and box/sphere overlaps with layer,
-trigger and entity-exclusion filters:
-
-```python
-from easy3d import physics
-
-hit = physics.raycast(scene, (0, 2, 0), (0, -1, 0), 10)
-nearby = physics.overlap_sphere(scene, (0, 0, 0), 3,
-                                include_triggers=False)
-```
-
-Entity scripts can define `on_collision_enter/stay/exit(event)` and
-`on_trigger_enter/stay/exit(event)`. Events are immutable snapshots dispatched
-on the gameplay thread after the native fixed step; Jolt never calls Python.
-
-For player movement, `Player` creates a native capsule motor rather than a
-Python transform script:
-
-```python
-from easy3d import Cube, Player, Scene
-
-scene = Scene("course")
-Cube(position=(0, -0.5, 0), size=(20, 1, 20), collider=True, scene=scene)
-player = Player(position=(0, 0, 0), controller="first_person", scene=scene)
-
-# Call from fixed_update. +Z input means camera-forward (-Z at heading 0).
-player.move((0, 0, 1), heading_degrees=0, jump=False)
-print(player.controller.grounded, player.controller.linear_velocity)
-```
-
-Use `controller="third_person"` to face the entity toward its movement while
-retaining camera-heading-relative input. Speed, acceleration, air control,
-jump speed, slope limit, step height, radius, and total capsule height are
-construction-time configuration. Character transforms are solver-owned; use
-`player.controller.teleport(...)` for an explicit discontinuity.
-
-For multiplayer prediction, both client and authority can feed the same native
-motor with strictly increasing commands:
-
-```python
-from easy3d import PredictedCharacterController
-
-prediction = PredictedCharacterController(
-    player.controller, role="client", max_pending_inputs=256
-)
-command = prediction.submit((0, 0, 1), heading_degrees=0)
-# Send command through the game's bounded input protocol. On authority:
-# authority_prediction.accept(command)
-```
-
-Client submission applies immediately and retains an immutable bounded queue;
-the server path rejects duplicate or stale sequences before changing native
-motor input. After its fixed step, authority calls `make_correction(server_tick)`.
-The client passes that state to `reconcile(..., fixed_delta_seconds=...)`, which
-snaps the native motor and replays only the unacknowledged bounded suffix.
-`correction_stats` reports error and replay work. Transport attachment remains
-explicit rather than choosing a game-specific input/RPC route.
-
-Remote replicas continue to use the bounded transform history. A
-`RemoteTransformInterpolator` subtracts a configured tick delay and reports
-interpolation calls/applied-object totals; it neither extrapolates nor changes
-the locally predicted character.
-
-Transform replication has a per-connection token budget (256 KiB/s, 64 KiB
-burst and 60 ticks/s by default), stable priority callback, and optional
-`SpatialInterest(radius)` observer filter. These controls affect only
-replaceable transforms; reliable lifecycle, values, match state, and RPCs remain
-coherent. Once a client acknowledges a full transform, subsequent values use a
-64-byte quantized delta instead of the 76-byte full frame where representable.
-A missing client baseline requests one reliable recovery and forces the next
-relevant snapshot full.
-
-The finite authoritative arena examples combine these multiplayer layers with
-health, teams, score and match state:
+Run the maintained examples from the repository root:
 
 ```powershell
-python examples/08_network_arenas/main.py --mode cooperative --clients 4
-python examples/08_network_arenas/main.py --mode competitive --clients 4
+python examples\00_window\main.py
+python examples\03_obstacle_course\main.py
+python examples\09_hud\main.py
+python examples\10_audio\main.py
+python examples\11_gltf\main.py
+python examples\12_diagnostics\main.py
+python examples\13_autotexture\main.py
+python examples\14_face_culling\main.py --view outside
+python examples\beginner\01_first_scene.py
+python examples\beginner\02_spinning_cube.py
+python examples\beginner\03_manual_loop.py
+python examples\beginner\10_inside_a_cube.py
+python examples\beginner\13_projectile_motion.py
+python examples\pygame\01_cube.py
+python examples\pygame\04_overlay.py
+python examples\pygame\07_inventory_viewport.py
+python examples\pygame\14_hybrid_minigame.py
 ```
 
-Clients can only send owner-gated attack requests. Authority validates playing
-phase, distance, target kind/team and current health before applying damage,
-score and `MATCH_END`.
+## Main API
 
-Run the complete Phase 2 course with:
+- `World`: Pygame-owned window/event/timing adapter with direct GPU and Surface
+  compatibility modes, fixed-step update, event forwarding, overlays, and
+  deterministic close order. `attach_session()` optionally pumps one or more
+  `rix.net.Session` objects from the same `world.update(dt)` call.
+- `SurfaceTexture`, `Viewport`, and `Billboard`: explicit Pygame Surface GPU
+  upload/update, camera-independent buffered Rect-sized previews, and
+  camera-facing world sprites. Full-window Surface mode and an explicitly
+  blocking Viewport refresh remain synchronous compatibility operations.
+
+- `Game`: native window, update/fixed-update callbacks, timers, input, renderer
+  settings, scene ownership, blocking `run()`, manual `tick()`, and clean
+  shutdown.
+- `Scene` and `Entity`: generational native handles, transform hierarchy,
+  components, fixed-step linear/angular motion, facing/launch helpers, lookup,
+  explicit destruction, and context-local construction.
+- `Cube`, `Sphere`, `Plane`, and `Model`: convenient renderable entities.
+- `Player` and `CharacterController`: first-/third-person movement, jumping,
+  sprinting, crouching, slopes, steps, and camera follow.
+- `Collider`, `Rigidbody`, `Constraint`, and physics queries: Jolt-backed rigid
+  bodies, triggers, collision callbacks, raycasts, sweeps, overlaps, CCD, and
+  joints.
+- `Camera`, `Light`, `Lighting`, and `Skybox`: projections, camera control,
+  bounded directional/point/spot lights, per-light shadows, procedural/image
+  skies, post-processing presets, and debug drawing.
+- `HUD`, layout containers, text, sprites, bars, and buttons: retained native
+  2D overlays with pointer interaction.
+- `Audio`, `Sound`, and `AudioSource`: WAV playback, mixing, and positional
+  audio.
+- `load_obj`, `load_gltf`, `TextureCache`, and `ModelCache`: pinned native asset
+  import and caching.
+- AutoTexture: filename-only missing PNG generation, 16 px/unit world-scale
+  tiling, cube atlases, spherical/authored UVs, tangent-space normal maps,
+  roughness/metallic/emissive/AO maps, mipmaps, and development hot reload.
+- gameplay helpers: health, enemies, hitscan weapons, teams, scoring,
+  interactions, respawn, state machines, events, timers, cooldowns, and tweens.
+- beginner shortcuts: scalar movement/rotation, scene-free raycasts, raw
+  key/mouse helpers, one-call cached audio, attached health/weapons, and managed
+  timers/state machines/tweens.
+
+The ordered beginner learning path is in `docs/guides/README.md`. Advanced
+facades remain available at the root and are curated in `rix.advanced`;
+timing utilities are also available from `rix.time`.
+
+The public API is typed. Native implementation details remain private behind
+`rix._rix` and are not compatibility promises.
+
+## Optional multiplayer and state systems
+
+`rix.net` provides safe named messages, independent headless servers and
+clients, listen hosting, LAN discovery, direct-IP connections, registered
+prefab/state replication, bounded RPCs, interest management, and supported
+character prediction/reconciliation. It does not initialize Pygame, a window,
+or a renderer unless the application does so separately. Hosted matchmaking,
+arbitrary NAT traversal, a managed relay service, and generic rollback are not
+claimed.
+
+The complete public sample set is indexed in
+`examples/networking/README.md`: twelve examples use real native connections
+and the thirteenth is clearly labeled as a finite seeded impairment simulator.
+State and screen-management examples are indexed under `examples/states`.
+
+```python
+from rix import net
+
+session = net.Session()
+session.join("127.0.0.1:7777")
+
+@session.on("chat")
+def chat(sender: net.Player, *, text: str) -> None:
+    print(sender.id, text)
+```
+
+## Textures in one line
+
+```python
+import rix as e3
+
+game = e3.Game()
+e3.Plane(size=30, texture="assets/grass.png")
+e3.Cube(y=1, texture="assets/brick.png")
+game.run()
+```
+
+If either PNG is missing, RIX creates an editable template and neutral normal
+map without overwriting existing work. Defaults are 16 pixels/world-unit,
+nearest filtering, automatic mapping, companion-map discovery, normal strength
+1.0, and hot reload. See `examples/13_autotexture` and `features.md` for atlas,
+material-map, runtime-editing, and cache details.
+
+## Face culling
+
+Renderable constructors accept `double_sided=True` as the simple way to draw
+both sides of a surface, or `cull_mode="back" | "front" | "none"` for explicit
+control:
+
+```python
+room = Cube(size=20, double_sided=True, collider=False)
+portal = Plane(cull_mode="front")
+
+room.cull_mode = "back"
+portal.double_sided = True
+```
+
+The default is back-face culling. Front-face culling is useful for inward-only
+shells, while `"none"` renders both sides. These settings affect rendering and
+shadows only; colliders, physics, raycasts, depth testing, and mesh geometry do
+not change. Imported glTF `doubleSided` metadata is honored unless the `Model`
+constructor or its live renderer property supplies an explicit override.
+
+## Multiple lights and skyboxes
+
+```python
+from rix import Game, Light, Skybox
+
+game = Game(graphics_preset="high")
+game.skybox = Skybox(top="skyblue", horizon="lightblue", bottom="#101624")
+Light("point", position=(2, 3, 0), color="orange", intensity=12, range=10)
+spot = Light("spot", position=(0, 7, 3), intensity=18, range=18,
+             inner_angle=24, angle=48, casts_shadows=True,
+             shadow_resolution=1024)
+spot.look_at((0, 0, 0))
+game.run()
+```
+
+Assign a 2:1 image directly with `game.skybox = "assets/sky.png"`, or use
+`Skybox(cubemap="assets/sky_faces")` for right/left/top/bottom/back/front PNG
+faces. Missing sky assets are generated once and never overwrite an existing
+file. `None` disables the sky and `"default"` restores it. Presets bound light
+and shadow work; `RendererStats` exposes active/culled lights and shadow
+selection, pass, and memory counters. Run `examples/15_lighting_sky/main.py`
+with `--sky procedural`, `--sky panorama`, or `--sky cubemap`.
+
+## Testing and validation
 
 ```powershell
-python examples/03_obstacle_course/main.py
+python -m pytest -q
+python -m mypy
+cmake --build --preset windows-debug
+ctest --preset windows-debug
 ```
 
-It combines the public input, script, character, rigid-body, trigger, lighting,
-camera, and scene APIs. Use WASD/arrows to move, mouse or Q/E to turn, Space to
-jump, and Escape to stop. See
-[`examples/03_obstacle_course/README.md`](examples/03_obstacle_course/README.md)
-for its gamepad controls and bounded smoke-run command.
-
-Advanced physics keeps the same component model. Capsules and convex hulls may
-be dynamic; OBJ triangle meshes are static-only. Fast dynamic bodies opt into
-linear-cast CCD, and scene-owned fixed/distance joints live in
-`easy3d.physics`:
-
-```python
-from easy3d import Cube, Model, Rigidbody
-from easy3d import physics
-
-level = Model("assets/level.obj", collider="mesh", scene=scene)
-projectile = Cube(position=(0, 2, 0), collider=True, scene=scene)
-projectile.add_component(Rigidbody, continuous=True)
-rope = physics.distance_constraint(anchor, projectile,
-                                   minimum_distance=2, maximum_distance=4)
-rope.remove()
-```
-
-PNG and JPEG assets can be validated and shared without exposing renderer
-handles:
-
-```python
-from easy3d.assets import TextureCache
-
-textures = TextureCache()
-grass = textures.load("assets/grass.png", color_space="srgb")
-print(grass.width, grass.height, grass.byte_size)
-```
-
-Cache keys use the canonical path and color space. Missing files raise
-`MissingAssetError`; unsupported or malformed files raise `AssetError`.
-
-## Network transport simulation
-
-Phase 3.1 exposes a dependency-free transport contract and deterministic
-two-endpoint impairment link for headless protocol tests:
-
-```python
-from easy3d import network
-
-link = network.SimulatedLink(latency=0.050, loss=0.05, seed=7)
-link.first.poll()  # connected event
-link.second.poll()
-status = link.first.send(b"bounded payload")
-link.advance(0.050)
-events = link.second.poll()
-```
-
-Queue limits, latency and jitter are in-process test controls. The pinned
-GameNetworkingSockets backend can be inspected and exercised independently:
-
-```python
-from easy3d import network
-
-print(network.backend_info())
-assert network.backend_smoke_test()
-```
-
-Phase 5 adds three explicitly synthetic profiles: LAN (5 ms one-way, 2 ms
-jitter, 0% loss), regional (40/10 ms, 1%), and adverse (100/30 ms, 5%). Use
-their seeded packet simulator for exact traces:
-
-```python
-from easy3d import network
-
-link = network.ADVERSE_NETWORK_CONDITION.create_simulated_link(seed=53)
-```
-
-For real GameNetworkingSockets retransmission tests, construct/start the
-backend owners first and enter `network.impair_backend(profile)` around connect
-and exchange. This setting is process-global, test-only, non-nestable, and
-always reset on scope exit. The profiles are regression scenarios, not claims
-about all Internet connections or performance guarantees.
-
-The backend is GameNetworkingSockets 1.6.1, statically linked with a matching
-Protobuf runtime and Windows BCrypt support. The smoke test initializes the
-process-global runtime and sends a reliable message through a native loopback
-socket pair. See [docs/network-protocol.md](docs/network-protocol.md).
-
-The internal Phase 3.3 handshake now validates exact protocol/schema versions,
-client/server roles and negotiated payload limits with bounded disconnect
-reasons. Phase 3.4 attaches it to a nonblocking numeric IPv4/IPv6 client:
-
-```python
-from easy3d import network
-
-client = network.Client(
-    timeout=5.0,
-    on_connect=lambda active: print("connected", active.remote_address),
-    on_disconnect=lambda _client, event: print(event.disconnect_code, event.reason),
-)
-client.connect("127.0.0.1", 27020)
-
-# Call from the owning gameplay thread each update.
-for event in client.poll():
-    if event.type is network.EventType.MESSAGE:
-        print(event.payload)
-```
-
-`connect()` is asynchronous; `poll()` advances native callbacks, handshake,
-timeouts and Python callback dispatch.
-
-Phase 3.5 adds an authoritative server that never creates a window or renderer:
-
-```python
-from easy3d import Scene, Server
-
-server = Server(port=7777, max_players=16, tick_rate=60)
-server.load_scene(Scene("World"))
-server.run()
-```
-
-`Server.run()` paces the existing Python lifecycle/native physics scheduler at
-the configured fixed rate. `Server.step()` executes one deterministic tick for
-tests and embedding. Connect, message and disconnect callbacks are dispatched
-only by `run()`, `step()` or `poll()` on their calling thread. Run
-`python examples/04_dedicated_server/main.py --seconds 2` for a bounded
-headless example.
-
-Phase 3.6 composes the same objects for a one-process listen host without
-sharing their authority:
-
-```python
-from easy3d import ListenServer, Scene
-
-host = ListenServer(port=7777)
-host.load_scene(Scene("AuthorityWorld"))  # authority role only
-host.run()
-```
-
-`host.authority` is the sole scene/scheduler owner; `host.client` is a real
-loopback client with no scene. `ListenEvent.role` and `local_host` keep the two
-role-local connection-ID spaces explicit and distinguish later remote clients.
-Run `python examples/05_listen_host/main.py` for bounded input/reply and clean
-shutdown output. LAN discovery, rendered-Game attachment, replication and
-player identity remain separate milestones.
-
-LAN discovery is an explicit, polled control plane; it never connects a client
-automatically:
-
-```python
-from easy3d import LanDiscoveryAnnouncer, LanDiscoveryBrowser
-
-# Server process: poll alongside the authoritative server.
-announcer = LanDiscoveryAnnouncer("My LAN game", game_port=7777)
-announcer.start()
-announcer.poll()
-
-# Client process: send one query, then poll during its response window.
-browser = LanDiscoveryBrowser()
-browser.start()
-browser.refresh()
-for server in browser.poll():
-    print(server.name, server.address, server.port, server.compatible)
-```
-
-The default UDP discovery port is `47777`; responses advertise the separate
-GNS game port. The cache, packet size, server name, per-poll work, response
-window and announcer rate-limit state are bounded. Discovery is IPv4-broadcast
-only, unauthenticated, and confined by router/subnet policy. Direct numeric
-IPv4/IPv6 connection remains available when broadcast is unavailable.
-
-On Windows, allow inbound UDP `47777` for the Python/game executable on the
-**Private** network profile if Defender Firewall prompts or blocks the
-announcer. Easy3D never changes firewall state. Administrators who explicitly
-want a development rule can use an elevated PowerShell command such as:
-
-```powershell
-$pythonExe = (Get-Command python).Source
-New-NetFirewallRule -DisplayName "Easy3D LAN discovery (dev)" `
-  -Direction Inbound -Action Allow -Protocol UDP -LocalPort 47777 `
-  -Profile Private -Program $pythonExe
-```
-
-Remove that optional rule with
-`Remove-NetFirewallRule -DisplayName "Easy3D LAN discovery (dev)"`. Limited
-broadcast (`255.255.255.255`) normally stays on the local subnet; guest Wi-Fi
-client isolation, VPNs, virtual adapters and router policy may block it. A
-known directed broadcast such as `192.168.1.255` can be passed as
-`target_address`, but it is still subject to network policy. Use the numeric
-server address with `network.Client.connect()` as the fallback.
-
-Phase 3.8 provides a supported process-boundary transport sample. Run these in
-two terminals:
-
-```powershell
-python examples/06_two_process/main.py server --bind 127.0.0.1 --port 7777 --one-shot
-python examples/06_two_process/main.py client --address 127.0.0.1 --port 7777
-```
-
-For LAN use, bind `0.0.0.0` and replace the client address with the server's
-numeric LAN address. `Client`, `Server`, and `ListenServer` accept a
-`peer_timeout` (10 seconds by default) that configures GNS connected-peer
-liveness detection separately from connection/handshake deadlines. Detection
-is poll-driven and may include backend scheduling time; it is not a gameplay
-heartbeat or latency promise. The sample proves bounded byte exchange and
-disconnect recovery only—entity replication, RPC and player identity begin in
-Phase 4.
-
-Phase 4.1 adds server-owned entity lifecycle without yet synchronizing fields or
-transforms:
-
-```python
-from easy3d import Entity, PrefabRegistry, ServerReplication
-
-prefabs = PrefabRegistry(schema_version=1)
-prefabs.register(1, "crate", lambda scene: Entity("crate", scene=scene))
-replication = ServerReplication(server, prefabs)
-crate = replication.spawn(1)  # stable NetworkObjectId, broadcast by authority
-replication.despawn(crate.id)
-```
-
-Clients use `ClientReplication(client, scene, prefabs)` and poll it instead of
-polling that `Client` directly. A late join receives a bounded fingerprinted
-snapshot before live spawn/despawn frames. Prefab IDs are explicit schema, and
-network object IDs are monotonic authority IDs—not scene/entity handles.
-
-Prefab schemas can declare bounded `NetworkVar` fields (`bool`, signed int64,
-finite float64, safe UTF-8 string, or bytes). Authority mirrors are writable;
-client mirrors are read-only. Call `ServerReplication.flush()` after changing
-values to queue only dirty fields. Late join receives current values.
-
-Register transform replication explicitly with
-`prefabs.register_transform(prefab_id)`. The authority calls
-`replication.flush_transforms(simulation_tick)` to send fixed, replaceable
-position/quaternion/scale samples. Clients retain a bounded history and call
-`mirror.interpolate_transforms(render_tick)` to apply clamped remote-actor
-interpolation. An optional `relevance_filter(connection, object)` suppresses
-transform traffic per connection without hiding lifecycle or field state;
-late join receives the current relevant transform baseline. This is not client
-prediction, spatial interest indexing, ownership, or reconciliation.
-
-RPCs are explicit frozen prefab schema, never dynamic Python lookup. Register a
-stable ID, direction, positional primitive argument bounds, handler, delivery
-and rate/ownership policy with `PrefabRegistry.register_rpc(...)`. Clients use
-`mirror.call_server(...)`; authorities use `replication.call_client(...)` or
-`broadcast_rpc(...)`. Server handlers receive `(entity, sender, *arguments)`;
-client handlers receive `(entity, *arguments)`. Ownership is authority-assigned
-with `set_owner` and is intentionally not client writable.
-
-Gameplay hooks can use `@server_only` or `@client_only`; unmarked hooks are
-shared. `current_script_role()` reports the scheduler role only during a
-callback. Listen hosts run one server scheduler—the local client transport does
-not own or advance an authority scene.
-
-`register_match_state()` declares a canonical replicated match object.
-`ServerMatchState` owns legal waiting/countdown/playing/round-end/match-end
-transitions and simulation-tick deadlines; `ClientMatchState` is read-only and
-derives remaining display ticks from the replicated deadline. Late join uses
-the normal complete `NetworkVar` snapshot, so it receives current match phase,
-round, deadline and revision before becoming synchronized.
-
-Run the finite real-transport cooperative sandbox with:
-
-```powershell
-python examples/07_coop_sandbox/main.py --clients 2
-python examples/07_coop_sandbox/main.py --clients 8
-```
-
-It assigns one server-owned player per connection, validates owner-gated move
-and hit requests, synchronizes every remote transform, and requires two clients
-to destroy the authoritative replicated crate. It is headless loopback evidence,
-not a rendered or 32-player performance claim.
-
-Clients can call `ClientReplication.request_resync()` after detecting an
-application baseline problem. The reliable request is sequence/rate guarded;
-the authority temporarily withholds live traffic, queues a fresh complete
-snapshot, and restores that peer to the live-ready set only on success.
-
-OBJ/MTL metadata and immutable shared meshes use the same asset layer:
-
-```python
-from easy3d.assets import ModelCache
-
-models = ModelCache()
-tree = models.load("assets/tree.obj")
-print(tree.triangle_count, len(tree.parts), len(tree.materials))
-```
-
-The initial importer triangulates faces, accepts positions/normals/UVs and
-vertex colors, generates flat normals when absent, splits parts by
-shape/material, and supports MTL diffuse color, dissolve, and `map_Kd`. See the
-API contract for explicit MTL/path limitations.
-
-glTF 2.0 `.gltf` and `.glb` assets use the same cache/model/collider path and
-add typed skeleton plus animation-clip metadata:
-
-```python
-from easy3d.assets import load_gltf
-
-asset = load_gltf("assets/character.glb")
-pose = asset.animations[0].sample(asset.skeleton, 0.5) if asset.skeleton else ()
-```
-
-The current D3D11 renderer draws static base-pose geometry; the sampled pose is
-available to tools/gameplay but GPU skin deformation is not claimed. Run
-`python examples/11_gltf/main.py --seconds 3` for a finite generated-asset
-window test. The supported subset and rejection limits are listed in the API
-contract and known-issues document.
-
-## Benchmarks
-
-After installation, run the small native-call harness with:
-
-```powershell
-python benchmarks/native_add.py --iterations 1000000
-```
-
-It measures Python-to-native call overhead; it is infrastructure, not an engine
-performance claim.
-
-For a visible renderer workload with frame-time distributions, process memory,
-frustum counters, and instancing counters, run:
-
-```powershell
-python benchmarks/render_cubes.py --count 10000 --seconds 10
-```
-
-The benchmark validates that every requested cube is either visible or culled
-and that multiple visible compatible cubes use instancing. Results are
-hardware/workload measurements, not general capacity guarantees.
-
-Run the finite 8/16/32-client real-loopback capacity gate with:
-
-```powershell
-python benchmarks/network_capacity.py --ticks 120 --warmup-ticks 20 --enforce-budget
-```
-
-It measures the documented dense all-to-all sample, validates every final
-replica, and enforces post-baseline CPU/RSS/tick/latency/byte budgets. See
-[`docs/benchmarks.md`](docs/benchmarks.md) for the exact machine, workload,
-results and limitations.
-
-Run the finite adverse-network lifecycle soak with:
-
-```powershell
-python benchmarks/network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse
-```
-
-It exercises bounded reliable input spam and rate limiting, rotating
-disconnect/reconnect/resynchronization cycles under configured lag/jitter/loss,
-then clean server-shutdown propagation. It terminates with nonzero status on an
-incorrect final report.
-
-## Scope and license
-
-Advanced lighting, broader asset pipelines, and multiplayer systems remain
-incomplete. The repository is private and
-proprietary; dependencies retain the
-licenses recorded in [LICENSES/THIRD_PARTY.md](LICENSES/THIRD_PARTY.md).
-
+Automated tests validate the native core and Python contracts. Window, audio,
+input-device, and visual quality checks still require an interactive Windows
+desktop. See `docs/progress.md` for recorded commands and `docs/known-issues.md`
+for current validation limits.
+
+## Build and dependency policy
+
+Dependencies are fetched at immutable commits and linked privately where
+possible. The active native dependency set is SDL3, bgfx/bx/bimg, GLM,
+tinyobjloader, cgltf, Jolt Physics, GameNetworkingSockets, and Protobuf. Python build tooling is pinned in
+`pyproject.toml`; license details are in `LICENSES/THIRD_PARTY.md`.
+
+The source version lives in `VERSION` and drives both the native and Python
+versions. This repository and its packages are private/proprietary.

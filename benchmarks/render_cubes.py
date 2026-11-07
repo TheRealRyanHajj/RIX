@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict
 from statistics import median
 
-from easy3d import Camera, Cube, Game, Light, Scene
+from rix import Camera, Cube, Game, Light, Scene
 
 
 class _ProcessMemoryCountersEx(ctypes.Structure):
@@ -91,7 +91,7 @@ def run(*, count: int, seconds: float) -> dict[str, object]:
     memory_after_creation = _memory_bytes()
 
     game = Game(
-        f"Easy3D renderer benchmark — {count} cubes",
+        f"RIX renderer benchmark — {count} cubes",
         (1280, 720),
         vsync=False,
     )

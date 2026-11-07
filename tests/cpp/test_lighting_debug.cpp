@@ -51,6 +51,50 @@ int main() {
             // Expected.
         }
 
+        const easy3d::EntityHandle point = scene.create_entity("point");
+        scene.add_light_component(point,
+                                  easy3d::LightKind::Point,
+                                  {1.0F, 0.2F, 0.1F, 1.0F},
+                                  8.0F,
+                                  12.0F,
+                                  20.0F,
+                                  45.0F,
+                                  true,
+                                  512,
+                                  0.004F);
+        scene.set_light_properties(point, 15.0F, 24.0F, 50.0F, true, 1024, 0.003F);
+        const easy3d::LightComponent& point_light = scene.light_component(point);
+        if (point_light.kind != easy3d::LightKind::Point ||
+            point_light.range != 15.0F || !point_light.casts_shadows ||
+            point_light.shadow_resolution != 1024 || point_light.shadow_bias != 0.003F) {
+            std::cerr << "point light properties did not persist\n";
+            return 11;
+        }
+        try {
+            scene.set_light_properties(point, 10.0F, 60.0F, 40.0F, false, 0, 0.002F);
+            std::cerr << "invalid spot cone angles were accepted\n";
+            return 12;
+        } catch (const std::invalid_argument&) {
+            // Expected.
+        }
+
+        scene.set_procedural_skybox({0.1F, 0.2F, 0.8F, 1.0F},
+                                    {0.6F, 0.7F, 0.9F, 1.0F},
+                                    {0.02F, 0.03F, 0.05F, 1.0F},
+                                    1.25F,
+                                    30.0F);
+        if (!scene.skybox().has_value() ||
+            scene.skybox()->kind != easy3d::SkyboxKind::Procedural ||
+            scene.skybox()->brightness != 1.25F) {
+            std::cerr << "procedural skybox did not persist\n";
+            return 13;
+        }
+        scene.clear_skybox();
+        if (scene.skybox().has_value()) {
+            std::cerr << "skybox disable did not persist\n";
+            return 14;
+        }
+
         scene.add_debug_line({{0.0F, 0.0F, 0.0F},
                               {1.0F, 0.0F, 0.0F},
                               {1.0F, 0.0F, 0.0F, 1.0F},
@@ -83,10 +127,10 @@ int main() {
             return 9;
         }
 
-        std::cout << "easy3d_lighting_debug_tests: PASS\n";
+        std::cout << "rix_lighting_debug_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_lighting_debug_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_lighting_debug_tests: FAIL: " << error.what() << '\n';
         return 10;
     }
 }

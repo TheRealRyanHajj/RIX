@@ -8,11 +8,11 @@ from tempfile import TemporaryDirectory
 import threading
 import time
 
-from easy3d import Cube, Game, Model, Plane, Scene, Sphere
+from rix import Cube, Game, Model, Plane, Scene, Sphere
 
 
 def main(*, seconds: float = 10.0) -> None:
-    with TemporaryDirectory(prefix="easy3d_render_components_") as directory:
+    with TemporaryDirectory(prefix="rix_render_components_") as directory:
         model_path = Path(directory) / "pyramid.obj"
         model_path.write_text(
             "v -0.6 0 -0.6\n"
@@ -41,7 +41,7 @@ def main(*, seconds: float = 10.0) -> None:
             Sphere(position=(0.9, 0, 0), radius=0.65, color=(0.95, 0.75, 0.2))
             Model(model_path, position=(2.5, -0.5, 0), color=(0.5, 0.9, 0.4))
 
-        game = Game("Easy3D native render components", (960, 540), vsync=False)
+        game = Game("RIX native render components", (960, 540), vsync=False)
         game.load_scene(scene)
 
         def stop_later() -> None:

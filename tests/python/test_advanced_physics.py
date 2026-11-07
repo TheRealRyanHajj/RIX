@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import Collider, Cube, Entity, Model, PhysicsError, Rigidbody, Scene, Vec3
-from easy3d import physics
+from rix import Collider, Cube, Entity, Model, PhysicsError, Rigidbody, Scene, Vec3
+from rix import physics
 
 
 def _step(scene: Scene, count: int) -> None:

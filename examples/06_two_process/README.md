@@ -1,6 +1,6 @@
 # Two-process direct-IP sample
 
-Open two terminals in the repository root after installing Easy3D. For local
+Open two terminals in the repository root after installing RIX. For local
 loopback, start the server:
 
 ```powershell
@@ -20,10 +20,15 @@ the configured timeout. `--peer-timeout` configures connected-peer liveness
 detection separately from the overall sample timeout; its default is 10
 seconds and observation remains poll/backend-scheduling dependent.
 
+For a bounded transport-recovery check, pass the same `--profile lan`,
+`regional`, or `adverse` option to both processes. The option applies
+GameNetworkingSockets' process-local test lag, jitter, and loss controls; it is
+for development/CI rather than a production connection setting.
+
 For two Windows machines on the same LAN, bind the server to `0.0.0.0` and pass
 its numeric LAN IPv4 address to the client. Windows Defender Firewall must allow
 the Python/game executable's inbound UDP game port on the Private profile.
-Easy3D does not change firewall rules. Guest Wi-Fi isolation, VPNs and router
+RIX does not change firewall rules. Guest Wi-Fi isolation, VPNs and router
 policy can block peers. The opt-in discovery API can suggest an address, but
 the direct numeric command remains the fallback.
 

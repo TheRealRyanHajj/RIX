@@ -4,7 +4,8 @@ import time
 
 import pytest
 
-from easy3d import NetworkError, network
+from rix import net as network
+from rix.net import NetworkError
 
 
 def _connected(link: network.SimulatedLink) -> None:
@@ -53,7 +54,7 @@ def test_direct_ip_client_validation_metrics_and_timeout_callback() -> None:
     with pytest.raises(NetworkError, match="not active"):
         client.disconnect()
 
-    # Port 1 is intentionally not an Easy3D listener. An immediate transport
+    # Port 1 is intentionally not an RIX listener. An immediate transport
     # refusal or the client-owned 20 ms handshake deadline are both valid; in
     # either case poll dispatches one typed failure callback on this thread.
     client.connect("127.0.0.1", 1)

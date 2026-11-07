@@ -177,7 +177,7 @@ struct PartBuilder final {
         return found->second;
     }
     if (part.mesh.vertices.size() >= std::numeric_limits<std::uint32_t>::max()) {
-        throw AssetError("OBJ exceeds Easy3D's 32-bit vertex limit: " + path.string());
+        throw AssetError("OBJ exceeds RIX's 32-bit vertex limit: " + path.string());
     }
     const std::uint32_t result = static_cast<std::uint32_t>(part.mesh.vertices.size());
     part.mesh.vertices.push_back(
@@ -205,7 +205,7 @@ void append_flat_triangle(PartBuilder& part,
     const Vec3 normal = cross.normalized();
     for (std::size_t corner = 0; corner < indices.size(); ++corner) {
         if (part.mesh.vertices.size() >= std::numeric_limits<std::uint32_t>::max()) {
-            throw AssetError("OBJ exceeds Easy3D's 32-bit vertex limit: " + path.string());
+            throw AssetError("OBJ exceeds RIX's 32-bit vertex limit: " + path.string());
         }
         part.mesh.indices.push_back(static_cast<std::uint32_t>(part.mesh.vertices.size()));
         part.mesh.vertices.push_back({positions[corner],
@@ -213,6 +213,48 @@ void append_flat_triangle(PartBuilder& part,
                                       uv_at(attributes, indices[corner], path),
                                       color_at(attributes, indices[corner])});
     }
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> resolve_material_texture(
+    const std::string& filename,
+    const std::filesystem::path& directory,
+    const std::string& material_name,
+    const char* label) {
+    if (filename.empty()) {
+        return std::nullopt;
+    }
+    std::filesystem::path texture = filename;
+    if (texture.is_relative()) {
+        texture = directory / texture;
+    }
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(texture, error) || error) {
+        throw MissingAssetError("OBJ material '" + material_name +
+                                "' references a missing " + label + " texture: " +
+                                texture.string());
+    }
+    texture = std::filesystem::weakly_canonical(texture, error);
+    if (error) {
+        throw AssetError("failed to resolve OBJ " + std::string(label) +
+                         " texture path '" + texture.string() + "': " +
+                         error.message());
+    }
+    return texture;
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> discovered_companion(
+    const std::optional<std::filesystem::path>& base,
+    const char* suffix) {
+    if (!base.has_value()) {
+        return std::nullopt;
+    }
+    const std::filesystem::path candidate =
+        base->parent_path() / (base->stem().string() + suffix + ".png");
+    std::error_code error;
+    return std::filesystem::is_regular_file(candidate, error) && !error
+               ? std::optional<std::filesystem::path>(
+                     std::filesystem::weakly_canonical(candidate, error))
+               : std::nullopt;
 }
 
 [[nodiscard]] ModelMaterial convert_material(const tinyobj::material_t& source,
@@ -225,23 +267,36 @@ void append_flat_triangle(PartBuilder& part,
         std::clamp(static_cast<float>(source.diffuse[2]), 0.0F, 1.0F),
         std::clamp(static_cast<float>(source.dissolve), 0.0F, 1.0F),
     };
-    if (!source.diffuse_texname.empty()) {
-        std::filesystem::path texture = source.diffuse_texname;
-        if (texture.is_relative()) {
-            texture = directory / texture;
-        }
-        std::error_code error;
-        if (!std::filesystem::is_regular_file(texture, error) || error) {
-            throw MissingAssetError("OBJ material '" + material.name +
-                                    "' references a missing diffuse texture: " +
-                                    texture.string());
-        }
-        texture = std::filesystem::weakly_canonical(texture, error);
-        if (error) {
-            throw AssetError("failed to resolve OBJ diffuse texture path '" +
-                             texture.string() + "': " + error.message());
-        }
-        material.diffuse_texture = std::move(texture);
+    material.diffuse_texture = resolve_material_texture(
+        source.diffuse_texname, directory, material.name, "diffuse");
+    material.normal_texture = resolve_material_texture(
+        source.normal_texname, directory, material.name, "normal");
+    material.roughness_texture = resolve_material_texture(
+        source.roughness_texname, directory, material.name, "roughness");
+    material.metallic_texture = resolve_material_texture(
+        source.metallic_texname, directory, material.name, "metallic");
+    material.emissive_texture = resolve_material_texture(
+        source.emissive_texname, directory, material.name, "emissive");
+    material.ambient_occlusion_texture = resolve_material_texture(
+        source.ambient_texname, directory, material.name, "ambient-occlusion");
+    if (!material.normal_texture.has_value()) {
+        material.normal_texture = discovered_companion(material.diffuse_texture, "_normal");
+    }
+    if (!material.roughness_texture.has_value()) {
+        material.roughness_texture =
+            discovered_companion(material.diffuse_texture, "_roughness");
+    }
+    if (!material.metallic_texture.has_value()) {
+        material.metallic_texture =
+            discovered_companion(material.diffuse_texture, "_metallic");
+    }
+    if (!material.emissive_texture.has_value()) {
+        material.emissive_texture =
+            discovered_companion(material.diffuse_texture, "_emissive");
+    }
+    if (!material.ambient_occlusion_texture.has_value()) {
+        material.ambient_occlusion_texture =
+            discovered_companion(material.diffuse_texture, "_ao");
     }
     return material;
 }
@@ -263,13 +318,34 @@ void ModelData::validate() const {
             throw AssetError("model part references an out-of-range material");
         }
         part.mesh.validate();
+        const ModelMaterial& material = materials[part.material_index];
+        const bool textured = material.diffuse_texture.has_value() ||
+                              material.normal_texture.has_value() ||
+                              material.roughness_texture.has_value() ||
+                              material.metallic_texture.has_value() ||
+                              material.emissive_texture.has_value() ||
+                              material.ambient_occlusion_texture.has_value();
+        if (textured) {
+            const Vec2 first = part.mesh.vertices.front().uv;
+            const bool has_area = std::any_of(
+                part.mesh.vertices.begin(), part.mesh.vertices.end(),
+                [&](const Vertex& vertex) {
+                    return std::abs(vertex.uv.x - first.x) > 1.0e-6F ||
+                           std::abs(vertex.uv.y - first.y) > 1.0e-6F;
+                });
+            if (!has_area) {
+                throw AssetError("textured model part '" + part.name +
+                                 "' has no usable authored UV coordinates");
+            }
+        }
     }
     for (const ModelMaterial& material : materials) {
         if (!std::isfinite(material.metallic) || material.metallic < 0.0F ||
             material.metallic > 1.0F || !std::isfinite(material.roughness) ||
             material.roughness < 0.04F || material.roughness > 1.0F ||
             !std::isfinite(material.emission) || material.emission < 0.0F ||
-            material.emission > 100.0F) {
+            material.emission > 100.0F || !std::isfinite(material.normal_strength) ||
+            material.normal_strength < 0.0F || material.normal_strength > 8.0F) {
             throw AssetError("model material surface values are invalid");
         }
     }
@@ -377,6 +453,9 @@ std::shared_ptr<const ModelData> load_obj(const std::filesystem::path& path) {
                                     std::move(builder.mesh),
                                     material_index});
         }
+    }
+    for (ModelPart& part : model->parts) {
+        generate_tangents(part.mesh);
     }
     model->validate();
     return model;

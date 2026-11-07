@@ -24,3 +24,6 @@ CMakeUserPresets.json
 Thumbs.db
 .DS_Store
 
+# Runtime-editable output from the AutoTexture demonstration
+examples/13_autotexture/generated/
+

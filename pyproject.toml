@@ -6,13 +6,13 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "easy3d"
+name = "rix"
 dynamic = ["version"]
-description = "Private Windows-first Python/C++ 3D framework"
+description = "Private high-performance 3D extension for Pygame and Python"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-authors = [{ name = "Easy3D contributors" }]
+authors = [{ name = "RIX contributors" }]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "License :: Other/Proprietary License",
@@ -32,6 +32,9 @@ dev = [
     "mypy==1.18.2",
     "pytest==9.2.0",
 ]
+pygame = [
+    "pygame-ce==2.5.8",
+]
 
 [[tool.dynamic-metadata]]
 provider = "scikit_build_core.metadata.regex"
@@ -42,8 +45,8 @@ regex = '^(?P<value>[0-9]+\.[0-9]+\.[0-9]+)$'
 [tool.scikit-build]
 cmake.version = ">=3.26"
 ninja.version = ">=1.11"
-build-dir = "build/scikit-build/{wheel_tag}"
-wheel.packages = ["python/easy3d"]
+build-dir = "build/scikit-build-msvc/{wheel_tag}"
+wheel.packages = ["python/rix", "python/easy3d"]
 wheel.license-files = ["LICENSE", "LICENSES/THIRD_PARTY.md"]
 editable.mode = "redirect"
 sdist.include = [
@@ -66,5 +69,11 @@ python_version = "3.11"
 strict = true
 follow_imports = "silent"
 warn_unreachable = true
-files = ["python/easy3d/diagnostics.py", "tests/typecheck/public_api.py"]
+files = [
+    "python/rix/diagnostics.py",
+    "python/rix/net",
+    "python/rix/game_states.py",
+    "python/rix/utilities.py",
+    "tests/typecheck/public_api.py",
+]
 

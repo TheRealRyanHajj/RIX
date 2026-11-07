@@ -4,7 +4,9 @@ import time
 
 import pytest
 
-from easy3d import Entity, NetworkError, Scene, Server, network, replication
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import NetworkError, Server, replication
 
 
 def _registry() -> replication.PrefabRegistry:

@@ -28,6 +28,11 @@ void InputSystem::begin_frame() {
         action.state.pressed = false;
         action.state.released = false;
     }
+    for (auto& [name, state] : control_states_) {
+        (void)name;
+        state.pressed = false;
+        state.released = false;
+    }
 }
 
 void InputSystem::end_frame() {
@@ -35,10 +40,24 @@ void InputSystem::end_frame() {
     for (auto& [name, action] : actions_) {
         (void)name;
         const bool was_down = action.state.down;
+        bool binding_pressed = false;
+        bool binding_released = false;
+        for (const InputBinding& binding : action.bindings) {
+            if (binding.scale == 0.0F) {
+                continue;
+            }
+            const auto state = control_states_.find(binding.control);
+            if (state != control_states_.end()) {
+                binding_pressed = binding_pressed || state->second.pressed;
+                binding_released = binding_released || state->second.released;
+            }
+        }
         action.state.value = evaluate(action);
         action.state.down = std::abs(action.state.value) > 1.0e-6F;
-        action.state.pressed = !was_down && action.state.down;
-        action.state.released = was_down && !action.state.down;
+        action.state.pressed =
+            !was_down && (action.state.down || binding_pressed);
+        action.state.released =
+            !action.state.down && (was_down || binding_released);
     }
 }
 
@@ -51,7 +70,22 @@ void InputSystem::set_control(const std::string_view control, const float value)
     if (!focused_) {
         return;
     }
-    controls_[std::string(control)] = std::clamp(value, -1.0F, 1.0F);
+    const std::string name(control);
+    const float clamped = std::clamp(value, -1.0F, 1.0F);
+    InputActionState& state = control_states_[name];
+    const bool was_down = state.down;
+    state.value = clamped;
+    state.down = std::abs(clamped) > 1.0e-6F;
+    state.pressed = state.pressed || (!was_down && state.down);
+    state.released = state.released || (was_down && !state.down);
+    controls_[name] = clamped;
+}
+
+InputActionState InputSystem::control_state(const std::string_view control) const {
+    validate_control(control);
+    std::scoped_lock lock(mutex_);
+    const auto found = control_states_.find(std::string(control));
+    return found == control_states_.end() ? InputActionState{} : found->second;
 }
 
 float InputSystem::control_value(const std::string_view control) const {
@@ -140,7 +174,12 @@ void InputSystem::set_gamepad_connected(const bool connected, std::string name) 
     if (!connected) {
         for (auto& [control, value] : controls_) {
             if (control.starts_with("gamepad:")) {
+                InputActionState& state = control_states_[control];
+                const bool was_down = state.down;
                 value = 0.0F;
+                state.value = 0.0F;
+                state.down = false;
+                state.released = state.released || was_down;
             }
         }
     }
@@ -259,8 +298,12 @@ float InputSystem::evaluate(const Action& action) const noexcept {
 
 void InputSystem::reset_controls_locked() {
     for (auto& [control, value] : controls_) {
-        (void)control;
+        InputActionState& state = control_states_[control];
+        const bool was_down = state.down;
         value = 0.0F;
+        state.value = 0.0F;
+        state.down = false;
+        state.released = state.released || was_down;
     }
     pointer_.delta_x = 0.0F;
     pointer_.delta_y = 0.0F;

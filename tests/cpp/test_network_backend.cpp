@@ -9,7 +9,6 @@ int fail(const int code, const char* const message) {
     std::cerr << message << '\n';
     return code;
 }
-
 } // namespace
 
 int main() {

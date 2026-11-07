@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import AssetError, MissingAssetError
-from easy3d.assets import ModelCache, load_obj
+from rix import AssetError, MissingAssetError
+from rix.assets import ModelCache, load_obj
 
 
 def _write_model(tmp_path: Path) -> Path:

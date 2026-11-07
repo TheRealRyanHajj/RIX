@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from easy3d import (
+from rix import (
     Camera,
     Cube,
     Light,
@@ -58,7 +58,7 @@ def test_scene_camera_light_components_and_debug_lines() -> None:
 def test_light_validation_and_component_removal() -> None:
     scene = Scene("validation")
     with pytest.raises(ValueError, match="light type"):
-        Light("point", scene=scene)  # type: ignore[arg-type]
+        Light("area", scene=scene)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="non-negative"):
         Light("ambient", intensity=-1, scene=scene)
     assert scene.entity_count == 0
@@ -68,3 +68,30 @@ def test_light_validation_and_component_removal() -> None:
     assert not light.has_component(LightComponent)
     with pytest.raises(RuntimeError, match="no longer"):
         _ = light.intensity
+
+
+def test_multiple_point_and_spot_lights_have_live_native_properties() -> None:
+    scene = Scene("local lights")
+    point = Light(
+        "point", scene=scene, position=(1, 2, 3), color="orange",
+        intensity=4, range=12, casts_shadows=True, shadow_resolution=512,
+    )
+    spot = Light(
+        "spot", scene=scene, position=(-2, 4, 1), rotation=(-60, 20, 0),
+        range=18, inner_angle=20, angle=50,
+    )
+    second_sun = Light("directional", scene=scene, rotation=(-20, 80, 0))
+    assert scene.lights("point") == (point,)
+    assert scene.lights("spot") == (spot,)
+    assert second_sun in scene.lights("directional")
+    assert point.range == pytest.approx(12)
+    assert point.casts_shadows is True
+    assert point.shadow_resolution == 512
+    spot.angle = 60
+    spot.inner_angle = 25
+    spot.shadow_bias = 0.004
+    assert (spot.angle, spot.inner_angle, spot.shadow_bias) == pytest.approx(
+        (60, 25, 0.004)
+    )
+    with pytest.raises(ValueError, match="angles"):
+        spot.inner_angle = 80

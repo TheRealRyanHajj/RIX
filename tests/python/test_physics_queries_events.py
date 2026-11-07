@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from easy3d import Collider, CollisionEvent, Cube, Entity, Game, Rigidbody, Scene, Sphere
-from easy3d import physics
+from rix import Collider, CollisionEvent, Cube, Entity, Game, Rigidbody, Scene, Sphere
+from rix import physics
 
 
 def _begin(scene: Scene) -> Game:

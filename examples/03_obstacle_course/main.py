@@ -1,4 +1,4 @@
-"""Playable Phase 2 obstacle course using only Easy3D's public Python API."""
+"""Playable Phase 2 obstacle course using only RIX's public Python API."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import threading
 import time
 
-from easy3d import (
+from rix import (
     Camera,
     Collider,
     Cube,
@@ -17,7 +17,7 @@ from easy3d import (
     Scene,
     Sphere,
 )
-from easy3d.input import Binding
+from rix.input import Binding
 
 
 class CoursePlayer(Player):
@@ -26,12 +26,14 @@ class CoursePlayer(Player):
         self._automated = automated
         self._yaw = 0.0
         self._pitch = -8.0
+        self._camera_height = 1.55
+        self._jump_requested = False
         self.finished = False
         super().__init__(
             position=(0.0, 0.0, 3.0),
             controller="first_person",
-            speed=4.5,
-            acceleration=35.0,
+            move_speed=4.5,
+            move_acceleration=35.0,
             jump_speed=5.5,
             max_slope_degrees=48.0,
             step_height=0.45,
@@ -52,22 +54,35 @@ class CoursePlayer(Player):
         self.move(
             (movement.value("strafe"), 0.0, movement.value("forward")),
             heading_degrees=self._yaw,
-            jump=movement.pressed("jump"),
+            jump=self._jump_requested,
+            sprint=movement.down("sprint"),
+            crouch=movement.down("crouch"),
         )
+        self._jump_requested = False
 
     def update(self, dt: float) -> None:
-        del dt
         if self._game is not None:
+            self._jump_requested = (
+                self._jump_requested or self._game.input.pressed("jump")
+            )
             pointer_x, pointer_y = self._game.input.pointer.delta
             if self._game.input.pointer_locked:
                 self._yaw -= pointer_x * 0.1
                 self._pitch = max(-85.0, min(85.0, self._pitch - pointer_y * 0.1))
             if self._game.input.pressed("quit"):
                 self._game.stop()
+        target_height = 0.95 if self.controller.crouched else 1.55
+        self._camera_height += (target_height - self._camera_height) * min(
+            1.0, dt * 12.0
+        )
         camera = Camera(
-            position=(self.position.x, self.position.y + 1.55, self.position.z),
+            position=(
+                self.position.x,
+                self.position.y + self._camera_height,
+                self.position.z,
+            ),
             rotation=(self._pitch, self._yaw, 0.0),
-            vertical_fov_degrees=70.0,
+            vertical_fov_degrees=76.0 if self.controller.sprinting else 70.0,
             far_plane=200.0,
         )
         self.scene.camera = camera
@@ -96,13 +111,17 @@ def _bind_controls(game: Game) -> None:
     )
     game.input.bind(
         "turn",
-        Binding("key:e", 1.0),
-        Binding("key:q", -1.0),
         Binding("key:right", 1.0),
         Binding("key:left", -1.0),
         Binding("gamepad:right_x", 1.0, 0.15),
     )
     game.input.bind("jump", "key:space", "gamepad:a")
+    game.input.bind("sprint", "key:left_shift", "key:right_shift")
+    game.input.bind("crouch", "key:left_ctrl", "key:right_ctrl")
+    # Reserved actions: deliberately unconsumed so games can assign behavior later.
+    game.input.bind("tab", "key:tab")
+    game.input.bind("q", "key:q")
+    game.input.bind("e", "key:e")
     game.input.bind("quit", "key:escape")
     game.input.pointer_lock_requested = True
 
@@ -182,6 +201,7 @@ def build_course(
             position=(0.0, 1.0, -18.0),
             size=(4.0, 2.0, 0.35),
             color=(0.2, 0.95, 0.45, 0.55),
+            collider=False,
             name="Finish trigger",
         )
         finish.add_component(
@@ -195,7 +215,7 @@ def build_course(
 
 
 def run(*, seconds: float | None = None) -> None:
-    game = Game("Easy3D — Physics Obstacle Course", (1280, 720), vsync=True)
+    game = Game("RIX — Physics Obstacle Course", (1280, 720), vsync=True)
     scene, player = build_course(game=game)
     game.load_scene(scene)
     if seconds is not None:

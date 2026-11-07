@@ -4,14 +4,47 @@ import math
 
 import pytest
 
-from easy3d import (
+from rix import (
     ClockDomain,
     Cooldown,
+    Cube,
     EventBus,
+    Game,
     StateMachine,
     Timer,
     Tween,
 )
+
+
+def test_game_manages_timer_state_machine_and_entity_tween_once() -> None:
+    game = Game()
+    fired: list[str] = []
+    timer = Timer(0.05, callback=lambda _timer: fired.append("timer"))
+    timer_handle = game.manage_timer(timer)
+
+    machine = StateMachine()
+    machine.add_state("active")
+    machine.start("active")
+    actor = Cube()
+    actor.add_state_machine(machine)
+    tween = actor.animate("y", to=2, duration=0.2)
+    with pytest.raises(ValueError, match="already managed"):
+        game.manage_timer(timer)
+    with pytest.raises(ValueError, match="animatable"):
+        actor.animate("name", to=2, duration=0.2)
+
+    game._scheduler.begin_run()
+    game._scheduler.advance(game.scene, 0.1)
+    assert fired == ["timer"]
+    assert not timer_handle.active
+    assert machine.time_in_state == pytest.approx(0.1)
+    assert actor.y == pytest.approx(1.0)
+    game._scheduler.advance(game.scene, 0.1)
+    assert actor.y == pytest.approx(2.0)
+    assert tween.finished
+
+    actor.destroy()
+    game.close()
 
 
 def test_state_machine_lifecycle_event_guard_and_time_accounting() -> None:

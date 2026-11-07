@@ -342,34 +342,33 @@ void generate_normals(MeshData& mesh, const std::filesystem::path& path) {
     if (normals == nullptr) {
         generate_normals(mesh, path);
     }
+    generate_tangents(mesh);
     mesh.validate();
     return mesh;
 }
 
-[[nodiscard]] std::optional<std::filesystem::path> external_base_color_texture(
-    const cgltf_material& material,
+[[nodiscard]] std::optional<std::filesystem::path> external_texture(
+    const cgltf_texture_view& view,
+    const std::string& material_name,
+    const char* label,
     const std::filesystem::path& directory,
     std::vector<std::string>& warnings) {
-    if (!material.has_pbr_metallic_roughness ||
-        material.pbr_metallic_roughness.base_color_texture.texture == nullptr ||
-        material.pbr_metallic_roughness.base_color_texture.texture->image == nullptr) {
+    if (view.texture == nullptr || view.texture->image == nullptr) {
         return std::nullopt;
     }
-    const cgltf_image& image =
-        *material.pbr_metallic_roughness.base_color_texture.texture->image;
+    const cgltf_image& image = *view.texture->image;
     if (image.buffer_view != nullptr || image.uri == nullptr ||
         std::string_view(image.uri).starts_with("data:")) {
-        warnings.push_back("embedded base-color image for material '" +
-                           name_or(material.name, "unnamed") +
-                           "' is not rendered by the Phase 6.4 base-pose path");
+        warnings.push_back("embedded " + std::string(label) + " image for material '" +
+                           material_name + "' is not rendered by the base-pose path");
         return std::nullopt;
     }
     std::filesystem::path texture =
         decoded_external_path(image.uri, directory, "image URI");
     std::error_code error;
     if (!std::filesystem::is_regular_file(texture, error) || error) {
-        throw MissingAssetError("glTF material '" + name_or(material.name, "unnamed") +
-                                "' references a missing base-color image: " +
+        throw MissingAssetError("glTF material '" + material_name +
+                                "' references a missing " + label + " image: " +
                                 texture.string());
     }
     texture = std::filesystem::weakly_canonical(texture, error);
@@ -378,6 +377,23 @@ void generate_normals(MeshData& mesh, const std::filesystem::path& path) {
                          "': " + error.message());
     }
     return texture;
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> companion_texture(
+    const std::optional<std::filesystem::path>& base,
+    const char* suffix) {
+    if (!base.has_value()) {
+        return std::nullopt;
+    }
+    const std::filesystem::path candidate =
+        base->parent_path() / (base->stem().string() + suffix + ".png");
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(candidate, error) || error) {
+        return std::nullopt;
+    }
+    const std::filesystem::path canonical =
+        std::filesystem::weakly_canonical(candidate, error);
+    return error ? std::nullopt : std::optional<std::filesystem::path>(canonical);
 }
 
 void import_materials(const cgltf_data& data,
@@ -389,6 +405,7 @@ void import_materials(const cgltf_data& data,
         ModelMaterial material;
         material.name = name_or(source.name, "material_" + std::to_string(index));
         material.authored_surface = true;
+        material.double_sided = source.double_sided != 0;
         if (source.has_pbr_metallic_roughness) {
             const auto& pbr = source.pbr_metallic_roughness;
             material.diffuse_color = {
@@ -410,7 +427,61 @@ void import_materials(const cgltf_data& data,
             0.0F,
             100.0F);
         material.diffuse_texture =
-            external_base_color_texture(source, directory, model.warnings);
+            source.has_pbr_metallic_roughness
+                ? external_texture(source.pbr_metallic_roughness.base_color_texture,
+                                   material.name,
+                                   "base-color",
+                                   directory,
+                                   model.warnings)
+                : std::nullopt;
+        material.normal_texture = external_texture(source.normal_texture,
+                                                   material.name,
+                                                   "normal",
+                                                   directory,
+                                                   model.warnings);
+        material.emissive_texture = external_texture(source.emissive_texture,
+                                                     material.name,
+                                                     "emissive",
+                                                     directory,
+                                                     model.warnings);
+        material.ambient_occlusion_texture = external_texture(source.occlusion_texture,
+                                                              material.name,
+                                                              "occlusion",
+                                                              directory,
+                                                              model.warnings);
+        if (source.has_pbr_metallic_roughness) {
+            const auto packed = external_texture(
+                source.pbr_metallic_roughness.metallic_roughness_texture,
+                material.name,
+                "metallic-roughness",
+                directory,
+                model.warnings);
+            material.roughness_texture = packed;
+            material.metallic_texture = packed;
+            material.packed_metallic_roughness = packed.has_value();
+        }
+        if (!material.normal_texture.has_value()) {
+            material.normal_texture = companion_texture(material.diffuse_texture, "_normal");
+        }
+        if (!material.roughness_texture.has_value()) {
+            material.roughness_texture =
+                companion_texture(material.diffuse_texture, "_roughness");
+        }
+        if (!material.metallic_texture.has_value()) {
+            material.metallic_texture =
+                companion_texture(material.diffuse_texture, "_metallic");
+        }
+        if (!material.emissive_texture.has_value()) {
+            material.emissive_texture =
+                companion_texture(material.diffuse_texture, "_emissive");
+        }
+        if (!material.ambient_occlusion_texture.has_value()) {
+            material.ambient_occlusion_texture =
+                companion_texture(material.diffuse_texture, "_ao");
+        }
+        material.normal_strength = source.normal_texture.texture != nullptr
+                                       ? std::clamp(source.normal_texture.scale, 0.0F, 8.0F)
+                                       : 1.0F;
         if (source.alpha_mode == cgltf_alpha_mode_blend ||
             source.alpha_mode == cgltf_alpha_mode_mask) {
             model.warnings.push_back("material '" + material.name +

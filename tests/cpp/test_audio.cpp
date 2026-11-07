@@ -105,10 +105,10 @@ int main() {
         } catch (const std::invalid_argument&) {
         }
 
-        std::cout << "easy3d_audio_tests: PASS\n";
+        std::cout << "rix_audio_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_audio_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_audio_tests: FAIL: " << error.what() << '\n';
         return 13;
     }
 }

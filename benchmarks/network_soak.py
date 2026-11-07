@@ -1,4 +1,4 @@
-"""Finite reconnect, spam, loss, and shutdown soak for Easy3D networking."""
+"""Finite reconnect, spam, loss, and shutdown soak for RIX networking."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ import json
 import struct
 import time
 
-from easy3d import Entity, NetworkError, Scene, Server, network, replication
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import NetworkError, Server
+from rix.net import replication
 
 
 PLAYER = 1
@@ -73,7 +76,7 @@ def run_soak(
     ):
         raise ValueError("inputs_per_client must be in [17, 1000]")
     if not isinstance(profile, network.NetworkCondition):
-        raise TypeError("profile must be an easy3d.network.NetworkCondition")
+        raise TypeError("profile must be an rix.net.NetworkCondition")
 
     owner_box: list[replication.ServerReplication] = []
     players: dict[network.ConnectionId, replication.NetworkObjectId] = {}

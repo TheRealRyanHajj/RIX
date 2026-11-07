@@ -4,6 +4,7 @@
 #include "easy3d/renderer.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -32,9 +33,9 @@ enum class TextureWrap {
 };
 
 struct TextureSampler final {
-    TextureFilter min_filter{TextureFilter::Linear};
-    TextureFilter mag_filter{TextureFilter::Linear};
-    TextureFilter mip_filter{TextureFilter::Linear};
+    TextureFilter min_filter{TextureFilter::Nearest};
+    TextureFilter mag_filter{TextureFilter::Nearest};
+    TextureFilter mip_filter{TextureFilter::Nearest};
     TextureWrap wrap_u{TextureWrap::Repeat};
     TextureWrap wrap_v{TextureWrap::Repeat};
 
@@ -57,6 +58,7 @@ struct ImageData final {
     std::uint32_t height{0};
     TextureColorSpace color_space{TextureColorSpace::Srgb};
     std::vector<std::uint8_t> rgba8;
+    std::uint64_t revision{1};
 
     void validate() const;
     [[nodiscard]] std::size_t byte_size() const noexcept;
@@ -74,23 +76,41 @@ public:
 
     [[nodiscard]] std::shared_ptr<const ImageData> load(
         const std::filesystem::path& path,
-        TextureColorSpace color_space = TextureColorSpace::Srgb);
+        TextureColorSpace color_space = TextureColorSpace::Srgb,
+        bool hot_reload = true);
+    [[nodiscard]] std::size_t poll_changes(
+        std::chrono::milliseconds minimum_interval = std::chrono::milliseconds{250}) const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
     void clear() noexcept;
 
 private:
+    struct Entry final {
+        std::shared_ptr<ImageData> image;
+        std::filesystem::file_time_type modified{};
+        bool hot_reload{true};
+    };
+
     mutable std::mutex mutex_;
-    std::unordered_map<std::string, std::shared_ptr<const ImageData>> images_;
+    mutable std::unordered_map<std::string, Entry> images_;
+    mutable std::chrono::steady_clock::time_point last_poll_{};
 };
 
 struct ModelMaterial final {
     std::string name{"default"};
     Color diffuse_color{};
     std::optional<std::filesystem::path> diffuse_texture;
+    std::optional<std::filesystem::path> normal_texture;
+    std::optional<std::filesystem::path> roughness_texture;
+    std::optional<std::filesystem::path> metallic_texture;
+    std::optional<std::filesystem::path> emissive_texture;
+    std::optional<std::filesystem::path> ambient_occlusion_texture;
     float metallic{0.0F};
     float roughness{0.5F};
     float emission{0.0F};
+    float normal_strength{1.0F};
+    bool packed_metallic_roughness{false};
     bool authored_surface{false};
+    bool double_sided{false};
 };
 
 struct ModelPart final {

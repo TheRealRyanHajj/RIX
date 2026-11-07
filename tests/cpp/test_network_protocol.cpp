@@ -27,7 +27,6 @@ int fail(const int code, const char* const message) {
     std::cerr << message << '\n';
     return code;
 }
-
 void write_u32(std::vector<std::uint8_t>& data,
                const std::size_t offset,
                const std::uint32_t value) {
@@ -36,7 +35,6 @@ void write_u32(std::vector<std::uint8_t>& data,
     data.at(offset + 2) = static_cast<std::uint8_t>((value >> 16U) & 0xffU);
     data.at(offset + 3) = static_cast<std::uint8_t>((value >> 24U) & 0xffU);
 }
-
 struct CompletedHandshake final {
     ProtocolHandshake client;
     ProtocolHandshake server;
@@ -67,7 +65,6 @@ easy3d::detail::HandshakeUpdate reject_hello(std::vector<std::uint8_t> hello) {
     static_cast<void>(server.start());
     return server.receive(hello);
 }
-
 } // namespace
 
 int main() {
@@ -83,7 +80,6 @@ int main() {
             compatible.server.negotiated_maximum_message_size() != 16 * 1024) {
             return fail(1, "compatible peers did not negotiate the bounded minimum");
         }
-
         easy3d::SimulatedNetwork transport;
         static_cast<void>(transport.first().poll(1));
         static_cast<void>(transport.second().poll(1));
@@ -127,7 +123,6 @@ int main() {
             transported_client.state() != HandshakeState::Established) {
             return fail(29, "handshake did not complete across the transport contract");
         }
-
         try {
             static_cast<void>(compatible.client.start());
             return fail(2, "a handshake could be started twice");

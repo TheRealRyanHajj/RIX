@@ -21,11 +21,9 @@ int fail(const int code, const char* const message) {
     std::cerr << message << '\n';
     return code;
 }
-
 std::vector<std::uint8_t> bytes(const std::string& value) {
     return {value.begin(), value.end()};
 }
-
 std::unique_ptr<easy3d::NetworkServer> listening_server(
     easy3d::NetworkServerConfig config) {
     for (std::uint16_t port = 32200; port < 32300; ++port) {
@@ -40,7 +38,6 @@ std::unique_ptr<easy3d::NetworkServer> listening_server(
     }
     throw std::runtime_error("could not bind a localhost server test port");
 }
-
 std::vector<easy3d::TransportEvent> connect_clients(
     easy3d::NetworkServer& server,
     const std::vector<easy3d::NetworkClient*>& clients,
@@ -63,7 +60,6 @@ std::vector<easy3d::TransportEvent> connect_clients(
     }
     return server_events;
 }
-
 std::vector<easy3d::TransportEvent> wait_for_server_messages(
     easy3d::NetworkServer& server,
     const std::size_t count) {
@@ -82,7 +78,6 @@ std::vector<easy3d::TransportEvent> wait_for_server_messages(
     }
     return result;
 }
-
 std::vector<easy3d::TransportEvent> wait_for_client_events(
     easy3d::NetworkClient& client,
     const std::size_t count) {
@@ -98,7 +93,6 @@ std::vector<easy3d::TransportEvent> wait_for_client_events(
     }
     return result;
 }
-
 std::atomic_bool raw_connected{false};
 std::atomic_int raw_end_reason{0};
 
@@ -115,7 +109,6 @@ void raw_status_callback(SteamNetConnectionStatusChangedCallback_t* info) {
         raw_end_reason.store(info->m_info.m_eEndReason);
     }
 }
-
 } // namespace
 
 int main() {

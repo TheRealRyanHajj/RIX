@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import Button, Panel, Scene, Text
+from rix import Button, Panel, Scene, Text
 
 
 _PNG_2X2 = (

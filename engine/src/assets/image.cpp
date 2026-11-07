@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <sstream>
 #include <system_error>
@@ -99,6 +100,9 @@ void ImageData::validate() const {
     if (expected != rgba8.size()) {
         throw AssetError("decoded texture must contain exactly width * height * 4 RGBA8 bytes");
     }
+    if (revision == 0) {
+        throw AssetError("decoded texture revision must be nonzero");
+    }
 }
 
 std::size_t ImageData::byte_size() const noexcept {
@@ -154,24 +158,75 @@ std::shared_ptr<const ImageData> load_image(const std::filesystem::path& path,
 #else
     (void)bytes;
     (void)color_space;
-    throw AssetError("PNG/JPEG texture decoding requires an Easy3D graphics-enabled build: " +
+    throw AssetError("PNG/JPEG texture decoding requires an RIX graphics-enabled build: " +
                      canonical.string());
 #endif
 }
 
 std::shared_ptr<const ImageData> TextureCache::load(const std::filesystem::path& path,
-                                                    const TextureColorSpace color_space) {
+                                                    const TextureColorSpace color_space,
+                                                    const bool hot_reload) {
     const std::filesystem::path canonical = checked_canonical_path(path);
     const std::string key = cache_key(canonical, color_space);
     std::scoped_lock lock(mutex_);
     const auto found = images_.find(key);
     if (found != images_.end()) {
-        return found->second;
+        found->second.hot_reload = found->second.hot_reload || hot_reload;
+        return found->second.image;
     }
 
-    std::shared_ptr<const ImageData> image = load_image(canonical, color_space);
-    images_.emplace(key, image);
+    const auto decoded = load_image(canonical, color_space);
+    auto image = std::make_shared<ImageData>(*decoded);
+    std::error_code error;
+    const auto modified = std::filesystem::last_write_time(canonical, error);
+    images_.emplace(key, Entry{image, error ? std::filesystem::file_time_type{} : modified,
+                               hot_reload});
     return image;
+}
+
+std::size_t TextureCache::poll_changes(
+    const std::chrono::milliseconds minimum_interval) const noexcept {
+    try {
+        const auto now = std::chrono::steady_clock::now();
+        std::scoped_lock lock(mutex_);
+        if (last_poll_ != std::chrono::steady_clock::time_point{} &&
+            now - last_poll_ < minimum_interval) {
+            return 0;
+        }
+        last_poll_ = now;
+        std::size_t updated = 0;
+        for (auto& [key, entry] : images_) {
+            (void)key;
+            if (!entry.hot_reload || !entry.image) {
+                continue;
+            }
+            std::error_code error;
+            const auto modified =
+                std::filesystem::last_write_time(entry.image->source_path, error);
+            if (error || modified == entry.modified) {
+                continue;
+            }
+            // Remember this write even if decoding fails. A later editor save
+            // changes the timestamp and retries while the previous valid image
+            // remains active.
+            entry.modified = modified;
+            try {
+                const auto decoded =
+                    load_image(entry.image->source_path, entry.image->color_space);
+                const std::uint64_t revision = entry.image->revision + 1;
+                *entry.image = *decoded;
+                entry.image->revision = revision == 0 ? 1 : revision;
+                ++updated;
+            } catch (const std::exception& reload_error) {
+                std::cerr << "RIX texture reload kept previous image for '"
+                          << entry.image->source_path.string() << "': "
+                          << reload_error.what() << '\n';
+            }
+        }
+        return updated;
+    } catch (...) {
+        return 0;
+    }
 }
 
 std::size_t TextureCache::size() const noexcept {
@@ -182,6 +237,7 @@ std::size_t TextureCache::size() const noexcept {
 void TextureCache::clear() noexcept {
     std::scoped_lock lock(mutex_);
     images_.clear();
+    last_poll_ = {};
 }
 
 } // namespace easy3d

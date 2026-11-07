@@ -79,10 +79,10 @@ int main() {
             return 22;
         }
 
-        std::cout << "easy3d_frustum_tests: PASS\n";
+        std::cout << "rix_frustum_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_frustum_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_frustum_tests: FAIL: " << error.what() << '\n';
         return 23;
     }
 }

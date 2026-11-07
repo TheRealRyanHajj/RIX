@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
@@ -272,11 +273,16 @@ void validate_settings(const CharacterMotorSettings& settings) {
     }
     if (!std::isfinite(settings.speed) || settings.speed < 0.0F ||
         !std::isfinite(settings.acceleration) || settings.acceleration < 0.0F ||
-        !std::isfinite(settings.air_control) || settings.air_control < 0.0F ||
-        settings.air_control > 1.0F || !std::isfinite(settings.jump_speed) ||
+        !std::isfinite(settings.air_acceleration) || settings.air_acceleration < 0.0F ||
+        !std::isfinite(settings.ground_friction) || settings.ground_friction < 0.0F ||
+        !std::isfinite(settings.stop_speed) || settings.stop_speed < 0.0F ||
+        !std::isfinite(settings.air_speed_cap) || settings.air_speed_cap < 0.0F ||
+        !std::isfinite(settings.horizontal_speed_limit) ||
+        settings.horizontal_speed_limit < 0.0F || !std::isfinite(settings.jump_speed) ||
         settings.jump_speed < 0.0F) {
         throw std::invalid_argument(
-            "character speed/acceleration/jump must be non-negative and air control in [0, 1]");
+            "character movement, friction, caps, and jump values must be finite and "
+            "non-negative");
     }
     if (!std::isfinite(settings.max_slope_degrees) || settings.max_slope_degrees < 0.0F ||
         settings.max_slope_degrees >= 90.0F || !std::isfinite(settings.step_height) ||
@@ -284,13 +290,17 @@ void validate_settings(const CharacterMotorSettings& settings) {
         throw std::invalid_argument(
             "character slope must be in [0, 90) degrees and step height non-negative");
     }
-}
-
-[[nodiscard]] float approach(const float current,
-                             const float target,
-                             const float maximum_delta) noexcept {
-    if (current < target) return std::min(current + maximum_delta, target);
-    return std::max(current - maximum_delta, target);
+    if (!std::isfinite(settings.sprint_multiplier) || settings.sprint_multiplier < 1.0F ||
+        !std::isfinite(settings.crouch_height) ||
+        settings.crouch_height <= settings.radius * 2.0F ||
+        settings.crouch_height > settings.height ||
+        !std::isfinite(settings.crouch_speed_multiplier) ||
+        settings.crouch_speed_multiplier < 0.0F ||
+        settings.crouch_speed_multiplier > 1.0F) {
+        throw std::invalid_argument(
+            "character sprint multiplier must be at least 1, crouch height must be in "
+            "(diameter, height], and crouch speed multiplier must be in [0, 1]");
+    }
 }
 
 [[nodiscard]] std::uint64_t body_pair_key(const JPH::BodyID first,
@@ -549,11 +559,20 @@ public:
 
     struct CharacterSlot final {
         JPH::Ref<JPH::CharacterVirtual> character;
+        JPH::RefConst<JPH::Shape> standing_shape;
+        JPH::RefConst<JPH::Shape> crouching_shape;
+        JPH::RefConst<JPH::Shape> standing_inner_shape;
+        JPH::RefConst<JPH::Shape> crouching_inner_shape;
         CharacterMotorSettings settings;
         CharacterMotorInput input;
+        Vec3 external_acceleration{};
+        float yaw_offset_degrees{0.0F};
         std::uint64_t last_input_sequence{0};
         std::uint32_t generation{1};
         bool alive{false};
+        bool crouched{false};
+        bool sprinting{false};
+        bool paused{false};
     };
 
     struct ConstraintSlot final {
@@ -573,7 +592,7 @@ public:
           contact_recorder(std::max<std::size_t>(
               1'024U, static_cast<std::size_t>(config.max_contact_constraints) * 4U)) {
         if (world_id == 0) {
-            throw PhysicsError("Easy3D exhausted native physics world identifiers");
+            throw PhysicsError("RIX exhausted native physics world identifiers");
         }
         physics_system.Init(config.max_bodies,
                             0,
@@ -670,41 +689,132 @@ public:
 
     void update_character(CharacterSlot& slot, const float delta_seconds) {
         JPH::CharacterVirtual& character = *slot.character;
+        if (slot.paused) {
+            character.SetLinearVelocity(JPH::Vec3::sZero());
+            return;
+        }
+
+        const bool wants_crouch = slot.input.crouch;
+        if (wants_crouch != slot.crouched) {
+            const JPH::Shape* shape = wants_crouch ? slot.crouching_shape.GetPtr()
+                                                   : slot.standing_shape.GetPtr();
+            const JPH::Shape* inner_shape = wants_crouch
+                                                ? slot.crouching_inner_shape.GetPtr()
+                                                : slot.standing_inner_shape.GetPtr();
+            const float maximum_penetration =
+                wants_crouch
+                    ? std::numeric_limits<float>::max()
+                    : 1.5F * physics_system.GetPhysicsSettings().mPenetrationSlop;
+            if (character.SetShape(
+                    shape,
+                    maximum_penetration,
+                    physics_system.GetDefaultBroadPhaseLayerFilter(character_layer),
+                    physics_system.GetDefaultLayerFilter(character_layer),
+                    {},
+                    {},
+                    temporary_allocator)) {
+                character.SetInnerBodyShape(inner_shape);
+                slot.crouched = wants_crouch;
+            }
+        }
         character.UpdateGroundVelocity();
 
-        const float heading = JPH::DegreesToRadians(slot.input.heading_degrees);
+        const float heading = JPH::DegreesToRadians(
+            slot.input.heading_degrees + slot.yaw_offset_degrees);
         const JPH::Quat heading_rotation =
             JPH::Quat::sRotation(JPH::Vec3::sAxisY(), heading);
-        const JPH::Vec3 local_movement(
-            slot.input.movement.x, 0.0F, -slot.input.movement.z);
+        JPH::Vec3 local_movement(slot.input.movement.x, 0.0F, -slot.input.movement.z);
+        const float input_length = local_movement.Length();
+        const float input_strength = std::min(input_length, 1.0F);
+        if (input_length > 1.0e-6F) {
+            local_movement /= input_length;
+        } else {
+            local_movement = JPH::Vec3::sZero();
+        }
         const JPH::Vec3 desired_direction = heading_rotation * local_movement;
-        const JPH::Vec3 desired_horizontal = desired_direction * slot.settings.speed;
+        slot.sprinting = slot.input.sprint && !slot.crouched &&
+                         !desired_direction.IsNearZero();
+        const float speed_multiplier = slot.crouched
+                                           ? slot.settings.crouch_speed_multiplier
+                                           : (slot.sprinting
+                                                  ? slot.settings.sprint_multiplier
+                                                  : 1.0F);
+        const float wish_speed = slot.settings.speed * speed_multiplier * input_strength;
 
         const bool on_walkable_ground = character.GetGroundState() ==
                                         JPH::CharacterVirtual::EGroundState::OnGround;
-        const float control = on_walkable_ground ? 1.0F : slot.settings.air_control;
-        const float maximum_delta = slot.settings.acceleration * control * delta_seconds;
         const JPH::Vec3 current = character.GetLinearVelocity();
-        JPH::Vec3 horizontal(approach(current.GetX(), desired_horizontal.GetX(), maximum_delta),
-                             0.0F,
-                             approach(current.GetZ(), desired_horizontal.GetZ(), maximum_delta));
-
-        JPH::Vec3 velocity = horizontal + current.GetY() * JPH::Vec3::sAxisY();
         const JPH::Vec3 ground_velocity = character.GetGroundVelocity();
         const bool moving_towards_ground = current.GetY() - ground_velocity.GetY() < 0.1F;
-        if (on_walkable_ground && moving_towards_ground) {
+        const bool grounded_for_movement = on_walkable_ground && moving_towards_ground;
+        const bool should_jump = grounded_for_movement && slot.input.jump;
+
+        JPH::Vec3 horizontal(current.GetX(), 0.0F, current.GetZ());
+        const JPH::Vec3 ground_horizontal(
+            ground_velocity.GetX(), 0.0F, ground_velocity.GetZ());
+        if (grounded_for_movement) horizontal -= ground_horizontal;
+
+        // Source-style ground friction is deliberately skipped on the exact
+        // takeoff frame. A correctly timed jump therefore carries momentum,
+        // while landing without jumping immediately begins slowing the player.
+        if (grounded_for_movement && !should_jump) {
+            const float horizontal_speed = horizontal.Length();
+            if (horizontal_speed > 1.0e-6F) {
+                const float control_speed =
+                    std::max(horizontal_speed, slot.settings.stop_speed);
+                const float dropped_speed =
+                    control_speed * slot.settings.ground_friction * delta_seconds;
+                const float new_speed = std::max(0.0F, horizontal_speed - dropped_speed);
+                horizontal *= new_speed / horizontal_speed;
+            }
+        }
+
+        // Acceleration only fills the component of velocity along wish direction.
+        // In air, the projected component is capped but orthogonal momentum is
+        // retained, which permits strafing curves without forward-only speed gain.
+        if (!desired_direction.IsNearZero() && wish_speed > 0.0F) {
+            const bool use_ground_acceleration = grounded_for_movement && !should_jump;
+            const float target_speed = use_ground_acceleration
+                                           ? wish_speed
+                                           : std::min(wish_speed, slot.settings.air_speed_cap);
+            const float acceleration = use_ground_acceleration
+                                           ? slot.settings.acceleration
+                                           : slot.settings.air_acceleration;
+            const float additional_speed =
+                target_speed - horizontal.Dot(desired_direction);
+            if (additional_speed > 0.0F) {
+                const float acceleration_speed =
+                    acceleration * wish_speed * delta_seconds;
+                horizontal += desired_direction *
+                              std::min(additional_speed, acceleration_speed);
+            }
+        }
+
+        if (slot.settings.horizontal_speed_limit > 0.0F &&
+            horizontal.LengthSq() > slot.settings.horizontal_speed_limit *
+                                        slot.settings.horizontal_speed_limit) {
+            horizontal = horizontal.Normalized() * slot.settings.horizontal_speed_limit;
+        }
+
+        JPH::Vec3 velocity = horizontal + current.GetY() * JPH::Vec3::sAxisY();
+        if (grounded_for_movement) {
             velocity = horizontal + ground_velocity;
-            if (slot.input.jump) velocity += slot.settings.jump_speed * JPH::Vec3::sAxisY();
+        }
+        if (should_jump) {
+            velocity = horizontal + ground_velocity +
+                       slot.settings.jump_speed * JPH::Vec3::sAxisY();
         }
         const JPH::Vec3 world_gravity = physics_system.GetGravity();
         velocity += world_gravity * delta_seconds;
+        velocity += to_jolt(slot.external_acceleration) * delta_seconds;
         character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(velocity));
 
         if (slot.settings.mode == CharacterMotorMode::FirstPerson) {
             character.SetRotation(heading_rotation);
         } else if (!desired_direction.IsNearZero()) {
             const float facing = std::atan2(-desired_direction.GetX(),
-                                            -desired_direction.GetZ());
+                                            -desired_direction.GetZ()) +
+                                 JPH::DegreesToRadians(slot.yaw_offset_degrees);
             character.SetRotation(
                 JPH::Quat::sRotation(JPH::Vec3::sAxisY(), facing));
         }
@@ -751,8 +861,18 @@ public:
                 ++slot.generation;
                 if (slot.generation == 0) slot.generation = 1;
             }
+            slot.standing_shape = nullptr;
+            slot.crouching_shape = nullptr;
+            slot.standing_inner_shape = nullptr;
+            slot.crouching_inner_shape = nullptr;
             slot.alive = false;
             slot.input = {};
+            slot.external_acceleration = {};
+            slot.yaw_offset_degrees = 0.0F;
+            slot.last_input_sequence = 0;
+            slot.crouched = false;
+            slot.sprinting = false;
+            slot.paused = false;
             free_character_indices.push_back(static_cast<std::uint32_t>(index));
         }
         character_count = 0;
@@ -962,36 +1082,42 @@ PhysicsCharacterHandle PhysicsWorld::create_character(
         throw PhysicsError("physics world character capacity exhausted");
     }
 
-    const float cylinder_half_height = 0.5F * (settings.height - 2.0F * settings.radius);
-    JPH::ShapeSettings::ShapeResult shape_result = JPH::RotatedTranslatedShapeSettings(
-        JPH::Vec3(0.0F, 0.5F * settings.height, 0.0F),
-        JPH::Quat::sIdentity(),
-        new JPH::CapsuleShape(cylinder_half_height, settings.radius)).Create();
-    if (shape_result.HasError()) {
-        const auto& error = shape_result.GetError();
-        throw std::invalid_argument("Jolt rejected character capsule: " +
-                                    std::string(error.data(), error.size()));
-    }
+    const auto create_capsule = [](const float height,
+                                   const float radius,
+                                   const float scale,
+                                   const char* const label) {
+        const float scaled_radius = radius * scale;
+        const float cylinder_half_height =
+            0.5F * (height - 2.0F * radius) * scale;
+        JPH::ShapeSettings::ShapeResult result = JPH::RotatedTranslatedShapeSettings(
+            JPH::Vec3(0.0F, 0.5F * height, 0.0F),
+            JPH::Quat::sIdentity(),
+            new JPH::CapsuleShape(cylinder_half_height, scaled_radius)).Create();
+        if (result.HasError()) {
+            const auto& error = result.GetError();
+            throw std::invalid_argument(std::string("Jolt rejected character ") + label +
+                                        " capsule: " +
+                                        std::string(error.data(), error.size()));
+        }
+        return JPH::RefConst<JPH::Shape>(result.Get());
+    };
+    JPH::RefConst<JPH::Shape> standing_shape =
+        create_capsule(settings.height, settings.radius, 1.0F, "standing");
+    JPH::RefConst<JPH::Shape> crouching_shape =
+        create_capsule(settings.crouch_height, settings.radius, 1.0F, "crouching");
+    JPH::RefConst<JPH::Shape> standing_inner_shape =
+        create_capsule(settings.height, settings.radius, 0.9F, "standing inner");
+    JPH::RefConst<JPH::Shape> crouching_inner_shape =
+        create_capsule(settings.crouch_height, settings.radius, 0.9F, "crouching inner");
 
     JPH::Ref<JPH::CharacterVirtualSettings> character_settings =
         new JPH::CharacterVirtualSettings();
-    character_settings->mShape = shape_result.Get();
+    character_settings->mShape = standing_shape;
     character_settings->mMaxSlopeAngle = JPH::DegreesToRadians(settings.max_slope_degrees);
     character_settings->mSupportingVolume =
         JPH::Plane(JPH::Vec3::sAxisY(), -settings.radius);
     character_settings->mEnhancedInternalEdgeRemoval = true;
-    JPH::ShapeSettings::ShapeResult inner_shape_result =
-        JPH::RotatedTranslatedShapeSettings(
-            JPH::Vec3(0.0F, 0.5F * settings.height, 0.0F),
-            JPH::Quat::sIdentity(),
-            new JPH::CapsuleShape(cylinder_half_height * 0.9F,
-                                  settings.radius * 0.9F)).Create();
-    if (inner_shape_result.HasError()) {
-        const auto& error = inner_shape_result.GetError();
-        throw std::invalid_argument("Jolt rejected character inner capsule: " +
-                                    std::string(error.data(), error.size()));
-    }
-    character_settings->mInnerBodyShape = inner_shape_result.Get();
+    character_settings->mInnerBodyShape = standing_inner_shape;
     character_settings->mInnerBodyLayer = character_layer;
 
     JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
@@ -1011,9 +1137,18 @@ PhysicsCharacterHandle PhysicsWorld::create_character(
     }
     Impl::CharacterSlot& slot = impl_->character_slots[index];
     slot.character = std::move(character);
+    slot.standing_shape = std::move(standing_shape);
+    slot.crouching_shape = std::move(crouching_shape);
+    slot.standing_inner_shape = std::move(standing_inner_shape);
+    slot.crouching_inner_shape = std::move(crouching_inner_shape);
     slot.settings = settings;
     slot.input = {};
+    slot.external_acceleration = {};
+    slot.yaw_offset_degrees = 0.0F;
     slot.last_input_sequence = 0;
+    slot.crouched = false;
+    slot.sprinting = false;
+    slot.paused = false;
     slot.alive = true;
     ++impl_->character_count;
     return PhysicsCharacterHandle{impl_->world_id, index, slot.generation};
@@ -1022,8 +1157,18 @@ PhysicsCharacterHandle PhysicsWorld::create_character(
 void PhysicsWorld::destroy_character(const PhysicsCharacterHandle handle) {
     Impl::CharacterSlot& slot = impl_->require_slot(handle);
     slot.character = nullptr;
+    slot.standing_shape = nullptr;
+    slot.crouching_shape = nullptr;
+    slot.standing_inner_shape = nullptr;
+    slot.crouching_inner_shape = nullptr;
     slot.alive = false;
     slot.input = {};
+    slot.external_acceleration = {};
+    slot.yaw_offset_degrees = 0.0F;
+    slot.last_input_sequence = 0;
+    slot.crouched = false;
+    slot.sprinting = false;
+    slot.paused = false;
     ++slot.generation;
     if (slot.generation == 0) slot.generation = 1;
     impl_->free_character_indices.push_back(handle.index);
@@ -1075,7 +1220,9 @@ CharacterMotorState PhysicsWorld::character_state(
             from_jolt_vec(slot.character->GetLinearVelocity()),
             from_jolt_vec(slot.character->GetGroundNormal()),
             slot.character->GetGroundState() ==
-                JPH::CharacterVirtual::EGroundState::OnGround};
+                JPH::CharacterVirtual::EGroundState::OnGround,
+            slot.crouched,
+            slot.sprinting};
 }
 
 void PhysicsWorld::correct_character(const PhysicsCharacterHandle handle,
@@ -1107,6 +1254,37 @@ void PhysicsWorld::replay_character_input(const PhysicsCharacterHandle handle,
     }
     set_character_input(handle, input);
     impl_->update_character(impl_->require_slot(handle), delta_seconds);
+}
+
+void PhysicsWorld::set_character_linear_velocity(
+    const PhysicsCharacterHandle handle,
+    const Vec3 velocity) {
+    if (!finite(velocity) || velocity.length() > 500.0F) {
+        throw std::invalid_argument(
+            "character linear velocity must be finite and no greater than 500 m/s");
+    }
+    impl_->require_slot(handle).character->SetLinearVelocity(to_jolt(velocity));
+}
+
+void PhysicsWorld::set_character_external_motion(
+    const PhysicsCharacterHandle handle,
+    const Vec3 acceleration,
+    const float yaw_offset_degrees) {
+    if (!finite(acceleration) || !std::isfinite(yaw_offset_degrees)) {
+        throw std::invalid_argument("character external motion must be finite");
+    }
+    Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    slot.external_acceleration = acceleration;
+    slot.yaw_offset_degrees = yaw_offset_degrees;
+}
+
+void PhysicsWorld::set_character_paused(const PhysicsCharacterHandle handle,
+                                        const bool paused) {
+    Impl::CharacterSlot& slot = impl_->require_slot(handle);
+    slot.paused = paused;
+    if (paused) {
+        slot.character->SetLinearVelocity(JPH::Vec3::sZero());
+    }
 }
 
 void PhysicsWorld::teleport_character(const PhysicsCharacterHandle handle,
@@ -1228,6 +1406,12 @@ Vec3 PhysicsWorld::body_linear_velocity(const PhysicsBodyHandle handle) const {
     return from_jolt_vec(impl_->physics_system.GetBodyInterface().GetLinearVelocity(slot.body_id));
 }
 
+Vec3 PhysicsWorld::body_angular_velocity(const PhysicsBodyHandle handle) const {
+    const Impl::Slot& slot = impl_->require_slot(handle);
+    return from_jolt_vec(
+        impl_->physics_system.GetBodyInterface().GetAngularVelocity(slot.body_id));
+}
+
 void PhysicsWorld::set_body_linear_velocity(const PhysicsBodyHandle handle,
                                             const Vec3 velocity) {
     const Impl::Slot& slot = impl_->require_slot(handle);
@@ -1239,6 +1423,19 @@ void PhysicsWorld::set_body_linear_velocity(const PhysicsBodyHandle handle,
             "physics linear velocity must be finite and no greater than 500 m/s");
     }
     impl_->physics_system.GetBodyInterface().SetLinearVelocity(slot.body_id, to_jolt(velocity));
+}
+
+void PhysicsWorld::set_body_angular_velocity(const PhysicsBodyHandle handle,
+                                             const Vec3 radians_per_second) {
+    const Impl::Slot& slot = impl_->require_slot(handle);
+    if (slot.motion_type == PhysicsMotionType::Static) {
+        throw PhysicsError("static physics bodies do not have angular velocity");
+    }
+    if (!finite(radians_per_second)) {
+        throw std::invalid_argument("physics angular velocity must be finite");
+    }
+    impl_->physics_system.GetBodyInterface().SetAngularVelocity(
+        slot.body_id, to_jolt(radians_per_second));
 }
 
 void PhysicsWorld::set_body_transform(const PhysicsBodyHandle handle,

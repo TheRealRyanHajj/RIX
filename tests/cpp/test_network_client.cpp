@@ -21,11 +21,9 @@ int fail(const int code, const char* const message) {
     std::cerr << message << '\n';
     return code;
 }
-
 std::vector<std::uint8_t> bytes(const std::string& value) {
     return {value.begin(), value.end()};
 }
-
 class LocalHandshakeServer final {
 public:
     explicit LocalHandshakeServer(const bool process_messages = true,
@@ -63,7 +61,6 @@ public:
             throw std::runtime_error("could not create the localhost test listener");
         }
     }
-
     ~LocalHandshakeServer() {
         if (connection_ != k_HSteamNetConnection_Invalid) {
             static_cast<void>(sockets_->SetConnectionUserData(connection_, 0));
@@ -252,7 +249,6 @@ std::vector<easy3d::TransportEvent> wait_for_connection(
     }
     return observed;
 }
-
 std::vector<easy3d::TransportEvent> wait_for_messages(
     easy3d::NetworkClient& client,
     LocalHandshakeServer& server,
@@ -274,7 +270,6 @@ std::vector<easy3d::TransportEvent> wait_for_messages(
     }
     return observed;
 }
-
 } // namespace
 
 int main() {

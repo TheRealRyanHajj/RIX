@@ -1,1027 +1,382 @@
-# Easy3D implemented API contract
-
-## Scene and entity lifecycle
-
-```python
-from easy3d import Entity, Game, Scene
-
-scene = Scene("main")
-with scene:
-    player = Entity("player")
-    prop = Entity("prop")
-
-game = Game("Example")
-game.load_scene(scene)
-
-assert player.is_alive
-player.enabled = False
-prop.destroy()
-
-game.unload_scene()
-scene.close()
-```
-
-Outside a `with scene:` block, pass `scene=...` or call
-`scene.create_entity()`. Easy3D deliberately raises an actionable `RuntimeError`
-instead of selecting an unqualified global world.
-
-`Entity.destroy()` invalidates every wrapper to that entity. `Scene.clear()`
-invalidates all current entities but leaves the scene reusable. `Scene.close()`
-clears and permanently closes it. Access through a stale wrapper raises
-`InvalidEntityError`, which is a Python `ReferenceError` subclass:
-
-```python
-from easy3d import InvalidEntityError
-
-entity = scene.create_entity()
-entity.destroy()
-
-try:
-    print(entity.name)
-except InvalidEntityError:
-    pass
-```
-
-Implemented entity properties include `id`, `name`, `enabled`, `visible`,
-`scene`, `is_alive`, local/world transforms, `parent`, and `children`.
-`MeshRenderer`, `Collider`, `Rigidbody`, and `CharacterController` are singleton native components and
-are available through typed `has_component`, `get_component`, and
-`remove_component`; physics components are attached with `add_component`.
-Network identity remains a later checklist item.
-
-## Renderable entities and components
-
-```python
-from easy3d import Cube, MeshRenderer, Model, Plane, Scene, Sphere
-
-world = Scene("world")
-with world:
-    floor = Plane(size=(20, 20), color=(0.3, 0.35, 0.4))
-    cube = Cube(position=(0, 0.5, 0), texture="assets/crate.png")
-    ball = Sphere(position=(2, 0.5, 0), radius=0.5)
-    prop = Model("assets/prop.obj", position=(-2, 0, 0))
-
-renderer = cube.get_component(MeshRenderer)
-assert renderer is not None
-renderer.color = (0.8, 0.9, 1.0)
-renderer.lit = False
-```
-
-`Cube`, `Plane`, `Sphere`, and `Model` are normal subclassable `Entity` values
-that transactionally attach one native `MeshRenderer`. Construction failures
-destroy the partially created entity. Primitive mesh allocations and parsed OBJ
-assets are shared across instances; the private renderer also shares GPU buffers
-by immutable resource identity. A primitive texture is decoded/cached at
-construction. OBJ parts apply their MTL diffuse color and optional diffuse map.
-
-Primitive dimensions are expressed through entity scale: cube `size` accepts a
-positive scalar or XYZ tuple, plane `size` a scalar or width/depth tuple, and
-sphere `radius` a positive scalar. `MeshRenderer.color` is multiplicative RGBA
-with finite components in `[0,1]`; `kind` and `asset` are read-only, and
-`lit` selects baseline ambient/directional lighting versus unlit vertex/material
-color, and `remove()` detaches the component.
-
-The loaded scene is traversed natively for every rendered frame. No per-entity
-Python draw calls occur. The renderer reads the scene-owned camera, native light
-components, and render components during that traversal. Public scene/entity/
-component mutation is allowed during scheduler hooks on the gameplay thread;
-other threads raise `RuntimeError` while `Game.run()` is active.
-
-## Math and transform conventions
-
-`Vec2` and `Vec3` provide finite components, arithmetic, dot products,
-normalization, and explicit approximate comparison. `Vec3` also provides cross
-products. `Quat` is stored as `(w, x, y, z)` and supports normalization,
-multiplication, vector rotation, and degree-based Euler conversion.
-
-Entity `position`, `rotation`, and `scale` are local-space live properties:
-`entity.position.x += 1` writes through to native state. `world_position`,
-`world_rotation`, `world_quaternion`, and `world_scale` are calculated snapshots.
-The coordinate system is right-handed, +Y up, with camera-forward -Z. Euler
-angles are degrees and are not unique: reading a rotation may produce a different
-but orientation-equivalent triple. Compare quaternions when orientation identity
-matters.
-
-`entity.set_parent(parent, keep_world=False)` preserves the local transform by
-default. Pass `keep_world=True` to recompute local TRS while preserving the
-current world transform. Parenting rejects self-parenting, cycles, stale handles,
-and cross-scene relationships. Destroying a parent detaches its direct children
-while preserving their world transforms.
-
-## Camera configuration
-
-```python
-from easy3d import Camera
-
-camera = Camera(
-    position=(0, 3, 8),
-    vertical_fov_degrees=60,
-    near_plane=0.1,
-    far_plane=500.0,
-)
-camera.look_at((0, 0, 0))
-scene.camera = camera
-view = camera.view_matrix()
-projection = camera.projection_matrix((1280, 720))
-```
-
-`Camera` is right-handed with local forward -Z and uses degree-based public
-Euler rotation backed by native quaternion math. FOV must be strictly between
-0° and 180°; near must be positive; far must exceed near. Projection matrices
-are column-major. D3D-style projection maps depth to `[0,1]`; the explicit
-`homogeneous_depth=True` query maps it to `[-1,1]` for backend testing.
-
-Set `projection="orthographic"` and a positive `orthographic_height` to select
-an orthographic volume. The height remains fixed while the renderer derives its
-width from the current pixel aspect ratio, so resize behavior matches the
-perspective camera's undistorted vertical framing.
-
-`Camera.aspect_ratio((width, height))` and `projection_matrix` reject zero or
-non-integer dimensions. The renderer uses current SDL pixel dimensions after
-every resize. Assigning `scene.camera` copies the current camera value into the
-native scene. Reading `scene.camera` returns a detached typed copy; change it and
-assign it back when updating several fields. Cameras are scene values rather
-than entity components in this baseline.
-
-## Lighting, materials, and debug lines
-
-```python
-from easy3d import Cube, Light, Scene, debug
-
-scene = Scene("lit world")
-with scene:
-    Light("ambient", color=(0.5, 0.6, 1.0), intensity=0.2)
-    sun = Light("directional", intensity=0.9, rotation=(-35, -30, 0))
-    lit_cube = Cube(position=(-1, 0, 0), color=(0.9, 0.2, 0.1))
-    unlit_cube = Cube(position=(1, 0, 0), color=(0.2, 0.9, 0.3), lit=False)
-    debug.axes(size=2.0)
-    debug.line((-2, 0, 0), (2, 0, 0), depth_test=False)
-```
-
-`Light` owns one native `LightComponent`. Ambient light colors are multiplied by
-intensity and accumulated. The first enabled directional light supplies its
-world-space local -Z direction and color/intensity; additional directional
-lights are retained as components but not blended by this baseline. If a scene
-has no explicit light of a kind, the renderer keeps its corresponding usable
-default ambient or directional contribution. Disabled light entities are
-ignored. Light color components are finite in `[0,1]`; intensity is finite and
-non-negative.
-
-Baseline lit materials apply diffuse Lambert lighting to both solid and
-textured RGB while retaining material alpha. Normals use the inverse-transpose
-world transform, so non-uniformly scaled objects remain correct. There are no
-shadows, specular/PBR channels, transparent sorting, or gamma-adjustable light
-units yet. Pass `lit=False` during primitive/model construction or set
-`MeshRenderer.lit` before running the game for unlit color.
-
-`debug.line` and `debug.axes` append persistent native scene lines. Depth-tested
-and overlay lines are batched separately into frame-local transient GPU buffers.
-They persist until `scene.clear_debug_lines()` or `scene.clear()`; debug drawing
-does not create entities and does not cross into Python once per rendered frame.
-
-## Renderer visibility and counters
-
-```python
-game.run()
-print(game.renderer_stats)
-# RendererStats(draw_calls=..., visible_instances=..., culled_instances=...,
-#               instanced_draw_calls=...)
-```
-
-Before submission, the renderer tests a conservative transformed bounding sphere
-derived from each mesh's cached local AABB against the current scene-camera
-frustum. `visible_instances` and `culled_instances` count mesh parts, so a
-multi-part OBJ may contribute more than one. Disabled, invisible, and
-non-renderable entities contribute neither. `draw_calls` counts submitted 3D
-and debug batches; `instanced_draw_calls` is the subset using instance data.
-
-Visible items with identical mesh, material state/color, and texture/sampler are
-grouped. Two or more compatible items with uniform absolute XYZ scale use one or
-more bgfx instance buffers; non-uniformly scaled items fall back to individual
-draws to preserve exact inverse-transpose normals. `Game.renderer_stats` returns
-a coherent, immutable `RendererStats` snapshot from the latest completed frame
-and is safe to sample from a monitoring thread while `Game.run()` has released
-the GIL.
-
-### Graphics presets and material surface controls
-
-`Game(..., graphics_preset=)` accepts exactly `"low"`, `"medium"`, `"high"`,
-or `"ultra"` and defaults to `"medium"`. `Game.graphics_preset` reports that
-requested immutable value. The presets resolve as follows:
-
-| Preset | Enhanced lighting | HDR/tone map | FXAA | Directional shadow map |
-| --- | --- | --- | --- | --- |
-| `low` | no | no | no | no |
-| `medium` | yes | yes | yes | no |
-| `high` | yes | yes | yes | 2048 x 2048 |
-| `ultra` | yes | yes | yes | 4096 x 4096 |
-
-The runtime may disable postprocessing/FXAA if the adapter lacks the required
-RGBA16F color or D24S8 depth render targets. It may disable shadows if the
-R32F/D24S8 targets or requested texture size are unsupported. The corresponding
-`RendererStats` booleans and `shadow_resolution` report active features, not
-merely the preset request. `draw_calls` includes shadow and postprocess passes.
-
-`MeshRenderer.metallic` is finite in `[0,1]`, `roughness` is finite in
-`[0.04,1]`, and `emission` is finite in `[0,100]`; setters raise `ValueError`
-outside those bounds. `casts_shadows` and `receives_shadows` require booleans.
-The lighting model is a compact direct-light metallic/roughness approximation,
-not a full glTF PBR implementation. The first active directional light supplies
-one camera-centered orthographic shadow map with 3x3 PCF. Cascades, point/spot
-light shadows, image-based lighting and alpha-tested shadow casters are not in
-this contract.
-
-## HUD, sprites, text, layout, and buttons
-
-Each `Scene` owns one `scene.hud`. `panel()`, `sprite()`, `text()`, and
-`button()` return retained `Panel`, `Sprite`, `Text`, and `Button` objects.
-Position and size are finite viewport-pixel tuples. Size must be positive for
-panels, sprites, and buttons. Color values use the normal Easy3D `[0,1]` RGBA
-contract. Sprites synchronously load the same cached `.png`, `.jpg`, or `.jpeg`
-RGBA8 assets as 3D materials and raise the existing asset exceptions.
-
-`anchor` accepts `top_left`, `top`, `top_right`, `left`, `center`, `right`,
-`bottom_left`, `bottom`, or `bottom_right`. The selected point is both the
-viewport anchor and element pivot. Consequently, a centered element at `(0,0)`
-stays centered after resize; a top-right element at `(-16,16)` stays 16 pixels
-inside that corner. Higher `z_index` values submit later. Equal values retain
-creation order. Alpha blending is source-over and the entire UI view runs after
-the 3D/postprocess view.
-
-`HUD.stack(direction, elements, position=..., anchor=..., spacing=...)` supports
-explicit horizontal or vertical layout. It applies child positions immediately;
-call `Stack.relayout()` after changing child sizes. Text auto-measures again when
-its string or font size changes. The built-in font is Roboto Regular baked once
-per renderer at startup. This milestone guarantees printable ASCII; each
-unsupported Unicode code point renders as `?` rather than corrupting the atlas.
-
-Buttons expose `normal_color`, `hover_color`, `pressed_color`, `enabled`, and an
-optional `on_click(button)` callback. The rising edge of the left mouse button
-selects the highest-z enabled visible button under the pointer and invokes it
-once before that frame's scheduler phases. The callback runs inside the normal
-gameplay-thread mutation boundary and exceptions unwind the native loop. No
-keyboard/controller focus or navigation is implied. `Scene.clear()`,
-`Scene.close()`, `HUD.clear()`, and element `remove()` invalidate retained UI
-wrappers predictably. `RendererStats.ui_elements` and `ui_draw_calls` report the
-last submitted overlay.
-
-## Asset reports, runtime diagnostics, and typing
-
-```python
-from easy3d import DebugOverlay, diagnose_asset
-
-report = diagnose_asset("assets/level.glb")
-if report.ok:
-    print(report.summary, report.triangle_count, report.warnings)
-else:
-    print(report.error_type, report.error_message)
-
-overlay = DebugOverlay(game, scene=scene, refresh_interval=0.25)
-```
-
-`diagnose_asset(path)` recognizes PNG/JPEG, OBJ, glTF and GLB and invokes the
-same synchronous decoder/importer as runtime loading. It returns a frozen
-`AssetDiagnostic` rather than raising for an asset failure. Successful image
-reports contain width/height. Successful model reports contain triangle, part,
-material and, for glTF, joint/clip counts plus importer warnings. Failure
-reports preserve the resolved candidate path, detected kind, concrete
-`AssetError` subclass name and complete message. Passing a non-path value is a
-programming error and still raises `TypeError`; unknown extensions return a
-structured unsupported-format report. Diagnostics do not recursively discover
-assets beyond what the importer itself resolves, and they are not asynchronous.
-
-`DebugOverlay` is an ordinary script entity plus two native HUD elements. It
-samples immutable `Game.renderer_stats`/`scheduler_stats` snapshots at a
-configurable positive interval and displays smoothed FPS, last frame time,
-entities, draw/instance/culling/UI counts, fixed ticks, maximum observed script
-callback, overruns, dropped time and active graphics features. `show()` and
-`hide()` toggle both retained elements. It does not create a profiler thread,
-GPU query, network monitor, log sink or hidden scene mutation path. Construct it
-before running the scene, as shown by `examples/12_diagnostics/main.py`.
-
-Easy3D ships a `py.typed` marker and an explicit `_easy3d.pyi`. Representative
-documented public usage is checked under strict mypy with:
-
-```powershell
-python -m mypy
-python -m mypy.stubtest easy3d._easy3d `
-  --allowlist tests/typecheck/stubtest_allowlist.txt
-```
-
-The narrow stubtest allowlist covers only pybind11's implementation metaclass
-and generic introspection signatures for native values that remain intentionally
-non-constructible in typed Python. Missing methods and runtime/stub signature
-drift are not ignored. Both commands run inside the default pytest suite.
-
-## Audio assets and voices
-
-`Game.audio.load(path)` accepts RIFF/WAVE files readable by Python's standard
-`wave` module with uncompressed 16-bit PCM, one or two channels, 8–192 kHz and
-at least one complete frame. Resolved paths are cached per game. A single
-decoded file is limited to 256 MiB; malformed, truncated, compressed, empty,
-8-bit, 24-bit and multichannel inputs raise before entering the native mixer.
-The returned `Sound` exposes `path`, `channels`, `sample_rate`, `frame_count`
-and `duration` and belongs to exactly that game's `Audio` manager.
-
-`Audio.play(sound, volume=1, loop=False, position=None,
-minimum_distance=1, maximum_distance=50)` returns an `AudioSource`. Volume is
-finite in `[0,4]`. Omitting position produces equal left/right gain; providing
-a finite position enables camera-relative attenuation and panning and requires
-`0 < minimum_distance < maximum_distance`. `AudioSource.volume` and
-`.position` are mutable while playing. `.playing` reports whether the native
-voice remains active and `stop()` is idempotent. Completed and stopped voices
-are retired; the native limits are 256 decoded sounds and 1,024 simultaneously
-active voices per game.
-
-The active `Scene.camera` supplies listener position and right direction once
-per frame. SDL3 opens the default output as 48 kHz stereo float during
-`Game.run()` and performs sample-rate conversion in Easy3D's native mixer.
-`Audio.available` reports that device lifetime. Device initialization/open
-failure logs a diagnostic and leaves audio unavailable without failing the
-window. This API does not claim streaming, compressed codecs, device selection,
-HRTF, reverb, occlusion or sample-accurate scheduling.
-
-## Input and remappable actions
-
-Each `Game` owns one `game.input` object. Physical control identifiers are
-lower-case `device:name` strings: `key:w`, `mouse:left`,
-`mouse:delta_x`, `mouse:wheel_y`, `gamepad:a`, and `gamepad:left_x` are
-representative values. Keyboard identifiers describe physical SDL scancodes,
-so `key:w` means the physical W position rather than layout-produced text.
-
-`Input.bind(name, *bindings, replace=True)` atomically replaces an action map;
-pass `replace=False` to append. A string creates a unit digital binding.
-`Binding(control, scale=..., deadzone=...)` supports opposing directions,
-axis inversion, and one-dimensional deadzones. Contributions sum and clamp to
-`[-1, 1]`; deadzone magnitude is rescaled to retain the full post-deadzone
-range. `state()` returns an immutable value/down/pressed/released snapshot.
-Unknown actions raise `IndexError` rather than silently returning an
-unconfigured value.
-
-Mouse position and delta are window-relative framebuffer pixels; SDL logical
-coordinates are scaled by the current high-DPI pixel ratio. Delta and wheel
-accumulate for the current frame and reset at the next native event poll. The current baseline opens one
-primary SDL gamepad and uses Xbox-style logical face names `a/b/x/y`; axes are
-normalized to `[-1,1]`, while triggers use `[0,1]`.
-
-Setting `pointer_lock_requested` asks the window thread to enter SDL relative
-mouse mode. `pointer_locked` reports the applied state. Losing keyboard focus
-clears all held controls, produces action releases at the next frame boundary,
-and disables the applied lock without discarding the request. Gaining focus
-reapplies it. The input object is mutex-protected for monitoring threads; Phase
-2.2 will make action reads deterministic inside gameplay callbacks.
-
-## Script lifecycle and scheduler
-
-An `Entity` subclass is registered as a script when it defines any of `awake`,
-`start`, `fixed_update`, `update`, `late_update`, or `on_destroy`. `awake` runs
-once when the scheduler first sees the entity. `start` runs once when that
-entity is first enabled; disabling and re-enabling does not repeat it. Disabled
-entities receive no fixed/render updates. `on_destroy` runs once before native
-handle invalidation, including scene clear.
-
-Input events are drained before the native frame callback. The scheduler then
-runs zero or more `fixed_update(fixed_dt)` calls, followed by one `update(dt)`
-phase and one `late_update(dt)` phase before renderer submission. The default
-fixed rate is 60 Hz. Frame delta clamps to 0.25 seconds and catch-up is capped at
-five ticks; excess whole-tick time is dropped and reported rather than causing
-an unbounded spiral. Configure these with `Game(fixed_hz=...,
-max_frame_seconds=..., max_catch_up_steps=...)`.
-
-Entity destruction and `Scene.clear()` requested inside a hook are deferred to
-the end of that callback phase. Other transform/component/camera mutations are
-safe immediately because callbacks execute on the SDL/render-owning thread
-before traversal. Uncontrolled worker-thread mutation remains rejected.
-
-The default `fail_fast=True` wraps callback failures in `ScriptCallbackError`
-with hook, entity type/name, and generation-qualified ID while preserving the
-original exception as its cause. The native loop unwinds and resets running
-state. With `fail_fast=False`, the traceback is printed, the failing entity is
-quarantined from later hooks, and the summary appears in `game.script_errors`.
-`game.scheduler_stats` exposes fixed tick/drop/overrun totals and immutable
-per-hook call/total/maximum/last durations.
-
-## Standalone gameplay utilities
-
-`StateMachine` registers named `State` objects, validates event transition
-endpoints up front, calls `on_exit(target)` before `on_enter(source)`, resets
-`time_in_state` on transition, and evaluates guarded transitions in registration
-order. Direct `transition_to` is available for unconditional control. Public
-machine operations from inside enter/update/exit/guard callbacks raise a
-reentrancy error rather than nesting a partial transition. Callback exceptions
-propagate to the caller; if an enter callback fails, the target remains current
-so state is never reported as the already-exited source.
-
-`Timer`, `Cooldown`, and `Tween` each declare a `ClockDomain`: `simulation`,
-`render`, or `wall`. Simulation/render objects advance only through
-`advance(dt, time_domain=...)`; passing the wrong explicit domain raises.
-Wall-clock objects use `poll()` and accept an injectable monotonic clock for
-tests. Negative/non-finite deltas are rejected. Timers support pause/resume,
-one-shot/repeat completion counts and a bounded repeat-callback burst.
-Cooldown activation is rejected until ready unless `restart=True`. Tween
-supports scalar/vector arithmetic, equal-sized tuples, custom interpolators,
-linear/ease-in/ease-out/ease-in-out curves, looping and ping-pong.
-
-`EventBus` dispatches synchronously by descending priority and then subscription
-order. One-shot listeners are removed before invocation, so recursive emission
-cannot call them twice. Unsubscribing a listener before its turn suppresses it;
-new listeners wait for the next emission. Nested dispatch is supported up to a
-configurable bound. Listener exceptions propagate without being hidden.
-
-## Physics components and foundation
-
-```python
-from easy3d import Collider, Entity, PhysicsMaterial, Rigidbody, Scene
-
-world = Scene("physics")
-floor = Entity("floor", scene=world)
-floor.position = (0, -0.5, 0)
-floor.add_component(
-    Collider,
-    half_extents=(5, 0.5, 5),
-    material=PhysicsMaterial(friction=0.8, restitution=0.0),
-)
-
-ball = Entity("ball", scene=world)
-ball.position = (0, 3, 0)
-ball.add_component(Collider, shape="sphere", radius=0.5)
-body = ball.add_component(Rigidbody, mass=2.0)
-body.add_impulse((2, 0, 0))
-```
-
-Jolt Physics is private behind `easy3d::PhysicsWorld`; no Jolt type crosses the
-public engine boundary. `PhysicsBodyHandle` contains physics-world identity,
-slot and generation, so stale and cross-world access raises `PhysicsError`.
-World configuration bounds bodies, broadphase pairs, contact constraints and
-temporary allocation. Capacity update errors are surfaced rather than ignored.
-
-The baseline object layers are `Static`, `Dynamic`, `Sensor`, and `Character`.
-Static/static and sensor/sensor pairs do not collide; other baseline pairs do.
-Static objects use Jolt's non-moving broadphase; all other layers use the moving
-broadphase. Public box/sphere `Collider` values use explicit meter dimensions;
-`Cube`, `Plane`, and `Sphere` can create matching colliders with
-`collider=True`. A collider without a `Rigidbody` is static. Attaching a
-`Rigidbody` selects dynamic or kinematic motion. Trigger colliders use Jolt
-sensor bodies.
-Collider geometry is captured in world-meter dimensions at construction and is
-not implicitly resized by later entity-scale changes; remove/recreate the
-collider when changing shape dimensions.
-
-`PhysicsMaterial` validates non-negative friction and restitution in `[0,1]`.
-Rigid-body mass is positive kilograms, linear velocity is meters/second, force
-is newtons, and impulse is newton-seconds. `use_gravity=False` gives the body a
-zero gravity factor without changing its scene. Forces and impulses require a
-dynamic body. Component construction is transactional, entity destruction
-releases its body, removing a rigid body returns its collider to static motion,
-and removing a collider also removes rigid-body motion.
-
-Dynamic transforms are physics-owned and synchronized to entities after every
-native step. Direct entity transform writes are rejected while a dynamic body
-is attached; `Rigidbody.teleport(position, rotation)` is the explicit override.
-Static and kinematic transform writes update Jolt immediately. Physics entities
-cannot be parented in this release because local/world conversion under moving
-parents is not yet a defined solver contract.
-
-### Queries
-
-`easy3d.physics` exposes `raycast`/`raycast_all`,
-`sphere_cast`/`sphere_cast_all`, `capsule_cast`/`capsule_cast_all`,
-`overlap_sphere`, and oriented `overlap_box`. Directions are normalized by the
-engine and `max_distance` supplies the cast length. Capsule `height` is total
-tip-to-tip height and must exceed its diameter; its local axis is +Y before the
-optional public rotation.
-
-All results are immutable `PhysicsHit` snapshots containing a generation-safe
-entity wrapper, world-space point/normal, distance and normalized cast fraction.
-Ray/shape-cast results are sorted nearest first with entity ID as a stable tie
-break. Overlaps are deduplicated and sorted by entity ID. `layers` is an
-explicit subset of `static`, `dynamic`, `sensor`, and `character`;
-`include_triggers=False` rejects sensors, and `exclude=entity` rejects exactly
-that scene-local generation. Invalid/cross-scene exclusions and non-finite or
-degenerate geometry raise instead of producing partial results.
-
-### Contact and trigger events
-
-Scripts may implement `on_collision_enter`, `on_collision_stay`,
-`on_collision_exit`, `on_trigger_enter`, `on_trigger_stay`, and
-`on_trigger_exit`. Each receives a frozen `CollisionEvent(other, point,
-normal)`. The normal points from the recipient toward `other`; the second
-recipient gets the inverse normal. Exit uses the last safe contact snapshot.
-
-Jolt's contact listener copies bounded native records only. After
-`PhysicsSystem::Update` and dynamic pose synchronization, the scheduler drains
-those records and invokes Python on the gameplay thread under the existing
-profiling/fail-fast/quarantine policy, then commits deferred destruction. A
-contact event is offered to both live, enabled, started script entities.
-Destroying an entity/body drops events that cannot provide two valid entity
-handles rather than exposing a stale reference. The current simple shapes have
-one subshape; compound-shape contact aggregation remains with Phase 2.8.
-Jolt may retire solver contacts when all moving bodies sleep; Easy3D retains
-the logical pair without emitting a false exit, reports stay if it is detected
-again, and emits exit when an awake/separated or destroyed pair is reconciled.
-
-### Character controller
-
-`Player(controller="first_person" | "third_person")` is the convenience form
-of `Entity + CharacterController`. The controller is a native, bottom-aligned
-Y-axis capsule. Public `height` is total tip-to-tip height in meters. Its
-construction-time configuration includes `radius`, `height`, `speed`,
-`acceleration`, `air_control` in `[0,1]`, `jump_speed`,
-`max_slope_degrees` in `[0,90)`, and `step_height`.
-
-`set_input((right, 0, forward), heading_degrees=..., jump=...)` stores one
-fixed-tick command. Input magnitude is clamped to one. At heading zero,
-positive forward moves along world -Z; heading rotates movement around +Y.
-First-person mode makes the entity face the supplied heading. Third-person
-mode faces nonzero movement while still interpreting it relative to heading.
-Jump is a one-shot request consumed by the next native step; movement and
-heading persist until replaced. `grounded`, `ground_normal`, and
-`linear_velocity` are solver snapshots.
-
-The native fixed phase updates each character velocity and calls Jolt
-`CharacterVirtual::ExtendedUpdate` before `PhysicsSystem::Update`. This gives
-the motor slope cancellation, stair walking, floor adhesion, collision/sliding,
-moving-ground velocity, gravity, and jump behavior on the simulation thread.
-A smaller Jolt inner capsule makes characters visible to ordinary queries,
-rigid bodies, sensors, and deferred contact events on the `character` layer.
-Character transforms are physics-owned, cannot be parented, and must use
-`teleport(position, heading_degrees=...)` for discontinuities. A character
-controller and ordinary collider are mutually exclusive on one entity.
-
-`CharacterInputCommand(sequence, movement, heading_degrees=0, jump=False)` is
-an immutable validated input value. `PredictedCharacterController(controller,
-role="client" | "server", max_pending_inputs=256)` drives the same native motor
-on both sides. Client `submit(...)` allocates a strictly increasing uint64
-sequence, applies immediately, and appends to `pending_inputs`; a full queue or
-sequence exhaustion raises `NetworkError`. Server `accept(command)` has no
-replay queue and native code rejects zero, duplicate, or stale sequences before
-input changes.
-
-After stepping accepted input, authority `make_correction(server_tick)` returns
-an immutable `CharacterCorrection` containing a nondecreasing acknowledged
-sequence, strictly newer uint64 simulation tick, position, normalized rotation
-and velocity. Client `reconcile(correction, fixed_delta_seconds=...)` rejects a
-future/backward acknowledgement or stale tick, restores the authority state,
-removes the acknowledged prefix and replays every retained newer input through
-the ordinary native motor without advancing the whole scene. The queue bound is
-therefore also the replay-work bound. `CorrectionStats` reports correction,
-replay and pre-snap position-error totals/max/average. Direct offline
-`CharacterController.set_input` remains unsequenced; `correct_state` and
-`replay_input` expose the lower-level mechanics. Easy3D does not serialize these
-values automatically; games choose their bounded input/correction channel.
-
-`RemoteTransformInterpolator(client_replication, delay_ticks=2)` applies the
-existing clamped remote transform histories at authority tick minus delay.
-Authority ticks cannot move backward. `RemoteInterpolationStats` exposes calls,
-applied objects and the last authority/render ticks. It does not extrapolate or
-operate on the local predicted character.
-
-Every `Scene` creates its physics world lazily. `scene.gravity` reads the default
-`(0, -9.81, 0)` without allocation and creates the world when changed. During a
-simulation tick the scheduler runs all eligible Python `fixed_update(dt)` hooks,
-commits deferred mutations, then advances the initialized Jolt world once with
-that same fixed `dt`, synchronizes dynamic poses and dispatches copied contact
-events. `scene.physics_step_count` is a diagnostic. Scene clear
-destroys all native bodies and characters and invalidates their handles. A scene with no
-physics use pays no Jolt-world/temp-buffer allocation.
-
-### Advanced shapes, constraints, and CCD
-
-`Collider` supports `box`, `sphere`, `capsule`, `convex`, and `mesh`. Capsule
-height is total tip-to-tip height and must exceed its diameter. Convex hulls
-accept 4–256 finite `points` or the vertices of an OBJ `mesh` asset. Triangle
-meshes are built from triangulated OBJ parts, use counter-clockwise one-sided
-triangles, and are static-only; attaching a `Rigidbody` is rejected. `Model`
-accepts `collider="mesh"` or `collider="convex"`. Model scale is baked into an
-advanced collider when it is created and later scale changes do not rebuild it.
-
-`Rigidbody(continuous=True)` selects Jolt linear-cast motion quality for dynamic
-bodies. It addresses high-speed linear tunneling but does not promise perfect
-collision for long, thin bodies with extreme angular velocity. Static and
-kinematic bodies reject the option.
-
-`easy3d.physics.fixed_constraint(first, second)` welds two collider bodies at
-their current relative pose. `distance_constraint` accepts optional world-space
-anchors and either automatic initial length or a validated
-`minimum_distance`/`maximum_distance` range. The returned `Constraint` is
-generation checked, exposes `is_alive`, and has explicit `remove()`. Endpoints
-must be distinct entities in one scene and at least one body must move.
-Destroying/replacing either endpoint body removes its constraints before the
-body. Phase 2.8 intentionally provides fixed and distance joints first; hinge,
-slider, motorized and compound-shape APIs remain future extensions.
-
-## Texture assets
-
-```python
-from easy3d.assets import TextureCache, load_image
-
-info = load_image("assets/albedo.jpg", color_space="srgb")
-cache = TextureCache()
-shared = cache.load("assets/albedo.jpg")
-assert len(cache) == 1
-```
-
-`load_image` accepts `.png`, `.jpg`, and `.jpeg`, decodes to four-channel
-RGBA8 storage, and returns immutable metadata. `TextureCache` owns shared native
-image resources and uses a deterministic canonical-path plus color-space key;
-`clear()` drops cache ownership without invalidating already referenced native
-resources. Cache access is thread-safe. It is intentionally synchronous until
-the later asynchronous asset milestone.
-
-Color textures default to `srgb`; data textures can request `linear`. Public
-mesh UV `(0, 0)` refers to the first/top-left decoded texel, `u` increases right,
-and `v` increases down. Native `TextureSampler` supports linear/nearest min,
-mag, and mip choices plus repeat/clamp U/V modes. The current D3D11 diagnostic
-visibly validates nearest sampling and repeat defaults. GPU cache identity
-includes both the immutable decoded image and sampler settings.
-
-A missing/non-file path raises `MissingAssetError`, an `AssetError` subclass.
-Malformed files and unsupported extensions raise `AssetError` with the path and
-decoder context. The public API never exposes bgfx handles.
-
-Graphics-disabled/headless builds retain the asset types and deterministic error
-surface but deliberately do not link image decoders; attempting image decode in
-that configuration raises `AssetError`. Dedicated servers do not need texture
-pixels. A future headless content-validation tool may split decoding into a
-separate optional build feature if that becomes a concrete requirement.
-
-## OBJ model assets
-
-```python
-from easy3d.assets import ModelCache, load_obj
-
-model = load_obj("assets/house.obj")
-cache = ModelCache()
-shared = cache.load("assets/house.obj")
-```
-
-The OBJ importer preserves positions, normalized supplied normals, texture
-coordinates, and optional per-vertex RGB. Faces are triangulated. If any corner
-of a triangle lacks a normal, Easy3D creates a flat geometric normal and unique
-vertices for that triangle. Degenerate triangles are rejected. OBJ V is flipped
-(`v_engine = 1 - v_obj`) into Easy3D's top-left texture convention; U is
-unchanged. Shapes are split again by material so every `ModelPartInfo` has one
-material index.
-
-`ModelCache` is thread-safe, holds immutable native model/mesh data, and uses a
-canonical path key. `Model` entities reference that shared data rather than
-parsing or copying the model again.
-Clearing the cache does not invalidate outstanding native shared references.
-OBJ loading and caching work in graphics-disabled/headless builds.
-
-Supported MTL fields are material name, diffuse `Kd`, dissolve `d`/`Tr`, and
-diffuse texture `map_Kd`. Diffuse texture paths are currently resolved relative
-to the OBJ directory; keep MTL files and their referenced textures under that
-root. Missing MTL files, unknown material names, missing diffuse textures,
-invalid indices, empty geometry, and malformed files are errors. Other MTL
-channels/options (specular/normal maps, illumination models, PBR extensions,
-multiple texture layers) are parsed by the dependency where possible but not
-represented or claimed by Easy3D. Smoothing-group normal generation is not yet
-implemented: provide normals for smooth shading, otherwise output is flat.
-
-## glTF/GLB model and animation assets
-
-```python
-from easy3d.assets import ModelCache, load_gltf
-
-asset = load_gltf("assets/character.glb")
-print(asset.triangle_count)
-if asset.skeleton and asset.animations:
-    local_pose = asset.animations[0].sample(asset.skeleton, 0.5, loop=True)
-
-shared_model = ModelCache().load("assets/character.glb")
-```
-
-`load_gltf` accepts glTF 2.0 `.gltf` and binary `.glb`. It imports the default
-scene's triangle primitives, positions, normalized normals (or generated flat
-normals), first UV/color set, unsigned indices and node transforms. The loader
-bakes node transforms into base-pose geometry while preserving Easy3D's
-right-handed, +Y-up convention. PBR metallic/roughness base color, metallic,
-roughness and emissive factors map to the engine material approximation;
-external PNG/JPEG base-color images are supported through the normal texture
-path. `Model` and triangle-mesh colliders accept these files through the same
-shared `ModelCache` path as OBJ.
-
-`GltfInfo` contains the ordinary immutable model fields alongside its skeletal
-metadata.
-`GltfInfo.skeleton` is `None` or one bounded hierarchy of `SkeletonJointInfo`
-values with parent index, local bind transform and column-major inverse-bind
-matrix. Each `AnimationClipInfo` owns translation, quaternion rotation and
-scale channels using `linear` or `step` interpolation. `sample` accepts a
-finite non-negative time and returns one local `JointPose` per joint, either
-looping by clip duration or clamping at its end. Quaternion interpolation uses
-the normalized shortest path. Sampling does not mutate a scene or model.
-
-The import boundary is deliberately strict: required extensions, non-triangle
-primitives, sparse/invalid accessors, multiple skins, joint matrix transforms,
-non-joint intermediary hierarchy nodes, morph weights and CUBICSPLINE channels
-are errors. The container, total declared buffers, and actual external buffers
-are each bounded to 512 MiB; vertex, joint, clip, channel and key counts also
-have native limits. Buffer/image URIs must be data URIs where supported or local
-filesystem paths; network and `file:` URIs are rejected.
-
-The current renderer draws the imported static base pose. It does not perform
-GPU skin deformation or morph animation. Embedded material images and alpha
-modes are parsed but not rendered (a warning is retained in model metadata);
-use an external PNG/JPEG for the current textured path. See
-`examples/11_gltf/main.py` for a generated, self-contained annotated example.
-
-## Network transport foundation
-
-`easy3d.network.NetworkTransport` is a runtime-checkable Python protocol for a
-polled endpoint. `send(bytes_like, delivery=...)` returns `SendStatus` instead
-of blocking or silently growing a queue. `poll(maximum_events)` returns immutable
-`NetworkEvent` snapshots; `stats` is an immutable counter snapshot. A
-`ConnectionId` is opaque local transport state and is never an entity or future
-replication ID.
-
-`SimulatedLink` owns `first` and `second` endpoints. `latency`, `jitter`, and
-manual `advance()` values are seconds; `loss` is in `[0, 1]`. The seed and
-explicit queue/message limits make impairment tests reproducible. Construction
-enqueues one connected event per endpoint. Disconnecting either side enqueues a
-disconnected event for both and invalidates further sends.
-
-The simulator preserves `Delivery.RELIABLE`/`UNRELIABLE` as intent only. It
-models datagram impairment and does not retransmit. Event queue exhaustion raises
-`NetworkError` once and leaves already-queued events available to a subsequent
-poll. No socket, server, client, handshake, or replication API is claimed by
-this foundation.
-
-`NetworkCondition(name, one_way_latency_seconds, jitter_seconds,
-loss_probability)` validates GNS-compatible bounds. The exported LAN, regional
-and adverse profiles are `(5ms, 2ms, 0%)`, `(40ms, 10ms, 1%)`, and `(100ms,
-30ms, 5%)`; `REPRESENTATIVE_NETWORK_CONDITIONS` preserves that order.
-`profile.create_simulated_link(seed=...)` uses the deterministic packet-level
-semantics above.
-
-`impair_backend(profile)` returns a context manager for real GNS testing. A
-`Server` or `Client` must already keep GNS initialized before entry. The scope
-applies send-side lag/jitter/loss process-wide, rejects nested/concurrent scopes,
-and clears every setting on normal or exceptional exit. GNS reliable delivery
-continues to retransmit/order; unreliable delivery may be lost. This is a test
-facility, not per-connection QoS, and the named profiles are regression inputs
-rather than network-quality promises.
-
-`backend_info()` returns a frozen `NetworkBackendInfo` containing availability,
-backend name/version and configured crypto provider. On the supported Windows
-build it reports GameNetworkingSockets 1.6.1 with Windows BCrypt.
-`backend_smoke_test()` temporarily owns the process-global native runtime and
-performs a bounded reliable loopback round trip. It is a build/runtime
-diagnostic, not a public client connection or network security test.
-
-The native `easy3d::detail::ProtocolHandshake` is an internal contract for the
-future `Client` and `Server` owners, not a Python gameplay API. It must be
-started once, consumes one complete reliable transport message at a time, and
-returns an optional outbound reply plus establishment/rejection state. It
-negotiates a maximum application payload no larger than either peer's declared
-limit. Peer bytes never raise parsing exceptions; malformed, incompatible,
-out-of-order or oversized input returns a stable disconnect code and bounded
-safe-text reason. Addresses, timeout clocks and socket ownership remain outside
-this codec.
-
-## Direct-IP client
-
-`easy3d.network.Client(...)` accepts finite positive `timeout` and
-`peer_timeout` values, bounded queue/message/version values, and optional
-`on_connect(client)` and
-`on_disconnect(client, event)` callables. `connect(address, port)` accepts a
-numeric IPv4/IPv6 address and port `1..65535`, starts asynchronously, and rejects
-an already-active client. DNS names are not accepted. `state` is one of
-`disconnected`, `connecting`, `handshaking`, or `connected`; `connection` is an
-opaque `ConnectionId` while active and `None` after close.
-
-`poll(maximum_events=256)` must be called by one owning thread. It advances the
-transport and handshake, enforces the deadline, returns immutable events, and
-then dispatches Python callbacks in event order on that same thread. Callback
-exceptions propagate to the caller after the native event has been drained.
-They are never invoked on a GNS callback or worker thread.
-
-`send(bytes_like, delivery=...)` returns `SendStatus`; it does not block or
-raise for normal inactive/oversize/backpressure outcomes. `disconnect(reason)`
-requires an active connection. Reason text is at most 120 UTF-8 bytes with no
-control/NUL characters. `stats` contains application counters. `metrics` adds
-state, GNS ping/recent rates/pending bytes and the negotiated payload limit;
-unavailable live values retain documented zero/`-1` defaults.
-
-`timeout` covers initial transport connection and protocol handshake.
-`peer_timeout` configures GNS connected-peer liveness detection and defaults to
-10 seconds; it is finite and in `[0.001, 2147483.647]`. Disconnect observation
-still requires polling and backend scheduling, so the configured value is not
-an exact wall-clock callback deadline.
-
-## Headless authoritative server
-
-`easy3d.network.Server(...)` (also exported as `easy3d.Server`) accepts a
-numeric `bind_address`, port `1..65535`, `max_players` in `1..1024`, positive
-`tick_rate`/handshake/peer timeouts and bounded queue/message/protocol settings. It is
-headless by construction: no graphics option is necessary and no window,
-renderer or input owner is created. `start()` binds without entering the
-simulation loop. `state`, normalized `bind_address`, active `port`, immutable
-`connections`, counters and `tick_count` are observational snapshots.
-
-`load_scene(scene)` gives the server exclusive scene ownership. `run()` blocks
-on its calling thread, services networking, and executes authoritative Python
-lifecycle plus native physics at the configured fixed rate until `stop()` is
-requested. `stop()` may be called from another Python thread. `step()` starts
-the listener if necessary and executes exactly one network pump/fixed tick;
-`poll()` services networking without advancing simulation. Scenes can be
-replaced only while `run()` is inactive.
-
-`send(connection, bytes_like, delivery=...)`, `broadcast(...)` and
-`disconnect(...)` operate only on post-handshake opaque IDs. Optional
-`on_connect(server, connection)`, `on_message(server, event)` and
-`on_disconnect(server, event)` callbacks execute synchronously in event order
-on the `run`/`step`/`poll` caller. Callback exceptions propagate after the event
-is drained and are not replayed. The dedicated `Server` itself implies no local
-client, player identity, entity replication, DNS or discovery behavior.
-
-The server's `peer_timeout` configures the same GNS connected-peer liveness
-policy for accepted clients. `ListenServer` passes one value to its isolated
-authority and local client. Abrupt backend/OS failure codes are retained as
-integers when they are outside Easy3D's stable application-code range.
-
-## Isolated listen host
-
-`easy3d.network.ListenServer(...)` (also `easy3d.ListenServer`) composes one
-authoritative `Server` with one real loopback `Client`. `start()` binds and
-completes the private host handshake before returning. Its returned
-`ListenEvent` values and optional `on_event(host, event)` callback tag every
-event with `ListenRole.AUTHORITY` or `ListenRole.CLIENT`; `local_host` is true
-for the private host peer and false for additional remote peers.
-
-`authority` and `client` remain separate typed objects. Only `authority` may
-own the scene, scheduler, physics and Python lifecycle. `authority_connection`
-is the authority-side opaque ID for the private client. It can have the same
-numeric value as `client.connection`, but equality across those two role-local
-spaces has no identity or ownership meaning. Use the role tag and the object
-that produced the ID.
-
-`step()` pumps both transports and executes exactly one authority tick.
-`run()` reuses the server's paced owner loop and pumps the client after each
-authority tick; it never executes the scene a second time. `stop()` is a
-thread-safe request while running and closes both roles when manually stepped.
-`poll()` services both transports without simulation. Additional direct-IP
-clients appear only as authority events with `local_host=False`. The local host
-receives no implicit privilege, player identity, entity replication, rendering
-or prediction behavior.
-
-## Opt-in LAN discovery
-
-`easy3d.discovery.LanDiscoveryAnnouncer(name, game_port, ...)` and
-`LanDiscoveryBrowser(...)` (also exported at package root) are explicitly
-started, single-owner IPv4 UDP objects. They are independent of `Server` and
-`Client`; callers must poll the announcer alongside a running authority and
-must explicitly choose a `DiscoveredServer.address`/`port` for a later
-`Client.connect()` call. Neither object owns a thread or changes Windows
-Firewall configuration.
-
-The announcer name is non-empty, control-free UTF-8 capped at 128 bytes. Ports,
-protocol/schema versions and optional persistent 64-bit instance ID are
-validated before a socket opens. `poll(maximum_packets)` accepts only complete
-format-1 query datagrams, caps work at its configured per-poll limit, rate
-limits repeat source addresses and bounds rate-limit state. `start()` reports
-bind/port-collision failures as `NetworkError`; `close()` is idempotent.
-
-The browser binds an ephemeral UDP port only after `start()`. `refresh()` sends
-one random nonzero nonce to the configured limited/directed broadcast address
-and replaces the prior response window. `poll()` ignores malformed and stale/
-unmatched responses, accepts responses only from the configured discovery
-port, and returns newly validated immutable `DiscoveredServer` values. Its
-`servers` property is the current finite-capacity, finite-TTL cache. A result's
-`compatible` flag is exact protocol/schema comparison; incompatible results
-remain visible but are not connected automatically. Stats are immutable
-snapshots. Discovery supplies no DNS, IPv6 broadcast, authentication, account
-identity, room directory, relay or cross-subnet guarantee.
-
-## Server-owned replicated lifecycle
-
-`PrefabRegistry(schema_version=..., capacity=...)` maps explicit nonzero 32-bit
-`PrefabId` values and unique 1–64-byte safe UTF-8 names to
-`factory(scene) -> Entity` callables. Its 16-byte fingerprint is computed from
-the schema version and canonical ID/name pairs, independent of registration
-order. Attaching a replicator freezes the non-empty registry. IDs/names cannot
-be duplicated and capacity is finite.
-
-`ServerReplication(server, registry, max_objects=...)` must attach before
-clients connect and preserves the server's existing callbacks. `spawn(prefab)`
-requires an authority scene, invokes its factory, assigns a monotonic nonzero
-64-bit `NetworkObjectId`, and reliably broadcasts the lifecycle. IDs are never
-derived from `Entity.id` and are not reused after despawn. `despawn(id)` sends
-the authoritative removal and destroys the mapped authority entity. Failed
-replication queueing disconnects that peer so a reconnect can rebuild from a
-fresh snapshot instead of silently diverging.
-
-On each post-handshake connection the authority sends snapshot begin, current
-spawns sorted by object ID, and matching end. The begin declares bounded count,
-registry schema and fingerprint. `ClientReplication(client, scene, registry)`
-consumes only `E3DR` lifecycle messages, validates exact framing/order/count and
-creates/destroys client entities. `poll()` returns non-replication network
-events; callers must not also poll the same client independently. Disconnect
-clears replicas. Client-authored `E3DR` messages are rejected by the authority.
-
-Lifecycle is the reliable base for the Phase 4 replication contract. Prediction
-is a separate typed character-input surface and is not automatically attached
-to replication transport.
-
-`PrefabRegistry.register_variable(prefab, field_id, name, type, default,
-max_bytes=...)` adds a canonical field definition before freeze. Supported
-types are `bool`, signed `int`, finite `float`, control-free UTF-8 `string` and
-copied `bytes`; values must fit the declared bound. `ServerReplication.variable`
-returns a writable authority `NetworkVar`. Actual changes increment its uint64
-version and mark it dirty; equal assignments do not. `flush()` reliably queues
-dirty fields and clears their dirty flags. Client variables are read-only and
-accept only known object/field/type updates with strictly newer versions.
-Late-join snapshots include every current field value before snapshot end.
-
-`PrefabRegistry.register_transform(prefab)` adds a `NetworkTransform` schema
-marker and changes the registry fingerprint. `ServerReplication.flush_transforms`
-accepts a nondecreasing uint64 simulation tick, assigns a monotonic uint64
-sequence and queues one fixed position/quaternion/scale frame per relevant
-object/connection using unreliable delivery. Local-space values must be finite;
-quaternions are normalized and scale components must be nonzero. Per-flush work
-is capped by `max_transform_sends`. `TransformFlushStats` reports queued,
-filtered, backpressured, budget-deferred, full/delta and byte counts;
-replaceable backpressure does not disconnect an otherwise healthy peer.
-
-`ServerReplication` defaults to a per-connection transform token budget of 256
-KiB/s, 64 KiB burst and 60 simulation ticks/s. All are bounded constructor
-arguments. An optional `priority(connection, object)` returns a finite numeric
-priority. `SpatialInterest(radius)` stores explicit connection observer
-positions, filters objects outside the radius and contributes nearer-first
-priority; object ID is the stable final tie-breaker. These policies never
-suppress reliable lifecycle, variables or RPCs.
-
-Each accepted full/delta sample is ACKed reliably. Authority sends a 64-byte
-quantized delta only from that connection/object's ACKed snapshot; otherwise it
-sends the 76-byte full frame. Delta ranges are signed int16 centimeters for
-position, 1/16000 quaternion-component difference and 1/1000 scale difference.
-Overflow/invalid reconstruction falls back to full. Sent baseline candidates
-and client histories are bounded. If a delta names an evicted client baseline,
-the client drops it and sends a monotonic reliable recovery request; authority
-clears that one baseline and its next relevant update is full.
-
-`ClientReplication(..., max_transform_samples=32)` stores at most 2–256 samples
-per object. Unknown, duplicate, stale-sequence and older-tick unreliable frames
-are dropped and counted rather than treated as connection corruption; malformed
-or schema-incompatible frames remain fatal. A newer sample for the same tick
-replaces that tick. `transform_snapshots(id)` exposes the immutable sample
-sequence and `interpolate_transforms(render_tick)` clamps outside history,
-linearly interpolates position and same-sign scale, steps mirrored scale sign
-changes to avoid an invalid zero scale, and normalized-shortest-path
-interpolates rotation before applying only to client replica entities. The
-optional server
-`relevance_filter(connection, object)` suppresses transform frames only; it does
-not despawn the object or hide its lifecycle/NetworkVar state.
-`delta_baseline_stats` exposes full/delta receive, ACK and recovery-request
-counts.
-
-`PrefabRegistry.register_rpc(prefab, rpc_id, name, direction, arguments,
-handler, reliable=..., rate_limit=..., require_owner=...)` adds a stable RPC to
-the frozen fingerprint. `arguments` is a tuple of `(NetworkValueType,
-max_bytes)` pairs with at most 16 entries. Supported values are the exact
-bounded primitive `NetworkVar` codecs. Client-to-server handlers receive
-`(authority_entity, sender_connection, *arguments)`; server-to-client handlers
-receive `(client_entity, *arguments)`. Handler lookup is registry-only.
-
-After initial synchronization, `ClientReplication.call_server` validates the
-local direction/schema and queues the declared delivery. The authority requires
-a known live object, newer per-connection invocation sequence, matching
-direction, and—when configured—`ServerReplication.owner(id) == sender`. It then
-enforces the registered per-second sliding limit before calling the handler on
-the server poll thread. `set_owner` accepts established connections only and
-clears ownership on disconnect. Excess calls are counted and dropped;
-malformed, replayed, wrong-direction or ownership-tampered calls disconnect the
-sender.
-
-`ServerReplication.call_client` and `broadcast_rpc` perform the inverse schema
-check and clients reject malformed, replayed or client-to-server calls from the
-authority channel. `RpcStats` reports received/executed/rate-limited counts.
-Reliable delivery does not confer authority. Game-specific validation remains
-the registered handler's responsibility.
-
-## Replicated match state
-
-`register_match_state(registry, prefab)` adds four bounded int64 fields to a
-dedicated prefab: phase, round, deadline simulation tick and transition
-revision. `ServerMatchState` accepts only `ServerReplication`, validates
-nondecreasing signed-int64 ticks and implements legal transitions among
-`WAITING`, `COUNTDOWN`, `PLAYING`, `ROUND_END` and `MATCH_END`. Countdown and
-intermission expiry is advanced explicitly from the authority simulation tick;
-wall-clock/render time never changes match authority.
-
-`ClientMatchState` accepts only `ClientReplication` and provides read-only
-properties plus `remaining_ticks(current_tick)`. All four values use the normal
-reliable dirty-field stream and complete late-join snapshot. A listen host has
-one `ServerMatchState` on its authority; its local transport client has no
-second timer or authority transition path.
-
-## Replication resynchronization
-
-`ClientReplication.request_resync()` is available only after initial sync and
-queues a reliable nonzero monotonic request. The authority validates replay and
-a 250 ms minimum interval, removes that peer from live-update recipients, and
-queues the same complete epoch/schema/lifecycle/value/transform snapshot used
-for late join. Readiness returns only after snapshot end is queued. Snapshot
-begin clears and recreates client replicas; exact same-version/same-value field
-updates crossing the boundary are idempotent, while older or conflicting
-versions remain protocol errors.
+# RIX implemented API contract
+
+This document describes the supported public Python surface. Names beginning
+with `_` and the C++ implementation are private unless documented otherwise.
+
+## Package and errors
+
+`rix.engine_version()` returns the native version. `rix.__version__`
+comes from the same `VERSION` file. `EngineError`, `AssetError`,
+`MissingAssetError`, `InvalidEntityError`, and `PhysicsError` are the public
+native exception hierarchy.
+
+Optional multiplayer APIs live under `rix.net`; the root exports the `net`
+module but does not flatten transport and replication types into the beginner
+namespace. `rix.net.NetworkError` is the networking exception. Builds with
+`RIX_ENABLE_NETWORKING=OFF` retain importable APIs but report an unavailable
+native backend rather than silently simulating internet connectivity.
+
+`rix` and `rix._rix` are authoritative. The transitional `easy3d` package
+emits `DeprecationWarning` and aliases the same classes, submodules, and native
+extension; mixed imports cannot create a second renderer runtime.
+
+## Pygame-owned World
+
+`World(screen, mode="gpu", fixed_hz=60, max_frame_seconds=0.25,
+max_catch_up_steps=5, ...)` requires the active Pygame CE display Surface on
+Windows. Pygame owns the window, queue, input polling, main loop, frame clock,
+and default audio. `handle_event(event)` translates only the supplied event and
+returns whether it was recognized. It never calls `pygame.event.get()`.
+
+`update(dt)` accepts finite non-negative seconds and advances the same scheduler,
+bounded fixed physics, callbacks, characters, collision delivery, timers, and
+deferred lifecycle operations as standalone Game. It never sleeps or advances
+physics a second time. `pause()` freezes simulation while rendering remains
+available.
+
+In GPU mode, `render()` lets bgfx/D3D11 perform the only presentation; calling
+Pygame display flip/update is unsupported. `set_overlay(surface)` installs a
+full-display, alpha-blended Pygame Surface copied into a native texture after
+3D/post-processing. Later changes require `world.overlay.update(surface)`.
+
+In Surface mode, `render()` renders offscreen, performs synchronous GPU
+readback, and returns an owned RGBA Pygame Surface without presenting. Pygame
+then owns the blit and `display.flip()`. `world.to_surface()` repeats blocking
+readback of the latest full-window 3D frame.
+
+`close()` is idempotent and must run before `pygame.quit()` so bgfx releases its
+swap chain before Pygame destroys the HWND. One bgfx renderer session may be
+active in the process.
+
+`SurfaceTexture(surface, srgb=True)` copies pixels, alpha, and row layout into
+owned contiguous RGBA8 storage. `.update(surface)` is explicit and revisioned;
+RIX never borrows Surface memory or automatically uploads each frame.
+`Viewport(world, size=... | rect=..., camera=...)` owns a copy of the supplied
+camera (or a snapshot of `world.camera`) and renders the shared scene into a
+dedicated native target of exactly that size. Its first default `to_surface()`
+blocks to produce an immediate image. Later default refreshes queue a native
+readback and return the newest completed cached Surface, normally one frame
+behind without stalling presentation. `blocking=True` waits for fresh pixels;
+`blocking=False` may return a transparent placeholder before the first request
+completes. `close()` cancels/abandons safely and is idempotent. Multiple
+Viewports have independent cameras, sizes, and cached output but share the
+world simulation and renderer thread. They do not claim input focus or consume
+events: the Pygame application decides which preview is active (typically with
+`viewport.rect.collidepoint(event.pos)`) and mutates that Viewport's camera.
+`Billboard(world, image=..., axis="free"
+| "y")` is a double-sided textured quad that faces the active camera.
+
+## Game
+
+`Game(title="RIX", resolution=(1280, 720), vsync=True, fps_limit=0, ...)`
+owns the native engine/window and optionally constructs a default scene,
+camera, lighting, and audio context. `run()` blocks until the native window
+closes or `stop()` is requested. `running` and `tick(fps=None)` provide a
+Pygame-style manual loop over the same native frame step and scheduler.
+`close()` is idempotent, closes a dormant manual session, and rejects closing
+inside an active frame or blocking managed loop.
+
+Each native frame calculates elapsed time, pumps SDL events, finalizes input,
+invokes the Python scheduler callback, runs bounded fixed simulation and
+gameplay callbacks, updates the audio listener, renders/presents exactly once,
+publishes counters, and applies the selected limit. Code after manual `tick()`
+is visible on the next presented frame. Managed and manual control cannot be
+mixed or entered recursively.
+
+Callbacks registered through `on_update`, `on_fixed_update`, input shortcuts,
+and timers run on the gameplay thread. Handles returned by registration can be
+cancelled. Callback mutation is permitted only inside the scheduler's guarded
+boundary.
+
+## Scene and entity lifetime
+
+`Scene` owns a native world ID and generational entity handles. Entity handles
+cannot cross scenes; destroyed handles raise `InvalidEntityError`. `Entity`
+provides name, active state, local/world transforms, parent/children,
+components, lookup, duplication helpers, and explicit `destroy()`.
+
+Every entity slot owns zero-initialized `velocity`, `acceleration`,
+`angular_velocity`, and `angular_acceleration`. All are live assignable vectors;
+linear values use world units and angular values use degrees. Ordinary entities
+integrate them on the fixed clock using semi-implicit Euler, including through
+parent transforms. `speed`, `movement_direction`, `forward`, `right`, `up`,
+direction conversion, `face_direction()`, and `launch()` provide typed helpers.
+Facing remains opt-in.
+
+`teleport(..., reset_motion=False)` preserves motion by default. Disabling an
+entity snapshots and freezes its motion while physics collision remains
+stationary; re-enabling restores it. Slot destruction/reuse clears motion.
+
+The active `with scene:` context controls convenience construction. A `Game`
+may attach one active scene; load/unload operations keep ownership explicit.
+
+## Rendering
+
+`Cube`, `Sphere`, `Plane`, and `Model` are convenience entities built over
+`MeshRenderer`. Material controls include color, texture, opacity, roughness,
+metallic response, emissive color, and shadow flags. Camera projection,
+lighting, debug lines, visibility, culling, instancing, renderer counters,
+quality presets, shadows, and post-processing are native.
+
+`Cube`, `Sphere`, `Plane`, and `Model` accept
+`cull_mode: Literal["back", "front", "none"] | None` and
+`double_sided: bool | None`. Omitting both selects back-face culling for
+primitives. `double_sided=True` is shorthand for `cull_mode="none"`, while
+`False` selects `"back"`; incompatible simultaneous values raise `ValueError`
+instead of silently choosing one. `Entity` and `MeshRenderer` expose live,
+synchronized `cull_mode` and `double_sided` properties.
+
+For imported models the precedence is explicit constructor/runtime override,
+then glTF material `doubleSided`, then back-face culling. OBJ has no equivalent
+flag and therefore uses the fallback. An explicit model override applies to all
+parts. Culling state participates in the instancing compatibility key and is
+also applied to shadow submission. Negative-determinant transforms swap front
+and back culling so the semantic visible side is preserved. Two-sided lit and
+normal-mapped fragments reverse the final shading normal for back faces;
+unlit shading remains unaffected.
+
+Face culling discards triangles by winding. It is independent of depth testing
+and does not mutate geometry, colliders, physics contacts, or raycast results.
+
+The current graphics backend is Windows D3D11 through bgfx. Python never owns
+an OpenGL or Direct3D context.
+
+## Input and player
+
+`Input` exposes remappable actions plus immutable per-frame keyboard, mouse,
+pointer, and gamepad state. `Player` composes a native `CharacterController`
+with first-/third-person camera policy. Default controls support move, look,
+jump, sprint, crouch, pointer capture, and release. `controls=False` disables
+automatic polling for code-driven movement.
+
+`Player` character tuning uses `move_speed` and `move_acceleration`. The old
+scalar `speed` and `acceleration` constructor calls fail with migration
+guidance. `view_forward`, `view_right`, and `view_up` include camera look;
+inherited facing vectors describe the character body.
+
+Physical `key`, `mouse`, press, and release helpers coexist with named action
+maps. `Game.on_key` and `Game.on_mouse` are edge decorators. `Game.raycast`,
+`Entity.raycast`, and camera-aware `Player.raycast` delegate to the existing
+physics query path and return `PhysicsHit`.
+
+Action edges preserve a press and release that both arrive in one native poll.
+`Game.on_input`, `Game.on_key`, and `Game.on_mouse` dispatch those edges during
+the variable-rate update of the same rendered frame rather than waiting for a
+fixed tick. This prevents quick interactions from being lost on high-refresh
+frames that perform no physics step.
+The automatic `Player` samples jump during render update and latches it until
+one fixed step consumes the request, so a faster render clock cannot lose a
+jump between physics ticks. Jump is edge-triggered and is neither buffered nor
+resubmitted while held. Normalized movement input uses ground friction and
+projection-based acceleration. Airborne movement has no friction and caps only
+the wish-direction projection, so forward-only input cannot continually gain
+speed while a perpendicular strafe can curve and increase total speed. A jump
+pressed on a grounded landing tick skips friction and preserves momentum.
+
+`CharacterController.set_sequenced_input()` accepts strictly increasing,
+nonzero input sequences and includes movement, heading, jump, sprint, and
+crouch intent. `last_input_sequence`, `correct_state()`, and `replay_input()`
+are the native boundary used by `rix.net.PredictedCharacterController` for
+bounded client reconciliation. Ordinary `set_input()` remains valid and does
+not advance the network sequence.
+
+## Optional networking
+
+`rix.net.Session` is a nonblocking safe-message façade for RIX, Pygame-only,
+and headless programs. `host()` creates one listen authority plus an isolated
+local logical client; `join()` creates only a client. `send()` routes from the
+session's client identity to its authority. Server routing is explicit through
+`send_to()` or `broadcast()`. Named handlers are added with `on()` and removed
+with `off()`. User callbacks run only from `update()`.
+
+The application codec is bounded UTF-8 JSON supporting only documented basic
+values and explicitly tagged bytes. It rejects non-finite numbers, non-string
+mapping keys, excessive nesting/containers, malformed frames, and oversized
+payloads. It does not deserialize classes, use pickle, or evaluate code.
+
+`rix.net.Client`, `Server`, and `ListenServer` expose the lower typed transport.
+`Server` owns a fixed-step scheduler and optional authoritative `Scene`, and
+can run without a window, renderer, Pygame, or GPU. `Client.connect()` and
+`Session.join()` do not create an implicit authority. Reliable and unreliable
+delivery, bounded native queues, timeouts, protocol/schema handshake,
+backpressure status, metrics, clean disconnect, and gameplay-thread callback
+dispatch are part of the transport contract.
+
+`PrefabRegistry` declares local prefab factories, typed `NetworkVar` fields,
+transforms, and bounded RPC schemas. `ServerReplication` owns monotonic object
+IDs, authoritative values, ownership, snapshots/deltas, transform baselines,
+interest and budget policy, and RPC validation. `ClientReplication` mirrors
+registered objects, requests explicit resynchronization, interpolates bounded
+transform history, and dispatches allowed RPCs. Neither side imports arbitrary
+classes named by remote input.
+
+`PredictedCharacterController` is a character-motor-specific sequencing and
+reconciliation helper. It is not a generic deterministic rollback system.
+`LanDiscoveryAnnouncer`/`LanDiscoveryBrowser` provide optional IPv4 LAN
+advertisement. `SignalingServer`/`SignalingClient` provide a bounded optional
+self-hosted room-code directory whose result is a numeric direct endpoint.
+Direct IP and room lookup do not promise NAT traversal; hosted matchmaking and
+packet relay infrastructure are outside the implemented contract.
+
+`World.attach_session(session)` makes the existing Pygame/RIX frame update the
+sole poll point for that session. Attached sessions continue polling while
+simulation is paused and close before the World by default. Detachment restores
+manual polling. Calling `Session.update()` manually while it is attached is an
+application error because it would create two event-dispatch points.
+
+Replicated match phase is opt-in and separate from local UI state.
+`register_match_state()` declares stable phase/round/deadline/revision fields;
+`ServerMatchState` is the only transition owner and advances from monotonic
+server ticks. `ClientMatchState` exposes a read-only late-join-safe view and
+never executes authority callbacks merely because a revision arrived.
+
+## State and animation selection
+
+`StateMachine(initial)` supports decorator and advanced registration APIs,
+safe deferred `change()`, stable prioritized conditions, state-local timers,
+and bounded transition loops. Initial entry occurs on the first update so all
+decorators are installed first. `Entity.state_machine(initial)` registers the
+machine exactly once with its owning `Game` and ties cancellation to entity
+lifetime.
+
+`AnimationSelection.play(name, restart=False)` tracks current/previous clip
+intent and a revision counter without restarting the same name by default.
+State `animation=` metadata drives an attached entity's selection. This does
+not extend the renderer contract to GPU skeletal deformation; imported models
+still render their base pose.
+
+## Physics
+
+`Collider`, `Rigidbody`, `CharacterController`, `PhysicsMaterial`, and
+`Constraint` expose Jolt through RIX-owned handles. Supported behavior
+includes static/dynamic/kinematic bodies, trigger events, contact snapshots,
+raycasts, shape casts, overlaps, box/sphere/capsule/mesh shapes, fixed/distance
+constraints, CCD, impulses, forces, teleport, slopes, steps, sprinting,
+crouching, ground friction, air strafing, and edge-triggered jumping.
+
+Physics stepping occurs on the fixed clock. Native results are immutable
+snapshots when delivered to Python.
+
+## Optional multiplayer contract
+
+`rix.net` exposes transport, Session messaging, registered replication/RPC,
+supported character prediction, LAN discovery, match state, and the optional
+self-hosted signaling directory. Signaling only resolves a room code to a
+numeric direct endpoint. No public API promises a packet relay, NAT traversal,
+hosted matchmaking, generic lockstep, or generic rollback.
+
+The future rollback boundary is normative in `docs/rollback-contract.md` but
+is not currently importable. In particular, `PredictedCharacterController`
+does not make an Entity, Scene, Python callback, or Jolt world deterministic.
+
+Dynamic/kinematic bodies expose their actual linear velocity and degree-based
+angular velocity through both `Entity` and `Rigidbody`. Entity acceleration is
+added independently of mass and gravity. Character linear velocity is
+assignable; character angular motion is Y-only to preserve upright collision.
+Adding/removing physics ownership transfers current motion. Collider-only
+static entities reject nonzero motion and direct callers to a kinematic body.
+
+## Assets
+
+`load_image`, `load_obj`, and `load_gltf` validate bounded local filesystem
+assets. `TextureCache` and `ModelCache` reuse immutable native data. OBJ/MTL,
+PNG/JPEG, glTF/GLB mesh/material/skeleton/animation metadata, and animation
+sampling are supported within the documented subset.
+
+### AutoTexture and material maps
+
+`Game` accepts optional `pixels_per_unit=16`, `texture_filter="nearest"`,
+`texture_mode="auto"`, and `texture_hot_reload=True` defaults. `Cube`, `Plane`,
+and `Sphere` accept per-object versions plus `normal_map`, `roughness_map`,
+`metallic_map`, `emissive_map`, `ambient_occlusion_map`, and
+`normal_strength=1.0`, plus optional `roughness`, `metallic`, and `emission`
+scalar factors. A missing local `.png` base path is generated
+automatically; an existing malformed file raises `AssetError` and is not
+replaced.
+
+Automatic mapping selects tile for cubes/planes, spherical for spheres, and
+preserve for imported authored UVs. `texture_mode="atlas"` selects the
+documented cube cross. `normal_map=False` disables discovery. Otherwise the
+engine searches conventional suffixes. `MeshRenderer` exposes live primitive
+texture/map/density/filter/mode/normal-strength properties without replacing
+the entity. Map-backed roughness/metallic/emission defaults use a neutral scalar
+factor of one; absent maps retain the legacy `0.5`/`0`/`0` scalar defaults.
+Atlas face regions retain their creation-time world proportions when local or
+parent scale changes; live world dimensions continue to drive tile/sphere
+mapping.
+
+`TextureCache.load(..., hot_reload=True)` shares canonical path/color-space
+entries and `poll_changes()` returns the number of valid replacements. A failed
+reload retains the prior image. `RendererStats` additionally reports
+`cpu_frame_ms`, `gpu_frame_ms`, `texture_count`, and
+`texture_memory_bytes`; zero timing means the active backend did not report that
+counter.
+
+## Advanced lighting and skyboxes
+
+`Light.type` accepts `"ambient"`, `"directional"`, `"point"`, and `"spot"`.
+All lights expose `color` and non-negative `intensity`; local lights expose a
+positive `range`, and spots expose full-cone `angle` plus `inner_angle` where
+`0 <= inner_angle <= angle < 180`. `casts_shadows`, `shadow_resolution` (zero
+means preset default), and `shadow_bias` are live. Entity transforms determine
+position/direction and `enabled=False` removes a source from selection.
+
+Multiple sources coexist. The first explicit ambient or directional light
+removes the matching beginner defaults, while later explicit sources supplement
+it. The automatic scene uses low ambient plus a warm key/cool fill directional
+rig so axis-aligned faces do not collapse to one ambient shade. The fill tracks
+the `game.lighting.directional` key intensity at its default ratio.
+`Scene.lights(kind=None)` returns live registered lights. Preset budgets are
+`1/4/2`, `2/16/8`, `4/32/16`, and `4/64/32` for directional/point/spot.
+
+Every `Scene` starts with a procedural `Skybox`; `Game.skybox` proxies the
+active scene. Assignment accepts a `Skybox`, a panorama path, `"default"`, or
+`None`. A panorama must be exactly 2:1. Cubemap folders/mappings use
+right/left/top/bottom/back/front square images of identical size. Missing paths
+generate bounded PNG templates with exclusive writes.
+
+`RendererStats` adds active counts per light kind, `culled_lights`,
+`shadow_passes`, `active_shadow_casters`, `dropped_shadow_casters`, and
+`shadow_memory_bytes`.
+
+## Audio
+
+`Audio`, `Sound`, and `AudioSource` provide bounded WAV loading, playback,
+mixing, looping, volume, pitch, and positional attenuation. SDL owns the output
+device; RIX owns decoded PCM and voice state.
+
+## UI
+
+`HUD`, `Panel`, `Text`, `Image`, `Sprite`, `Button`, `ProgressBar`,
+`HealthBar`, `ScoreboardPanel`, and row/column/grid/stack containers form a
+retained native overlay. Layout, anchors, visibility, hit testing, and button
+callbacks remain bound to the owning game and scene.
+
+## Gameplay utilities
+
+Public convenience helpers include health/damage/death, enemies, hitscan
+weapons, interactions, spawn/respawn, teams, scoreboards, event buses, timers,
+cooldowns, state machines, easing, and tweens. They compose normal entities,
+physics queries, callbacks, and UI rather than a parallel runtime.
+
+`Entity.add_health`, `Player.add_weapon`, `Game.manage_timer`,
+`Game.manage_state_machine`, `Game.manage_tween`, and `Entity.animate` add
+optional managed ownership while preserving standalone/manual advancement.
+Managed entity helpers cancel on entity destruction or scene detachment and
+must never be registered twice. `Game.play_sound` uses the existing per-game
+WAV cache and playback backend.
+
+Managed `Timer` and `Tween` registrations preserve the utility's selected
+clock domain and pause/resume state. Game-level `after` and `every` use
+render/game-loop time, persist across scene replacement, and end on explicit
+cancellation or game close. Scheduler exception handling remains governed by
+the game's `fail_fast` setting.
+
+Curated `rix.time` and `rix.advanced` modules improve discovery without
+removing compatible root exports.
+
+## Diagnostics and typing
+
+Asset diagnostics, the debug overlay, renderer/scheduler counters, `.pyi`
+stubs, `py.typed`, and strict consumer type checks are part of the supported
+developer experience. Diagnostics observe state and do not mutate scenes.

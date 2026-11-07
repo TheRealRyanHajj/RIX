@@ -13,11 +13,9 @@ int fail(const int code, const char* const message) {
     std::cerr << message << '\n';
     return code;
 }
-
 std::vector<std::uint8_t> bytes(const std::string& value) {
     return {value.begin(), value.end()};
 }
-
 } // namespace
 
 int main() {
@@ -44,7 +42,6 @@ int main() {
             queue.size() != 1) {
             return fail(3, "bounded transport event queue lost FIFO ordering");
         }
-
         easy3d::SimulatedNetworkConfig config;
         config.one_way_latency_seconds = 0.050;
         config.random_seed = 7;
@@ -61,7 +58,6 @@ int main() {
             second_connected[0].type != easy3d::TransportEventType::Connected) {
             return fail(4, "simulated endpoints did not emit connected events");
         }
-
         const std::vector<std::uint8_t> hello = bytes("hello");
         const std::vector<std::uint8_t> world = bytes("world");
         if (first.send(network.first().connection(),
@@ -107,7 +103,6 @@ int main() {
                 easy3d::SendStatus::MessageTooLarge) {
             return fail(9, "simulated send validation is incorrect");
         }
-
         easy3d::SimulatedNetworkConfig loss_config;
         loss_config.loss_probability = 1.0;
         loss_config.random_seed = 42;

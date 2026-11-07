@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from easy3d import Camera, Vec3
+from rix import Camera, Vec3
 
 
 def test_default_camera_basis_and_view_matrix() -> None:
@@ -37,7 +37,7 @@ def test_projection_uses_resolution_and_configurable_clipping() -> None:
 
 
 def test_orthographic_projection_and_scene_round_trip() -> None:
-    from easy3d import Scene
+    from rix import Scene
 
     camera = Camera(
         position=(2.0, 3.0, 4.0),

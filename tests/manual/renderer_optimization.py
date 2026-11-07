@@ -6,7 +6,7 @@ import argparse
 import threading
 import time
 
-from easy3d import Camera, Cube, Game, Light, Scene
+from rix import Camera, Cube, Game, Light, Scene
 
 
 def main(*, seconds: float = 5.0) -> None:
@@ -21,7 +21,7 @@ def main(*, seconds: float = 5.0) -> None:
         Cube(position=(-100, 0, 0), color=(0.2, 0.7, 0.95))
         Cube(position=(0, 0, 20), color=(0.2, 0.7, 0.95))
 
-    game = Game("Easy3D culling + instancing", (960, 540), vsync=False)
+    game = Game("RIX culling + instancing", (960, 540), vsync=False)
     game.load_scene(scene)
 
     def stop_later() -> None:

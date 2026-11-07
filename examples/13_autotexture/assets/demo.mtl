@@ -1,0 +1,3 @@
+newmtl AutoTexture
+Kd 1 1 1
+map_Kd ../generated/obj_albedo.png

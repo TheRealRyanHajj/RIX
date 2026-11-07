@@ -24,11 +24,34 @@ struct Vertex final {
     Vec3 normal{0.0F, 1.0F, 0.0F};
     Vec2 uv{};
     Color color{};
+    // xyz is the tangent direction and w is the bitangent handedness.
+    std::array<float, 4> tangent{1.0F, 0.0F, 0.0F, 1.0F};
 };
 
 struct Bounds final {
     Vec3 minimum{};
     Vec3 maximum{};
+};
+
+enum class TextureMode {
+    Auto,
+    Tile,
+    Atlas,
+    Sphere,
+    Preserve,
+};
+
+enum class CullMode {
+    Back,
+    Front,
+    None,
+};
+
+struct TextureMappingData final {
+    // X-facing, Y-facing, and Z-facing UV repeat factors.
+    std::array<Vec2, 3> repeat{{{1.0F, 1.0F}, {1.0F, 1.0F}, {1.0F, 1.0F}}};
+    // Front, back, right, left, top, and bottom normalized atlas rectangles.
+    std::array<std::array<float, 4>, 6> atlas{};
 };
 
 struct MeshData final {
@@ -45,10 +68,12 @@ struct Material final {
     bool lit{true};
     bool depth_test{true};
     bool depth_write{true};
-    bool cull_back_faces{true};
+    CullMode cull_mode{CullMode::Back};
     float metallic{0.0F};
     float roughness{0.5F};
     float emission{0.0F};
+    float normal_strength{1.0F};
+    bool packed_metallic_roughness{false};
     bool casts_shadows{true};
     bool receives_shadows{true};
 
@@ -134,5 +159,12 @@ struct Frustum final {
 [[nodiscard]] MeshData make_uv_sphere_mesh(float radius = 0.5F,
                                            std::uint32_t segments = 24,
                                            std::uint32_t rings = 16);
+void generate_tangents(MeshData& mesh);
+[[nodiscard]] TextureMappingData calculate_texture_mapping(
+    TextureMode mode,
+    Vec3 world_dimensions,
+    std::uint32_t image_width,
+    std::uint32_t image_height,
+    float pixels_per_unit = 16.0F);
 
 } // namespace easy3d

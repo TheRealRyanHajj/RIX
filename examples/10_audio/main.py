@@ -1,4 +1,4 @@
-"""Easy3D WAV playback and camera-relative positional-audio example."""
+"""RIX WAV playback and camera-relative positional-audio example."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import threading
 import time
 import wave
 
-from easy3d import AudioSource, Camera, Cube, Entity, Game, Light, Plane, Scene
+from rix import AudioSource, Camera, Cube, Entity, Game, Light, Plane, Scene
 
 
 def _write_tone(path: Path, frequency: float) -> None:
@@ -43,13 +43,13 @@ class MovingEmitter(Cube):
 
 
 def run(*, seconds: float | None = None) -> None:
-    with tempfile.TemporaryDirectory(prefix="easy3d-audio-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rix-audio-") as temporary:
         low_path = Path(temporary) / "low.wav"
         high_path = Path(temporary) / "high.wav"
         _write_tone(low_path, 330.0)
         _write_tone(high_path, 550.0)
 
-        game = Game("Easy3D — Positional Audio", (960, 540), vsync=True)
+        game = Game("RIX — Positional Audio", (960, 540), vsync=True)
         low = game.audio.play(
             game.audio.load(low_path),
             loop=True,

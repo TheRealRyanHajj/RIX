@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from easy3d import Entity, Quat, Scene, Vec2, Vec3
+from rix import Entity, Quat, Scene, Vec2, Vec3
 
 
 def test_vec2_and_vec3_value_operations() -> None:
@@ -52,6 +52,26 @@ def test_entity_vector_properties_are_live_native_proxies() -> None:
 
     with pytest.raises(ValueError, match="nonzero"):
         entity.scale = (1, 0, 1)
+
+
+def test_incremental_euler_rotation_crosses_singularities_and_full_turns() -> None:
+    scene = Scene("continuous Euler rotation")
+    entity = scene.create_entity()
+    entity.rotation = (10, 0, 20)
+
+    for _ in range(400):
+        entity.ry += 1
+
+    assert entity.rotation.almost_equal(Vec3(10, 400, 20), tolerance=1.0e-5)
+    assert entity.quaternion.almost_equal(
+        Quat.from_euler((10, 400, 20)),
+        tolerance=1.0e-5,
+    )
+
+    # Rotation hints belong to the native entity, not to one Python wrapper.
+    alias = scene.entities[0]
+    alias.ry += 20
+    assert entity.ry == pytest.approx(420)
 
 
 def test_hierarchy_world_transform_dirty_propagation_and_cycle_rejection() -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from easy3d import DebugOverlay, Game, Scene, diagnose_asset
+from rix import DebugOverlay, Game, Scene, diagnose_asset
 
 
 _PNG_2X2 = (

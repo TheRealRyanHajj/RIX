@@ -30,7 +30,7 @@ private:
                                    .time_since_epoch()
                                    .count();
             const auto candidate =
-                root / ("easy3d_model_test_" + std::to_string(ticks) + "_" +
+                root / ("rix_model_test_" + std::to_string(ticks) + "_" +
                         std::to_string(random()));
             std::error_code error;
             if (std::filesystem::create_directory(candidate, error)) {
@@ -190,10 +190,10 @@ int main() {
             // Expected.
         }
 
-        std::cout << "easy3d_model_tests: PASS\n";
+        std::cout << "rix_model_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_model_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_model_tests: FAIL: " << error.what() << '\n';
         return 20;
     }
 }

@@ -4,7 +4,9 @@ import time
 
 import pytest
 
-from easy3d import Entity, NetworkError, Scene, Server, network, replication
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import NetworkError, Server, replication
 
 
 def _server_calls_registry(
@@ -204,10 +206,8 @@ def test_loopback_rpc_dispatch_rate_limit_and_ownership_guard() -> None:
         owner.close(destroy=True)
         server.stop()
         server.unload_scene(clear=True)
-
-
-def test_rpc_codec_rejects_argument_errors_and_root_exports() -> None:
-    import easy3d
+def test_rpc_codec_rejects_argument_errors_and_net_exports() -> None:
+    import rix
 
     registry = _server_calls_registry([], [])
     spec = registry.rpc(1, 1)
@@ -220,9 +220,9 @@ def test_rpc_codec_rejects_argument_errors_and_root_exports() -> None:
             1,
             (True, 1, 1.0, "this string is too long", b""),
         )
-    assert easy3d.RpcDirection is replication.RpcDirection
-    assert easy3d.RpcSpec is replication.RpcSpec
-    assert easy3d.RpcStats is replication.RpcStats
+    assert rix.net.RpcDirection is replication.RpcDirection
+    assert rix.net.RpcSpec is replication.RpcSpec
+    assert rix.net.RpcStats is replication.RpcStats
 
 
 @pytest.mark.parametrize("kind", ("unknown", "truncated"))

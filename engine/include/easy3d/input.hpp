@@ -38,6 +38,7 @@ public:
 
     void set_control(std::string_view control, float value);
     [[nodiscard]] float control_value(std::string_view control) const;
+    [[nodiscard]] InputActionState control_state(std::string_view control) const;
     void add_pointer_motion(float x, float y, float delta_x, float delta_y);
     void add_wheel(float x, float y);
     [[nodiscard]] PointerState pointer_state() const;
@@ -76,6 +77,7 @@ private:
 
     mutable std::mutex mutex_;
     std::unordered_map<std::string, float> controls_;
+    std::unordered_map<std::string, InputActionState> control_states_;
     std::unordered_map<std::string, Action> actions_;
     PointerState pointer_;
     bool focused_{true};

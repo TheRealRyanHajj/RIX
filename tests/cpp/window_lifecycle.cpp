@@ -5,7 +5,7 @@
 #include <thread>
 
 int main() {
-    easy3d::Engine engine({"Easy3D native lifecycle", 640, 360, false, 120.0});
+    easy3d::Engine engine({"RIX native lifecycle", 640, 360, false, 120.0});
     std::thread stopper([&engine] {
         std::this_thread::sleep_for(std::chrono::milliseconds(750));
         engine.stop();

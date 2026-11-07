@@ -1,256 +1,58 @@
-"""Public Easy3D API."""
+"""Deprecated compatibility facade for the renamed :mod:`rix` package."""
 
-from ._easy3d import (
-    AssetError,
-    EngineError,
-    InvalidEntityError,
-    MissingAssetError,
-    NetworkError,
-    PhysicsError,
-    engine_version,
-    native_add,
-)
-from .assets import (
-    AnimationChannelInfo,
-    AnimationClipInfo,
-    GltfInfo,
-    ImageInfo,
-    ModelCache,
-    ModelInfo,
-    ModelMaterialInfo,
-    ModelPartInfo,
-    JointPose,
-    SkeletonInfo,
-    SkeletonJointInfo,
-    TextureCache,
-    load_image,
-    load_gltf,
-    load_obj,
-)
-from .audio import Audio, AudioSource, Sound
-from .camera import Camera, Projection
-from .components import (
-    CharacterController,
-    Collider,
-    LightComponent,
-    MeshRenderer,
-    PhysicsMaterial,
-    Rigidbody,
-)
-from . import debug, discovery, network, physics, replication
-from .discovery import LanDiscoveryAnnouncer, LanDiscoveryBrowser
-from .diagnostics import AssetDiagnostic, AssetKind, DebugOverlay, diagnose_asset
-from .entity import Entity
-from ._version import __version__
-from .game import Game, GraphicsPreset, RendererStats
-from .input import ActionState, Binding, Input, PointerState
-from .lights import Light
-from .math import Quat, Vec2, Vec3
-from .match import (
-    ClientMatchState,
-    MatchPhase,
-    MatchStateFields,
-    ServerMatchState,
-    register_match_state,
-)
-from .network import (
-    ADVERSE_NETWORK_CONDITION,
-    LAN_NETWORK_CONDITION,
-    REGIONAL_NETWORK_CONDITION,
-    REPRESENTATIVE_NETWORK_CONDITIONS,
-    BackendImpairment,
-    ListenServer,
-    NetworkCondition,
-    Server,
-    impair_backend,
-)
-from .primitives import Cube, Model, Plane, Sphere
-from .physics import CollisionEvent, Constraint, PhysicsHit
-from .player import Player
-from .prediction import (
-    CharacterCorrection,
-    CharacterInputCommand,
-    CorrectionStats,
-    PredictedCharacterController,
-    PredictionRole,
-    ReconciliationResult,
-    RemoteInterpolationStats,
-    RemoteTransformInterpolator,
-)
-from .replication import (
-    ClientReplication,
-    DeltaBaselineStats,
-    NetworkObjectId,
-    NetworkTransform,
-    NetworkValueType,
-    NetworkVar,
-    PrefabId,
-    PrefabRegistry,
-    RpcArgumentSpec,
-    RpcDirection,
-    RpcSpec,
-    RpcStats,
-    ServerReplication,
-    SpatialInterest,
-    TransformFlushStats,
-    TransformReplicationStats,
-    TransformSnapshot,
-)
-from .scene import Scene
-from .scheduler import (
-    CallbackStats,
-    SchedulerStats,
-    ScriptCallbackError,
-    ScriptRole,
-    client_only,
-    current_script_role,
-    server_only,
-)
-from .utilities import (
-    ClockDomain,
-    Cooldown,
-    Easing,
-    EventBus,
-    State,
-    StateMachine,
-    Subscription,
-    Timer,
-    Transition,
-    Tween,
-)
-from .ui import Anchor, Button, HUD, Panel, Sprite, Stack, Text, UIElement
+from __future__ import annotations
 
-__all__ = [
-    "AnimationChannelInfo",
-    "AnimationClipInfo",
-    "Audio",
-    "AudioSource",
-    "Anchor",
-    "Button",
-    "HUD",
-    "Panel",
-    "Sprite",
-    "Stack",
-    "Text",
-    "UIElement",
-    "ADVERSE_NETWORK_CONDITION",
-    "BackendImpairment",
-    "EngineError",
-    "AssetError",
-    "AssetDiagnostic",
-    "AssetKind",
-    "Camera",
-    "CallbackStats",
-    "CharacterController",
-    "CharacterCorrection",
-    "CharacterInputCommand",
-    "ClientMatchState",
-    "ClientReplication",
-    "DeltaBaselineStats",
-    "DebugOverlay",
-    "Collider",
-    "CollisionEvent",
-    "Constraint",
-    "ClockDomain",
-    "Cooldown",
-    "CorrectionStats",
-    "Cube",
-    "Entity",
-    "Easing",
-    "EventBus",
-    "Game",
-    "GraphicsPreset",
-    "GltfInfo",
-    "InvalidEntityError",
-    "ImageInfo",
-    "Input",
-    "Light",
-    "LightComponent",
-    "LanDiscoveryAnnouncer",
-    "LanDiscoveryBrowser",
-    "JointPose",
-    "LAN_NETWORK_CONDITION",
-    "ListenServer",
-    "MissingAssetError",
-    "NetworkError",
-    "NetworkCondition",
-    "NetworkObjectId",
-    "NetworkTransform",
-    "NetworkValueType",
-    "NetworkVar",
-    "PhysicsError",
-    "PhysicsMaterial",
-    "PhysicsHit",
-    "PrefabId",
-    "PrefabRegistry",
-    "RpcArgumentSpec",
-    "RpcDirection",
-    "RpcSpec",
-    "RpcStats",
-    "MeshRenderer",
-    "MatchPhase",
-    "MatchStateFields",
-    "Model",
-    "ModelCache",
-    "ModelInfo",
-    "ModelMaterialInfo",
-    "ModelPartInfo",
-    "Quat",
-    "Projection",
-    "PointerState",
-    "Player",
-    "PredictedCharacterController",
-    "PredictionRole",
-    "REGIONAL_NETWORK_CONDITION",
-    "REPRESENTATIVE_NETWORK_CONDITIONS",
-    "ReconciliationResult",
-    "RemoteInterpolationStats",
-    "RemoteTransformInterpolator",
-    "RendererStats",
-    "Rigidbody",
-    "ActionState",
-    "Binding",
-    "Plane",
-    "Scene",
-    "Server",
-    "ServerReplication",
-    "ServerMatchState",
-    "TransformFlushStats",
-    "TransformReplicationStats",
-    "TransformSnapshot",
-    "SchedulerStats",
-    "ScriptCallbackError",
-    "ScriptRole",
-    "SkeletonInfo",
-    "SkeletonJointInfo",
-    "Sphere",
-    "SpatialInterest",
-    "Sound",
-    "State",
-    "StateMachine",
-    "Subscription",
-    "Timer",
-    "Transition",
-    "Tween",
-    "Vec2",
-    "Vec3",
-    "TextureCache",
-    "__version__",
-    "engine_version",
-    "impair_backend",
+import importlib
+import sys
+import warnings
+
+warnings.warn(
+    "easy3d was renamed to rix; replace 'import easy3d' with 'import rix'",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+import rix as _rix_package
+from rix import *  # noqa: F401,F403
+
+__all__ = _rix_package.__all__
+__version__ = _rix_package.__version__
+
+_FORWARDED_MODULES = (
+    "_rix",
+    "advanced",
+    "assets",
+    "audio",
+    "autotexture",
+    "camera",
+    "components",
     "debug",
-    "diagnose_asset",
-    "discovery",
+    "diagnostics",
+    "entity",
+    "game",
+    "gameplay",
+    "input",
+    "lights",
+    "math",
     "physics",
-    "replication",
-    "load_image",
-    "load_gltf",
-    "load_obj",
-    "native_add",
-    "network",
-    "register_match_state",
-    "client_only",
-    "current_script_role",
-    "server_only",
-]
+    "player",
+    "primitives",
+    "scene",
+    "scheduler",
+    "skybox",
+    "time",
+    "ui",
+    "utilities",
+    "world",
+)
 
+for _module_name in _FORWARDED_MODULES:
+    _forwarded_module = importlib.import_module(f"rix.{_module_name}")
+    sys.modules[f"{__name__}.{_module_name}"] = _forwarded_module
+    setattr(sys.modules[__name__], _module_name, _forwarded_module)
+
+# Preserve the most common legacy native import without shipping a second .pyd.
+sys.modules[f"{__name__}._easy3d"] = sys.modules["rix._rix"]
+_easy3d = sys.modules["rix._rix"]
+
+del _forwarded_module, _module_name

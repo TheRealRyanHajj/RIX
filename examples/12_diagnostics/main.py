@@ -1,4 +1,4 @@
-"""Structured asset reporting plus the native Easy3D runtime debug overlay."""
+"""Structured asset reporting plus the native RIX runtime debug overlay."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ import tempfile
 import threading
 import time
 
-from easy3d import Cube, DebugOverlay, Game, Light, Plane, Scene, diagnose_asset
+from rix import Cube, DebugOverlay, Game, Light, Plane, Scene, diagnose_asset
 
 
 def run(*, seconds: float | None = None) -> None:
-    with tempfile.TemporaryDirectory(prefix="easy3d-diagnostics-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rix-diagnostics-") as temporary:
         obj = Path(temporary) / "triangle.obj"
         obj.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", encoding="utf-8")
         # Reports use the production importer but capture expected content errors.
@@ -24,7 +24,7 @@ def run(*, seconds: float | None = None) -> None:
             f"message={missing.error_message}"
         )
 
-        game = Game("Easy3D — diagnostics", (960, 540), vsync=True)
+        game = Game("RIX — diagnostics", (960, 540), vsync=True)
         scene = Scene("diagnostics example")
         with scene:
             Light("ambient", intensity=0.3)

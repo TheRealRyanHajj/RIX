@@ -1,6 +1,7 @@
 #include "easy3d/scene.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -49,6 +50,13 @@ int main() {
         reused.id() == first.id()) {
         return fail(6, "entity slot reuse did not advance generation");
     }
+    if (!easy3d::almost_equal(world.motion(reused).velocity, easy3d::Vec3{}) ||
+        !easy3d::almost_equal(world.motion(reused).acceleration, easy3d::Vec3{}) ||
+        !easy3d::almost_equal(world.motion(reused).angular_velocity, easy3d::Vec3{}) ||
+        !easy3d::almost_equal(world.motion(reused).angular_acceleration,
+                              easy3d::Vec3{})) {
+        return fail(24, "reused entity slot retained motion state");
+    }
 
     easy3d::World other_world;
     const easy3d::EntityHandle other = other_world.create_entity("other");
@@ -78,6 +86,89 @@ int main() {
     if (scene.entity_count() != 0 || scene.is_alive(scene_entity) ||
         scene.physics().is_alive(physics_body) || scene.physics().body_count() != 0) {
         return fail(10, "scene clear did not invalidate entities and physics bodies");
+    }
+
+    easy3d::Scene motion_scene("motion");
+    const easy3d::EntityHandle moving = motion_scene.create_entity("moving");
+    motion_scene.set_entity_velocity(moving, {1.0F, 0.0F, 0.0F});
+    motion_scene.set_entity_acceleration(moving, {2.0F, 0.0F, 0.0F});
+    motion_scene.set_entity_angular_velocity(moving, {0.0F, 10.0F, 0.0F});
+    motion_scene.set_entity_angular_acceleration(moving, {0.0F, 20.0F, 0.0F});
+    motion_scene.step_physics(0.5F);
+    if (!easy3d::almost_equal(motion_scene.entity_velocity(moving),
+                              {2.0F, 0.0F, 0.0F}) ||
+        !easy3d::almost_equal(motion_scene.local_transform(moving).position,
+                              {1.0F, 0.0F, 0.0F}) ||
+        !easy3d::almost_equal(motion_scene.entity_angular_velocity(moving),
+                              {0.0F, 20.0F, 0.0F})) {
+        return fail(25, "plain entity semi-implicit integration failed");
+    }
+    const easy3d::Vec3 rotated_forward =
+        motion_scene.local_transform(moving).rotation.rotate({0.0F, 0.0F, -1.0F});
+    if (!easy3d::almost_equal(
+            rotated_forward,
+            {-std::sin(10.0F * 3.14159265358979323846F / 180.0F),
+             0.0F,
+             -std::cos(10.0F * 3.14159265358979323846F / 180.0F)},
+            1.0e-4F)) {
+        return fail(26, "plain entity world-axis angular integration failed");
+    }
+
+    const easy3d::EntityHandle motion_parent = motion_scene.create_entity("parent");
+    easy3d::Transform parent_transform{};
+    parent_transform.position = {10.0F, 0.0F, 0.0F};
+    parent_transform.rotation = easy3d::Quat::from_euler_degrees({0.0F, 90.0F, 0.0F});
+    parent_transform.scale = {2.0F, 2.0F, 2.0F};
+    motion_scene.set_local_transform(motion_parent, parent_transform);
+    const easy3d::EntityHandle motion_child = motion_scene.create_entity("child");
+    motion_scene.set_entity_parent(motion_child, motion_parent);
+    const easy3d::Vec3 child_before = motion_scene.world_transform(motion_child).position;
+    motion_scene.set_entity_velocity(motion_child, {1.0F, 0.0F, 0.0F});
+    motion_scene.step_physics(0.25F);
+    if (!easy3d::almost_equal(motion_scene.world_transform(motion_child).position,
+                              child_before + easy3d::Vec3{0.25F, 0.0F, 0.0F},
+                              1.0e-4F)) {
+        return fail(27, "parented entity motion was not world-space");
+    }
+    motion_scene.set_entity_enabled(moving, false);
+    const easy3d::Vec3 frozen_position = motion_scene.world_transform(moving).position;
+    const easy3d::Vec3 frozen_velocity = motion_scene.entity_velocity(moving);
+    motion_scene.step_physics(1.0F);
+    if (!easy3d::almost_equal(motion_scene.world_transform(moving).position,
+                              frozen_position) ||
+        !easy3d::almost_equal(motion_scene.entity_velocity(moving), frozen_velocity)) {
+        return fail(28, "disabled entity did not freeze while retaining motion");
+    }
+    motion_scene.set_entity_enabled(moving, true);
+    motion_scene.step_physics(0.5F);
+    if (!easy3d::almost_equal(motion_scene.entity_velocity(moving),
+                              frozen_velocity + easy3d::Vec3{1.0F, 0.0F, 0.0F})) {
+        return fail(29, "re-enabled entity did not resume saved motion");
+    }
+    const easy3d::EntityHandle stable_rotation =
+        motion_scene.create_entity("stable rotation");
+    motion_scene.set_entity_angular_velocity(
+        stable_rotation, {73.0F, -41.0F, 19.0F});
+    for (int step = 0; step < 3600; ++step) {
+        motion_scene.step_physics(1.0F / 120.0F);
+    }
+    const easy3d::Quat stable_quaternion =
+        motion_scene.local_transform(stable_rotation).rotation;
+    if (!std::isfinite(stable_quaternion.w) ||
+        !std::isfinite(stable_quaternion.x) ||
+        !std::isfinite(stable_quaternion.y) ||
+        !std::isfinite(stable_quaternion.z) ||
+        std::abs(stable_quaternion.length() - 1.0F) > 1.0e-4F) {
+        return fail(30, "long-running angular integration lost quaternion stability");
+    }
+    const easy3d::EntityHandle invalid_static =
+        motion_scene.create_entity("invalid moving static collider");
+    motion_scene.set_entity_velocity(invalid_static, {1.0F, 0.0F, 0.0F});
+    try {
+        motion_scene.add_collider_component(invalid_static, {});
+        return fail(31, "moving collider-only entity was accepted");
+    } catch (const easy3d::PhysicsError&) {
+        // Expected.
     }
 
     easy3d::Scene physics_scene("physics components");
@@ -190,6 +281,6 @@ int main() {
         // Expected.
     }
 
-    std::cout << "easy3d_scene_tests: PASS\n";
+    std::cout << "rix_scene_tests: PASS\n";
     return 0;
 }

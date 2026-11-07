@@ -27,6 +27,22 @@ constexpr float pi = 3.14159265358979323846F;
     return finite(value.r) && finite(value.g) && finite(value.b) && finite(value.a);
 }
 
+[[nodiscard]] bool finite(const std::array<float, 4>& value) noexcept {
+    return std::all_of(value.begin(), value.end(), [](const float component) {
+        return finite(component);
+    });
+}
+
+[[nodiscard]] Vec3 tangent_xyz(const Vertex& vertex) noexcept {
+    return {vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]};
+}
+
+[[nodiscard]] Vec3 fallback_tangent(const Vec3 normal) {
+    const Vec3 axis = std::abs(normal.y) < 0.999F ? Vec3{0.0F, 1.0F, 0.0F}
+                                                  : Vec3{1.0F, 0.0F, 0.0F};
+    return axis.cross(normal).normalized();
+}
+
 void require_positive(const float value, const char* label) {
     if (!finite(value) || value <= 0.0F) {
         throw std::invalid_argument(label);
@@ -73,13 +89,18 @@ void MeshData::validate() const {
     }
     for (const Vertex& vertex : vertices) {
         if (!finite(vertex.position) || !finite(vertex.normal) || !finite(vertex.uv) ||
-            !finite(vertex.color)) {
+            !finite(vertex.color) || !finite(vertex.tangent)) {
             throw std::invalid_argument("mesh vertex attributes must be finite");
         }
         if (vertex.normal.length_squared() <= 1.0e-12F) {
             throw std::invalid_argument("mesh vertex normals must be nonzero");
         }
         (void)vertex.color.rgba8();
+        if (tangent_xyz(vertex).length_squared() <= 1.0e-12F ||
+            std::abs(std::abs(vertex.tangent[3]) - 1.0F) > 1.0e-4F) {
+            throw std::invalid_argument(
+                "mesh tangents must be nonzero with handedness -1 or 1");
+        }
     }
     for (const std::uint32_t index : indices) {
         if (index >= vertices.size()) {
@@ -119,6 +140,114 @@ void Material::validate() const {
     if (!std::isfinite(emission) || emission < 0.0F || emission > 100.0F) {
         throw std::invalid_argument("material emission must be in [0, 100]");
     }
+    if (!std::isfinite(normal_strength) || normal_strength < 0.0F ||
+        normal_strength > 8.0F) {
+        throw std::invalid_argument("material normal strength must be in [0, 8]");
+    }
+}
+
+void generate_tangents(MeshData& mesh) {
+    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3 != 0) {
+        throw std::invalid_argument("cannot generate tangents for an incomplete mesh");
+    }
+    std::vector<Vec3> tangents(mesh.vertices.size());
+    std::vector<Vec3> bitangents(mesh.vertices.size());
+    for (std::size_t triangle = 0; triangle < mesh.indices.size(); triangle += 3) {
+        const std::uint32_t ia = mesh.indices[triangle];
+        const std::uint32_t ib = mesh.indices[triangle + 1];
+        const std::uint32_t ic = mesh.indices[triangle + 2];
+        if (ia >= mesh.vertices.size() || ib >= mesh.vertices.size() ||
+            ic >= mesh.vertices.size()) {
+            throw std::out_of_range("mesh index references a missing vertex");
+        }
+        const Vertex& a = mesh.vertices[ia];
+        const Vertex& b = mesh.vertices[ib];
+        const Vertex& c = mesh.vertices[ic];
+        const Vec3 edge1 = b.position - a.position;
+        const Vec3 edge2 = c.position - a.position;
+        const Vec2 delta1 = b.uv - a.uv;
+        const Vec2 delta2 = c.uv - a.uv;
+        const float determinant = delta1.x * delta2.y - delta1.y * delta2.x;
+        if (std::abs(determinant) <= 1.0e-12F) {
+            continue;
+        }
+        const float inverse = 1.0F / determinant;
+        const Vec3 tangent = (edge1 * delta2.y - edge2 * delta1.y) * inverse;
+        const Vec3 bitangent = (edge2 * delta1.x - edge1 * delta2.x) * inverse;
+        for (const std::uint32_t index : {ia, ib, ic}) {
+            tangents[index] = tangents[index] + tangent;
+            bitangents[index] = bitangents[index] + bitangent;
+        }
+    }
+    for (std::size_t index = 0; index < mesh.vertices.size(); ++index) {
+        Vertex& vertex = mesh.vertices[index];
+        const Vec3 normal = vertex.normal.normalized();
+        Vec3 tangent = tangents[index] - normal * normal.dot(tangents[index]);
+        if (tangent.length_squared() <= 1.0e-12F) {
+            tangent = fallback_tangent(normal);
+        } else {
+            tangent = tangent.normalized();
+        }
+        const float handedness = normal.cross(tangent).dot(bitangents[index]) < 0.0F
+                                     ? -1.0F
+                                     : 1.0F;
+        vertex.tangent = {tangent.x, tangent.y, tangent.z, handedness};
+    }
+}
+
+TextureMappingData calculate_texture_mapping(const TextureMode mode,
+                                             const Vec3 world_dimensions,
+                                             const std::uint32_t image_width,
+                                             const std::uint32_t image_height,
+                                             const float pixels_per_unit) {
+    if (!finite(world_dimensions) || image_width == 0 || image_height == 0 ||
+        !finite(pixels_per_unit) || pixels_per_unit <= 0.0F) {
+        throw std::invalid_argument("texture mapping inputs must be finite and positive");
+    }
+    const float width = std::max(std::abs(world_dimensions.x), 1.0e-6F);
+    const float height = std::max(std::abs(world_dimensions.y), 1.0e-6F);
+    const float depth = std::max(std::abs(world_dimensions.z), 1.0e-6F);
+    const float texture_width = static_cast<float>(image_width);
+    const float texture_height = static_cast<float>(image_height);
+    TextureMappingData result;
+    if (mode == TextureMode::Tile) {
+        result.repeat = {{
+            {depth * pixels_per_unit / texture_width,
+             height * pixels_per_unit / texture_height},
+            {width * pixels_per_unit / texture_width,
+             depth * pixels_per_unit / texture_height},
+            {width * pixels_per_unit / texture_width,
+             height * pixels_per_unit / texture_height},
+        }};
+    } else if (mode == TextureMode::Sphere) {
+        const float horizontal_diameter = (width + depth) * 0.5F;
+        result.repeat[0] = {
+            horizontal_diameter * pi * pixels_per_unit / texture_width,
+            height * pi * 0.5F * pixels_per_unit / texture_height,
+        };
+    } else if (mode == TextureMode::Atlas) {
+        const float atlas_width = width * 2.0F + depth * 2.0F;
+        const float atlas_height = height + depth * 2.0F;
+        const auto rect = [&](const std::size_t index,
+                              const float x,
+                              const float y,
+                              const float w,
+                              const float h) {
+            result.atlas[index] = {
+                x / atlas_width,
+                y / atlas_height,
+                w / atlas_width,
+                h / atlas_height,
+            };
+        };
+        rect(0, depth, depth, width, height);
+        rect(1, depth + width + depth, depth, width, height);
+        rect(2, depth + width, depth, depth, height);
+        rect(3, 0.0F, depth, depth, height);
+        rect(4, depth, 0.0F, width, depth);
+        rect(5, depth, depth + height, width, depth);
+    }
+    return result;
 }
 
 void DebugLine::validate() const {
@@ -140,6 +269,7 @@ MeshData make_triangle_mesh() {
         },
         {0, 1, 2},
     };
+    generate_tangents(mesh);
     mesh.validate();
     return mesh;
 }
@@ -157,6 +287,7 @@ MeshData make_cube_mesh(const float size) {
     append_face(mesh, {{{-h, -h, -h}, {-h, -h, h}, {-h, h, h}, {-h, h, -h}}}, {-1.0F, 0.0F, 0.0F});
     append_face(mesh, {{{-h, h, h}, {h, h, h}, {h, h, -h}, {-h, h, -h}}}, {0.0F, 1.0F, 0.0F});
     append_face(mesh, {{{-h, -h, -h}, {h, -h, -h}, {h, -h, h}, {-h, -h, h}}}, {0.0F, -1.0F, 0.0F});
+    generate_tangents(mesh);
     mesh.validate();
     return mesh;
 }
@@ -175,6 +306,7 @@ MeshData make_plane_mesh(const float width, const float depth) {
         },
         {0, 2, 1, 0, 3, 2},
     };
+    generate_tangents(mesh);
     mesh.validate();
     return mesh;
 }
@@ -218,6 +350,7 @@ MeshData make_uv_sphere_mesh(const float radius,
             mesh.indices.insert(mesh.indices.end(), {a, b, c, b, d, c});
         }
     }
+    generate_tangents(mesh);
     mesh.validate();
     return mesh;
 }

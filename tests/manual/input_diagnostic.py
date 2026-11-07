@@ -6,11 +6,11 @@ import argparse
 import threading
 import time
 
-from easy3d import Binding, Game
+from rix import Binding, Game
 
 
 def run(*, seconds: float, pointer_lock: bool) -> None:
-    game = Game("Easy3D input diagnostic", (800, 450), vsync=False)
+    game = Game("RIX input diagnostic", (800, 450), vsync=False)
     game.input.bind(
         "move_x",
         Binding("key:d"),

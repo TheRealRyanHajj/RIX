@@ -19,7 +19,7 @@ public:
     TemporaryDirectory() {
         const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
         path_ = std::filesystem::temp_directory_path() /
-                ("easy3d_gltf_test_" + std::to_string(ticks));
+                ("rix_gltf_test_" + std::to_string(ticks));
         std::filesystem::create_directories(path_);
     }
     ~TemporaryDirectory() {
@@ -70,7 +70,7 @@ void write_bytes(const std::filesystem::path& path,
         ? R"({"byteLength":264})"
         : R"({"uri":"asset.bin","byteLength":264})";
     return std::string(R"({
-"asset":{"version":"2.0","generator":"Easy3D test"},
+"asset":{"version":"2.0","generator":"RIX test"},
 "buffers":[)") + buffer + R"(],
 "bufferViews":[
  {"buffer":0,"byteOffset":0,"byteLength":36},
@@ -90,7 +90,9 @@ void write_bytes(const std::filesystem::path& path,
  {"bufferView":5,"componentType":5126,"count":2,"type":"SCALAR","min":[0],"max":[1]},
  {"bufferView":6,"componentType":5126,"count":2,"type":"VEC3"}
 ],
-"materials":[{"name":"Copper","pbrMetallicRoughness":{"baseColorFactor":[0.8,0.2,0.1,1],"metallicFactor":0.3,"roughnessFactor":0.7},"emissiveFactor":[0.2,0.1,0]}],
+"images":[{"uri":"packed.png"}],
+"textures":[{"source":0}],
+"materials":[{"name":"Copper","doubleSided":true,"pbrMetallicRoughness":{"baseColorFactor":[0.8,0.2,0.1,1],"metallicFactor":0.3,"roughnessFactor":0.7,"metallicRoughnessTexture":{"index":0}},"emissiveFactor":[0.2,0.1,0]}],
 "meshes":[{"name":"Triangle","primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":0}]}],
 "nodes":[
  {"name":"MeshNode","mesh":0,"skin":0,"translation":[2,0,0],"children":[1]},
@@ -106,6 +108,7 @@ void write_bytes(const std::filesystem::path& path,
 void write_gltf(const std::filesystem::path& directory) {
     const std::vector<std::uint8_t> bytes = asset_binary();
     write_bytes(directory / "asset.bin", bytes);
+    write_bytes(directory / "packed.png", {0});
     std::ofstream output(directory / "asset.gltf", std::ios::binary);
     output << asset_json(false);
 }
@@ -171,13 +174,19 @@ int main() {
         }
         const easy3d::Vertex& first = gltf->parts[0].mesh.vertices[0];
         if (!easy3d::almost_equal(first.position, {2.0F, 0.0F, 0.0F}) ||
-            !easy3d::almost_equal(first.normal, {0.0F, 0.0F, 1.0F})) {
+            !easy3d::almost_equal(first.normal, {0.0F, 0.0F, 1.0F}) ||
+            first.uv != easy3d::Vec2{0.0F, 0.0F} ||
+            gltf->parts[0].mesh.vertices[1].uv != easy3d::Vec2{1.0F, 0.0F} ||
+            gltf->parts[0].mesh.vertices[2].uv != easy3d::Vec2{0.0F, 1.0F}) {
             return fail(2, "glTF node or normal transform was not baked");
         }
         const easy3d::ModelMaterial& material = gltf->materials[1];
         if (!easy3d::almost_equal(material.metallic, 0.3F) ||
             !easy3d::almost_equal(material.roughness, 0.7F) ||
-            !easy3d::almost_equal(material.emission, 0.2F)) {
+            !easy3d::almost_equal(material.emission, 0.2F) ||
+            !material.packed_metallic_roughness ||
+             !material.double_sided ||
+            material.metallic_texture != material.roughness_texture) {
             return fail(3, "glTF PBR material factors were not imported");
         }
         const easy3d::Skeleton& skeleton = *gltf->skeleton;
@@ -253,10 +262,10 @@ int main() {
         } catch (const easy3d::MissingAssetError&) {
         }
 
-        std::cout << "easy3d_gltf_tests: PASS\n";
+        std::cout << "rix_gltf_tests: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_gltf_tests: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_gltf_tests: FAIL: " << error.what() << '\n';
         return 13;
     }
 }

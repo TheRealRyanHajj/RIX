@@ -102,6 +102,6 @@ int main() {
         return fail(12, "destroying parent did not preserve and detach child");
     }
 
-    std::cout << "easy3d_math_transform_tests: PASS\n";
+    std::cout << "rix_math_transform_tests: PASS\n";
     return 0;
 }

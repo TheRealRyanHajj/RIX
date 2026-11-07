@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from easy3d import (
+from rix import (
     Collider,
     Entity,
     PhysicsError,

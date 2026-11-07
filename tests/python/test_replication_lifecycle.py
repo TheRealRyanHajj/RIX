@@ -4,7 +4,9 @@ import time
 
 import pytest
 
-from easy3d import Entity, NetworkError, Scene, Server, network, replication
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import NetworkError, Server, replication
 
 
 def _registry(name: str = "crate") -> replication.PrefabRegistry:
@@ -205,8 +207,8 @@ def test_schema_mismatch_and_duplicate_spawn_are_rejected() -> None:
         server.unload_scene(clear=True)
 
 
-def test_root_exports() -> None:
-    import easy3d
+def test_net_exports() -> None:
+    import rix
 
-    assert easy3d.NetworkObjectId is replication.NetworkObjectId
-    assert easy3d.ServerReplication is replication.ServerReplication
+    assert rix.net.NetworkObjectId is replication.NetworkObjectId
+    assert rix.net.ServerReplication is replication.ServerReplication

@@ -1,5071 +1,1451 @@
-# Easy3D implementation progress
-
-**Current status (2026-11-01): Phase 0, Phase 1, Phase 2, and Phase 3.1 passed;
-Phase 3.2 is next. Live relative-mouse behavior and physical gamepad validation
-remain unverified.** Earlier blocked checkpoints below are retained as
-diagnostic history.
-
-## 2026-11-01 — Phase 0 kickoff
-
-### Bounded approach
-
-Scope is limited to `MASTERPLAN.md` Phase 0 (0.1–0.10). The implementation will:
-
-1. inventory the clean repository and Windows toolchain;
-2. bootstrap only the native core, Python binding/package, platform window/renderer, tests, example, and Phase 0 documentation;
-3. pin SDL3, bgfx, pybind11, and Python build/test dependencies;
-4. build and run every test supported by this machine, fixing failures rather than bypassing them;
-5. leave GPU/window validation explicitly unverified unless the example is run interactively on this Windows desktop.
-
-Expected files affected: root build/package configuration, `engine/`, `bindings/`, `python/easy3d/`, `tests/`, `examples/00_window/`, `cmake/`, `LICENSES/`, and Phase 0 documentation. No scene, entity, physics, networking, or gameplay systems will be added.
-
-Primary risks: Visual Studio/MSVC and Python 3.11 are not currently installed; bgfx/SDL native handle and renderer lifecycle must be implemented without falsely claiming runtime proof. Planned verification commands are `python -m pip install -e '.[dev]'`, `python -m pytest -q`, CMake configure/build plus `ctest`, the import one-liner, and an explicitly interactive window example.
-
-### 0.1 repository and environment inventory
-
-Initial repository state:
-
-```text
-git status --short --branch
-## main
-?? masterplan.md
-
-rg --files
-masterplan.md
-```
-
-The sole file was the user-provided, untracked 346-line master plan. It was read in full before edits. Windows filename matching is case-insensitive, so it will be case-normalized to the required `MASTERPLAN.md` without changing content.
-
-Commands and exact outputs:
-
-```text
-Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
-Caption: Microsoft Windows 11 Home
-Version: 10.0.26200
-BuildNumber: 26200
-OSArchitecture: 64-bit
-
-$PSVersionTable.PSVersion
-7.6.5
-
-py -0p
- -V:3.13 *        C:\Program Files\Python313\python.exe
- -V:3.12          C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\python3.12.exe
-
-py -3.11 --version
-No suitable Python runtime found
-
-python --version
-Python 3.13.2
-
-python -c "import sys,platform; print(sys.executable); print(platform.platform()); print(platform.machine())"
-C:\Program Files\Python313\python.exe
-Windows-11-10.0.26200-SP0
-AMD64
-
-git --version
-git version 2.45.1.windows.1
-
-cmake --version
-cmake version 4.0.1
-
-ninja --version
-1.12.1
-
-cl
-The term 'cl' is not recognized as a name of a cmdlet, function, script file, or executable program.
-
-vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json
-[]
-
-vcpkg version
-The term 'vcpkg' is not recognized as a name of a cmdlet, function, script file, or executable program.
-
-conan --version
-The term 'conan' is not recognized as a name of a cmdlet, function, script file, or executable program.
-
-winget --version
-v1.29.380
-
-choco --version
-The term 'choco' is not recognized as a name of a cmdlet, function, script file, or executable program.
-
-scoop --version
-The term 'scoop' is not recognized as a name of a cmdlet, function, script file, or executable program.
-```
-
-Missing required prerequisites: Visual Studio 2022 Build Tools with the Desktop development with C++ workload (MSVC and Windows SDK), and CPython 3.11 x64. CMake, Ninja, Git, Python 3.12/3.13, and Windows Package Manager are available. No dependency manager is installed; Phase 0 will use pinned CMake dependency acquisition so no global dependency-manager installation is required.
-
-Status: **0.1 DONE** (inventory independently executed and recorded). Build/install acceptance remains blocked until the missing compiler is installed or another supported MSVC environment is made available.
-
-## 2026-11-01 — Phase 0 implementation checkpoint
-
-### Implemented
-
-- C++20 `easy3d_core`, version/configuration API, strict warning flags, native
-  CTest, and native benchmark target.
-- scikit-build-core/pybind11 editable packaging for `easy3d._easy3d`, typed
-  public Python package, registered `EngineError`, `engine_version`,
-  `native_add`, and lazy native `Engine` lifecycle.
-- SDL3 Win32 resizable window/event loop and monotonic frame timing.
-- bgfx D3D11 initialization, clear/touch/present, resize/reset, renderer/adapter
-  logging, and shutdown-before-HWND destruction.
-- Python `Game`, blank-window example, visible lifecycle diagnostic, non-GPU
-  Python/native tests, dependency/license pins, setup docs, and known issues.
-
-No Phase 1+ gameplay, scene, physics, asset, or network work was started.
-
-### Commands and exact decisive outputs
-
-Supported MSVC preset (expected blocker on this machine):
-
-```text
-cmake --preset windows-debug
--- The CXX compiler identification is unknown
-CMake Error at CMakeLists.txt:3 (project):
-  The CMAKE_CXX_COMPILER:
-
-    cl
-
-  is not a full path and was not found in the PATH.
--- Configuring incomplete, errors occurred!
-```
-
-Graphics-disabled portable-core diagnostic:
-
-```text
-cmake -S . -B build/headless-mingw -G Ninja -DCMAKE_CXX_COMPILER=C:/mingw64/bin/g++.exe -DEASY3D_ENABLE_GRAPHICS=OFF -DEASY3D_BUILD_PYTHON=OFF -DEASY3D_BUILD_BENCHMARKS=ON -DBUILD_TESTING=ON
--- Configuring done
--- Generating done
--- Build files have been written to: C:/Users/Ryan/Desktop/code/Easy3D/build/headless-mingw
-
-cmake --build build/headless-mingw
-ninja: no work to do.
-
-ctest --test-dir build/headless-mingw --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/headless-mingw
-    Start 1: easy3d.core
-1/1 Test #1: easy3d.core ......................   Passed    0.01 sec
-
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) =   0.03 sec
-```
-
-Full graphics-enabled diagnostic compilation and non-GPU CTest:
-
-```text
-cmake -S . -B build/graphics-mingw -G Ninja -DCMAKE_CXX_COMPILER=C:/mingw64/bin/g++.exe -DCMAKE_C_COMPILER=C:/mingw64/bin/gcc.exe -DEASY3D_ENABLE_GRAPHICS=ON -DEASY3D_BUILD_PYTHON=OFF -DEASY3D_BUILD_BENCHMARKS=OFF -DBUILD_TESTING=ON
--- SDL3 was configured with the following options:
--- Platform: Windows-6.2.9200
--- 64-bit:   TRUE
--- Compiler: C:/mingw64/bin/gcc.exe
--- Revision: SDL-3.4.18-release-3.4.18
--- Build Shared Library: OFF
--- Build Static Library: ON
--- Configuring done
--- Generating done
-
-cmake --build build/graphics-mingw --target easy3d_core_tests -j 4
-[1/3] Building CXX object CMakeFiles/easy3d_core_tests.dir/tests/cpp/test_core.cpp.obj
-[2/3] Linking CXX executable easy3d_core_tests.exe
-
-ctest --test-dir build/graphics-mingw --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/graphics-mingw
-    Start 1: easy3d.core
-1/1 Test #1: easy3d.core ......................   Passed    0.07 sec
-
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) =   1.01 sec
-```
-
-The first isolated Python 3.13 editable build completed but import found missing
-MinGW runtime DLLs. This failure was fixed by static GCC/C++ runtime linkage and
-installing the compiler-matched `libwinpthread-1.dll` only for MinGW builds:
-
-```text
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e '.[dev]'
-Successfully built easy3d
-Successfully installed colorama-0.4.6 easy3d-0.1.0 iniconfig-2.3.1 packaging-26.3 pluggy-1.7.0 pygments-2.21.0 pytest-9.2.0
-
-python -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-
-python -m pytest -q
-.............                                                            [100%]
-13 passed in 0.04s
-```
-
-This is Python 3.13.2 + MinGW 15.1 diagnostic evidence, not the required Python
-3.11 + MSVC acceptance evidence.
-
-Benchmark harness:
-
-```text
-python benchmarks/native_add.py --iterations 1000000
-iterations=1000000 elapsed_seconds=0.097206 ns_per_call=97.2 final_value=500000
-```
-
-The number is a harness baseline on this particular Python 3.13/MinGW build,
-not an engine performance guarantee.
-
-Syntax/configuration checks:
-
-```text
-python -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-cmake --list-presets
-Available configure presets:
-
-  "windows-debug"   - Windows x64 Debug
-  "windows-release" - Windows x64 Release
-```
-
-### GPU/window failure evidence
-
-Command:
-
-```text
-python tests/manual/window_lifecycle.py
-# process exit code -1073741819 (Windows 0xC0000005 access violation)
-```
-
-The equivalent symbol-bearing native diagnostic was run under GDB. Relevant
-exact output:
-
-```text
-BGFX Version 1.167.9149
-BGFX NVIDIA GeForce RTX 3070 Ti
-BGFX Direct3D11 device feature level 12.1.
-BGFX Failed to create swap chain, hr 0x887a0001.
-BGFX CreateSwapChain with DXGI_SWAP_EFFECT(4) failed with HRESULT(887a0001)
-
-Thread 10 "bgfx - renderer backend thread" received signal SIGSEGV, Segmentation fault.
-#0  dxgi!CompatString () from C:\WINDOWS\SYSTEM32\dxgi.dll
-#7  bgfx::Dxgi::createSwapChain (...) at .../bgfx-src/src/dxgi.cpp:529
-#8  bgfx::d3d11::RendererContextD3D11::init (...) at .../bgfx-src/src/renderer_d3d11.cpp:1215
-#10 bgfx::rendererCreate (...) at .../bgfx-src/src/bgfx.cpp:3883
-```
-
-The window and D3D11 adapter discovery therefore occurred, but no clear/present,
-resize, clean exit, or repeated lifecycle pass is claimed. The likely
-toolchain-specific failure must first be reproduced under the locked MSVC
-toolchain; see `docs/known-issues.md`.
-
-### Phase 0 item status
-
-| Item | Status | Evidence / blocker |
-|---|---|---|
-| 0.1 | **DONE** | Repository/toolchain inventory above. |
-| 0.2 | **DONE** | Structure, docs, formatting, ignore and license files present; config parsers pass. |
-| 0.3 | **BLOCKED/UNVERIFIED** | Core and CTest pass with GNU 15.1, but required MSVC Debug/Release builds cannot run. |
-| 0.4 | **BLOCKED/UNVERIFIED** | Editable install/import passes on Python 3.13 + MinGW; Python 3.11 + MSVC is unavailable. |
-| 0.5 | **DONE** | Native CTest and 13 Python tests verify version, add, exception translation and lazy Engine state. |
-| 0.6 | **BLOCKED/UNVERIFIED** | SDL path compiles and creates a window, but the combined run crashes during renderer init before clean close proof. |
-| 0.7 | **BLOCKED/UNVERIFIED** | D3D11 adapter is discovered; bgfx MinGW swap-chain creation fails/faults. |
-| 0.8 | **BLOCKED/UNVERIFIED** | `Game` construction/tests pass; `run()` cannot complete the GPU lifecycle. |
-| 0.9 | **DONE** | Non-GPU tests pass; visible commands are explicit and excluded from automated suites. |
-| 0.10 | **DONE** | Harness, measured diagnostic timing, instructions, immutable pins, notices and known issues are present. |
-
-Phase 0 exit gate: **NOT PASSED**. Precise next step: install/activate VS2022
-Build Tools (MSVC v143 + Windows SDK) and CPython 3.11 x64, run the documented
-MSVC commands, and reproduce the window example before changing the bgfx pin or
-swap-chain implementation.
-
-## 2026-11-01 — Phase 0 completion after prerequisite recheck
-
-### Blocker recheck and toolchain
-
-The missing-prerequisite blockers are resolved. Exact decisive inventory:
-
-```text
-vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools
-
-py -0p
- -V:3.13          C:\Program Files\Python313\python.exe
- -V:3.12          C:\Users\Ryan\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe
- -V:3.11[-64] *   C:\Users\Ryan\AppData\Local\Python\pythoncore-3.11-64\python.exe
-
-py -3.11 --version
-Python 3.11.9
-
-cmake --version
-cmake version 4.0.1
-
-ninja --version
-1.12.1
-
-VsDevCmd.bat -arch=amd64 && cl
-Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64
-C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\cl.exe
-```
-
-Visual Studio reports Build Tools 2026 v18.11.3. The installed Windows SDK is
-10.0.26100.0. This is newer than the plan's intended VS 2022/v143 minimum; see
-ADR-0004 for the exact compatibility claim.
-
-### D3D11 crash diagnosis and correction
-
-The MSVC build reproduced the earlier access violation, proving that it was not
-a MinGW-only backend issue. A temporary descriptor trace recorded this invalid
-primary swap-chain format before the failed DXGI call:
-
-```text
-BGFX Easy3D probe: hwnd=0x3108cc valid=1 size=640x360 format=155467664 ...
-BGFX Failed to create swap chain, hr 0x887a0001.
-Thread 1 received signal SIGSEGV ... dxgi!CompatString
-```
-
-Root cause: Easy3D assigned a separately constructed `bgfx::SwapChain` to
-`bgfx::Init::swapChain`. The standalone descriptor uses `TextureFormat::Count`
-sentinels, so this overwrote `bgfx::Init`'s valid primary defaults (`BGRA8`,
-`D24S8`, two back buffers) and indexed beyond bgfx's format table. The fix
-configures `bgfx::Init::swapChain` first, copies that complete descriptor for
-later resize resets, and keeps the lifecycle on the SDL window thread. No bgfx
-source patch or dependency-pin change is part of the repository.
-
-The corrected Debug diagnostic showed `format=87` (`BGRA8`) and completed:
-
-```text
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-frames=52 running=0
-```
-
-### Native build and test evidence
-
-Both presets were freshly configured under the x64 developer environment and
-successfully built all targets (407 build steps on the first full build):
-
-```text
-cmake --fresh --preset windows-debug
--- The CXX compiler identification is MSVC 19.51.36260.0
--- Configuring done
--- Generating done
--- Build files have been written to: C:/Users/Ryan/Desktop/code/Easy3D/build/windows-debug
-
-cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-debug
-    Start 1: easy3d.core
-1/1 Test #1: easy3d.core ......................   Passed    0.07 sec
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) =   0.11 sec
-
-cmake --fresh --preset windows-release
--- The CXX compiler identification is MSVC 19.51.36260.0
--- Configuring done
--- Generating done
--- Build files have been written to: C:/Users/Ryan/Desktop/code/Easy3D/build/windows-release
-
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-release
-    Start 1: easy3d.core
-1/1 Test #1: easy3d.core ......................   Passed    0.05 sec
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) =   0.09 sec
-
-.\build\windows-release\Release\easy3d_window_lifecycle.exe
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-frames=49 running=0
-```
-
-The pinned bx/bgfx projects emit compiler-option override warnings in some
-translation units under MSVC 19.51; there were no Easy3D compile errors or test
-failures.
-
-### Python 3.11 editable install and test evidence
-
-The acceptance environment is an ignored venv at `build/venv311`:
-
-```text
-py -3.11 -m venv build/venv311
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Building editable for easy3d (pyproject.toml): finished with status 'done'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl size=1750695 sha256=a4d7279f14ead3a577a869f5f21185f73aa601546da4f9722e2585b187aba224
-Successfully built easy3d
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-.............                                                            [100%]
-13 passed in 0.04s
-
-build\venv311\Scripts\python.exe tests\manual\window_lifecycle.py
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-iteration=1 frames=51 running=False
-iteration=2 frames=57 running=False
-```
-
-Two exploratory command names were incorrect and failed without changing code:
-`easy3d.native_smoke_test` does not exist (the public smoke function is
-`native_add`), and `benchmarks/native_call.py` does not exist (the file is
-`benchmarks/native_add.py`). The corrected commands passed:
-
-```text
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.native_add(20, 22))"
-0.1.0
-42
-
-build\venv311\Scripts\python.exe benchmarks\native_add.py
-iterations=1000000 elapsed_seconds=0.184044 ns_per_call=184.0 final_value=500000
-
-.\build\windows-release\Release\easy3d_core_benchmark.exe
-iterations=10000000 elapsed_seconds=0.013628 final_value=5000000
-```
-
-Benchmark numbers are one-run harness evidence, not performance guarantees.
-
-### Interactive Windows GPU evidence
-
-`build\venv311\Scripts\python.exe examples\00_window\main.py` was run in a
-GUI-capable Windows desktop session. Windows UI automation selected the unique
-native window titled `Easy3D — Phase 0` and captured the slate-blue D3D11 clear.
-It invoked the native Maximize control; the accessibility state changed from
-`Maximize` to `Restore`, the client expanded to the 1920x1080 desktop, and the
-entire resized client remained correctly cleared. It then invoked the native
-Close control. A fresh window inventory contained no matching window and the
-Python process exited with code 0.
-
-Validated hardware/renderer log:
-
-```text
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-```
-
-This proves the D3D11 path on the NVIDIA GeForce RTX 3070 Ti used for this run;
-it does not make claims for other adapters or backends.
-
-Final source/checklist consistency commands:
-
-```text
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -m pytest -q
-.............                                                            [100%]
-13 passed in 0.04s
-
-clang-format --version
-The term 'clang-format' is not recognized as a name of a cmdlet, function,
-script file, or executable program.
-```
-
-The optional formatter executable is unavailable, so no automated format check
-is claimed. The repository does contain `.clang-format`, and the changed C++
-source was compiled successfully with the strict Easy3D warning settings in
-both MSVC configurations.
-
-### Final Phase 0 status
-
-| Item | Status | Completion evidence |
-|---|---|---|
-| 0.1 | **DONE** | Repository and refreshed toolchain inventory recorded. |
-| 0.2 | **DONE** | Minimal structure, docs, formatting, ignore and license/notice files present. |
-| 0.3 | **DONE** | MSVC Debug/Release builds and both CTest runs pass. |
-| 0.4 | **DONE** | CPython 3.11 editable wheel builds, installs and imports. |
-| 0.5 | **DONE** | Native and 13 Python tests cover version, add and exception translation. |
-| 0.6 | **DONE** | SDL window opens, polls, resizes and cleanly closes on the real desktop. |
-| 0.7 | **DONE** | Pinned bgfx D3D11 clear/present, resize/reset and clean shutdown verified. |
-| 0.8 | **DONE** | Python `Game` example and two repeated open/close iterations pass. |
-| 0.9 | **DONE** | Automated non-GPU tests remain separate from explicit visible diagnostics. |
-| 0.10 | **DONE** | Benchmarks, setup, immutable pins, notices and limitations recorded. |
-
-Phase 0 exit gate: **PASSED**. Work stopped at the original delivery checkpoint
-with no Phase 1 code at that time. The later full-engine objective below
-superseded that stop condition and authorized continuation at Phase 1.1.
-
-## 2026-11-01 — Phase 1.1 scene and entity lifetime
-
-### Implemented
-
-- Native C++ `World` registry with O(1) free-slot reuse and native `Scene`
-  ownership.
-- World-scoped `EntityHandle` values containing a nonzero runtime world ID,
-  slot index, and generation. Destroy and clear advance generations before
-  reuse; invalid and cross-world access throws `InvalidEntityError`.
-- Native entity name, enabled, and visible state plus live enumeration/counting.
-- Typed public Python `Scene` and `Entity` wrappers, explicit/context-managed
-  construction, permanent close vs reusable clear, and `ReferenceError`-based
-  stale-handle behavior.
-- `Game.load_scene`/`unload_scene`, activation, scene switching, and exclusive
-  ownership between games.
-- Architecture/API documentation and a runnable entity-lifecycle example.
-
-Transform, hierarchy, component attachment, and rendering submission are not
-claimed by this milestone; they remain subsequent Phase 1 items.
-
-### Verification evidence
-
-Debug native build and tests:
-
-```text
-cmake --build --preset windows-debug
-# exit code 0; easy3d_core, easy3d_scene_tests and existing targets linked
-
-ctest --preset windows-debug --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-debug
-    Start 1: easy3d.core
-1/2 Test #1: easy3d.core ......................   Passed    0.05 sec
-    Start 2: easy3d.scene
-2/2 Test #2: easy3d.scene .....................   Passed    0.03 sec
-100% tests passed, 0 tests failed out of 2
-Total Test time (real) =   0.17 sec
-```
-
-Python 3.11 editable rebuild and tests:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl size=1764859 sha256=5279d7016e731a6e668530372f98a18ce5d31407155bdfdffcfd086795aa953e
-Successfully built easy3d
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-.....................                                                    [100%]
-21 passed in 0.09s
-```
-
-Release build, native tests, and Phase 0 GPU regression:
-
-```text
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-release
-    Start 1: easy3d.core
-1/2 Test #1: easy3d.core ......................   Passed    0.04 sec
-    Start 2: easy3d.scene
-2/2 Test #2: easy3d.scene .....................   Passed    0.04 sec
-100% tests passed, 0 tests failed out of 2
-Total Test time (real) =   0.16 sec
-
-.\build\windows-release\Release\easy3d_window_lifecycle.exe
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-frames=52 running=0
-```
-
-Runnable public API example and syntax validation:
-
-```text
-build\venv311\Scripts\python.exe examples\01_entity_lifecycle\main.py
-loaded 'lifecycle example' with 2 entities
-destroyed id=4294967297; replacement id=8589934593
-stale access rejected: invalid entity handle (world=1, index=1, generation=1); expected live entity in world 1
-scene closed=True; player alive=False
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-```
-
-### Status and next task
-
-Phase 1.1: **DONE**. The evidence covers native create/destroy/reuse,
-cross-world rejection, Python stale-reference translation, explicit ownership,
-nested contexts, scene cleanup, Debug/Release builds, and the existing D3D11
-lifecycle regression.
-
-Immediate next task: Phase 1.2 — native `Vec2`/`Vec3`/`Quat`, public Euler
-facade, transform storage, parenting with cycle rejection and keep-world
-semantics, dirty propagation, and local/world correctness tests.
-
-## 2026-11-01 — Phase 1.2 math and transform hierarchy
-
-### Implemented
-
-- Immutable-pinned GLM 1.0.1 as a private implementation dependency.
-- Native Easy3D `Vec2`, `Vec3`, `Quat`, and `Transform` values with arithmetic,
-  normalization, dot/cross operations, quaternion multiplication/rotation,
-  approximate comparison, and degree-based Euler conversion.
-- Native local TRS storage, quaternion normalization, cached world matrices,
-  recursive dirty propagation, parent/child links, cycle/self/cross-world
-  rejection, keep-local and keep-world reparenting, and world-preserving child
-  detachment when a parent is destroyed.
-- Typed Python `Vec2`, `Vec3`, and `Quat` APIs. Entity `position`, `rotation`, and
-  `scale` are live proxies, so component mutation writes through to native state.
-  World transform snapshots, `parent`, `children`, and explicit `set_parent`
-  are public.
-- Right-handed, +Y-up, -Z-forward and Euler/quaternion semantics documented.
-
-### Failure and correction evidence
-
-The first Debug compile stopped before linking because pinned GLM requires an
-explicit opt-in for its matrix decomposition extension:
-
-```text
-glm/gtx/matrix_decompose.hpp(24): fatal error C1189:
-"GLM: GLM_GTX_matrix_decompose is an experimental extension ...
-Use #define GLM_ENABLE_EXPERIMENTAL before including it"
-ninja: build stopped: subcommand failed.
-```
-
-`GLM_ENABLE_EXPERIMENTAL` is now scoped to `scene.cpp`, the only translation
-unit using that pinned extension. The rebuild passed.
-
-The first Python run then exposed a non-unique Euler representation after
-incrementing yaw from 90° to 135°:
-
-```text
-entity.rotation
-Vec3(180.0, 45.000003814697266, 180.0)
-```
-
-That triple is orientation-equivalent to `(0, 135, 0)` and the native quaternion
-was correct. The regression now compares quaternion orientation, and the public
-contract explicitly states that Euler triples may canonicalize.
-
-### Verification evidence
-
-```text
-cmake --build --preset windows-debug
-# exit code 0
-
-ctest --preset windows-debug --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-debug
-    Start 1: easy3d.core
-1/3 Test #1: easy3d.core ......................   Passed    0.05 sec
-    Start 2: easy3d.scene
-2/3 Test #2: easy3d.scene .....................   Passed    0.03 sec
-    Start 3: easy3d.math_transform
-3/3 Test #3: easy3d.math_transform ............   Passed    0.04 sec
-100% tests passed, 0 tests failed out of 3
-Total Test time (real) =   0.23 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl size=1780041 sha256=13469a18882f8b194165b862593805dbdb64604ba9d2d72c879e6bd97df33589
-Successfully built easy3d
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-............................                                             [100%]
-28 passed in 0.08s
-
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-Test project C:/Users/Ryan/Desktop/code/Easy3D/build/windows-release
-    Start 1: easy3d.core
-1/3 Test #1: easy3d.core ......................   Passed    0.04 sec
-    Start 2: easy3d.scene
-2/3 Test #2: easy3d.scene .....................   Passed    0.04 sec
-    Start 3: easy3d.math_transform
-3/3 Test #3: easy3d.math_transform ............   Passed    0.03 sec
-100% tests passed, 0 tests failed out of 3
-Total Test time (real) =   0.22 sec
-
-.\build\windows-release\Release\easy3d_window_lifecycle.exe
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-frames=52 running=0
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-```
-
-Tests cover vector/quaternion behavior, exact versus approximate equality,
-Euler orientation round-trip, live native property writes, local/global TRS,
-rotation and scale inheritance, cache invalidation after an ancestor mutation,
-cycle/self/cross-scene rejection, keep-world reparenting, and parent destruction.
-
-Phase 1.2: **DONE**. Immediate next task: Phase 1.3 — renderer abstraction,
-mesh/material handles, GPU resource lifetime, shaders, and indexed triangle/cube/
-plane/sphere rendering with depth testing.
-
-## 2026-11-01 — Phase 1.3 indexed geometry and GPU resource lifetime
-
-### Implemented
-
-- Backend-neutral `Color`, `Vertex`, `Bounds`, `MeshData`, and `Material`
-  abstractions with finite/range/index validation and bounds/triangle queries.
-- Counter-clockwise triangle, 24-vertex cube, +Y horizontal plane, and
-  configurable UV-sphere generators with positions, normals, UVs, and colors.
-- Private bgfx renderer extracted from the Win32 event loop. Its move-only GPU
-  mesh resources own immutable vertex and 32-bit index buffers; all buffers,
-  program, and uniform handles release before bgfx/device shutdown.
-- Easy3D-owned solid-color vertex/fragment shaders, material color uniform,
-  depth writes, `LESS` depth testing, and back-face culling.
-- Reviewed D3D11 SM5 DXBC headers plus explicit pinned-shaderc regeneration via
-  `EASY3D_REGENERATE_SHADERS=ON`; ordinary builds do not compile shader tools.
-- An opt-in native geometry diagnostic that leaves the ordinary Python window
-  blank and avoids claiming the Phase 1.4 public camera or Phase 1.7 components.
-
-### Failure and correction evidence
-
-The first shader-tool configure inherited an unset include variable and invoked
-both Debug compiler processes with `-i /src`; both produced zero-byte headers
-and stalled. The build was interrupted without accepting those outputs.
-Resolving the nested FetchContent `bgfx` source directory produced valid SM5
-headers. The full tool build also demonstrated that enabling shaderc adds 713
-first-build Ninja steps on this revision, so ADR-0007 records the reviewed,
-committed-artifact approach and opt-in regeneration path.
-
-### Verification evidence
-
-Debug and Release native suites:
-
-```text
-cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
-1/4 easy3d.core             Passed
-2/4 easy3d.scene            Passed
-3/4 easy3d.math_transform   Passed
-4/4 easy3d.mesh             Passed
-100% tests passed, 0 tests failed out of 4
-Total Test time (real) = 0.28 sec
-
-cmake --preset windows-release
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-1/4 easy3d.core             Passed
-2/4 easy3d.scene            Passed
-3/4 easy3d.math_transform   Passed
-4/4 easy3d.mesh             Passed
-100% tests passed, 0 tests failed out of 4
-Total Test time (real) = 0.28 sec
-```
-
-Release GPU diagnostic on the interactive Windows desktop:
-
-```text
-.\build\windows-release\Release\easy3d_geometry_lifecycle.exe
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-Easy3D geometry: GPU meshes=4, indexed triangles=783, depth-test=less
-easy3d_geometry_lifecycle: PASS frames=1032
-EXIT_CODE=0
-```
-
-A live Windows.Graphics.Capture screenshot was inspected while the Debug
-diagnostic was rendering. It visibly showed the colored triangle, cyan cube,
-yellow sphere, and gray floor plane; foreground geometry correctly occluded the
-plane. This is genuine interactive evidence on the NVIDIA GeForce RTX 3070 Ti,
-not an inference from process exit.
-
-Python 3.11 packaging regression:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3209650
-sha256=ca09e59f61b10c050928f8b61bc2087e1f0f4b4cd19867449efdbf851a666c75
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-............................                                             [100%]
-28 passed in 0.07s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples
-# exit code 0, no output
-```
-
-The native mesh tests cover primitive counts, bounds, front-face winding,
-sphere radii and unit normals, invalid indices/sizes, and RGBA8 packing. The GPU
-diagnostic remains intentionally excluded from CTest because it opens a visible
-window and requires a real D3D11 desktop.
-
-Phase 1.3: **DONE**. Immediate next task: Phase 1.4 — scene-facing camera data,
-configurable near/far projection, aspect ratio, and resize behavior tests.
-
-## 2026-11-01 — Phase 1.4 camera, projection, and resize
-
-### Implemented
-
-- Easy3D-owned column-major `Matrix4` and perspective `Camera` native values.
-- Position/quaternion orientation, -Z forward/+Y up/+X right basis, validated
-  vertical FOV, configurable positive near/far planes, and robust `look_at`.
-- Backend-capability projection for D3D `[0,1]` and homogeneous `[-1,1]` depth.
-- Renderer diagnostic migrated from hard-coded GLM matrices to the native
-  camera. Projection aspect is recomputed from current SDL pixel dimensions
-  after swap-chain/view resize.
-- Typed public Python `Camera` with mutable `Vec3` position/Euler rotation,
-  basis vectors, `look_at`, aspect queries, and view/projection matrix tuples.
-  Scene attachment is explicitly deferred rather than simulated.
-
-### Verification evidence
-
-```text
-cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
-1/5 easy3d.core             Passed
-2/5 easy3d.scene            Passed
-3/5 easy3d.math_transform   Passed
-4/5 easy3d.mesh             Passed
-5/5 easy3d.camera           Passed
-100% tests passed, 0 tests failed out of 5
-Total Test time (real) = 0.49 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3216116
-sha256=fa9d07defc6883d76a70584cec4919d08372b185acf1935bc3220e858d38b0ea
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-....................................                                     [100%]
-36 passed in 0.42s
-
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-1/5 easy3d.core             Passed
-2/5 easy3d.scene            Passed
-3/5 easy3d.math_transform   Passed
-4/5 easy3d.mesh             Passed
-5/5 easy3d.camera           Passed
-100% tests passed, 0 tests failed out of 5
-Total Test time (real) = 0.36 sec
-
-.\build\windows-release\Release\easy3d_geometry_lifecycle.exe
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-Easy3D geometry: GPU meshes=4, indexed triangles=783, depth-test=less
-easy3d_geometry_lifecycle: PASS frames=1033
-EXIT_CODE=0
-```
-
-Native camera tests verify look-at basis and view-space mapping, FOV/aspect
-projection terms, resize invariants, exact near/far depth mapping for both clip
-conventions, and invalid clipping/viewport/look-at rejection. Python tests
-verify the public facade and validation.
-
-A live Windows capture then resized the running D3D11 diagnostic from 962×572
-to 701×572 through the native window border. Rendering continued, the refreshed
-capture preserved cube and sphere proportions, and the plane/framing adapted to
-the narrower aspect. This directly exercises SDL pixel-size handling, bgfx reset
-and view-rect update, and per-frame camera projection recomputation.
-
-Phase 1.4: **DONE**. Immediate next task: Phase 1.5 — shared PNG/JPEG texture
-decode/upload/cache, sampler and sRGB semantics, UV shader path, and missing
-asset errors.
-
-## 2026-11-01 — Phase 1.5 texture assets and sampling
-
-### Implemented
-
-- Engine-owned RGBA8 `ImageData`, explicit linear/sRGB intent, filter/wrap
-  sampler values, actionable asset exceptions, and pinned bimg PNG/JPEG decode.
-- Thread-safe shared CPU cache keyed by canonical path plus color space, with
-  Windows case folding and reference-safe clearing.
-- Private move-only bgfx texture handles, capability validation, sampler/sRGB
-  flag mapping, deterministic pre-shutdown release, and texture byte counts.
-- D3D11 textured shader variant using mesh UVs and a visible nearest-filtered
-  sRGB checker diagnostic. Reviewed DXBC headers were regenerated with pinned
-  shaderc 1.19.167.
-- Typed `easy3d.assets` Python facade, PNG/JPEG and error tests, API contract,
-  dependency notices, and ADR-0009.
-
-The initial remembered 1×1 PNG fixture was accepted by Windows imaging but
-rejected by strict LodePNG CRC/stream validation. It was replaced with a fresh
-valid 2×2 RGBA PNG; no decoder check was bypassed.
-
-### Exact verification evidence
-
-```text
-cmake --build --preset windows-debug -j 8
-[11/12] Linking CXX executable Debug\easy3d_geometry_lifecycle.exe
-
-ctest --preset windows-debug --output-on-failure
-1/6 Test #1: easy3d.core ......................   Passed    0.05 sec
-2/6 Test #2: easy3d.scene .....................   Passed    0.04 sec
-3/6 Test #3: easy3d.math_transform ............   Passed    0.03 sec
-4/6 Test #4: easy3d.mesh ......................   Passed    0.04 sec
-5/6 Test #5: easy3d.camera ....................   Passed    0.04 sec
-6/6 Test #6: easy3d.texture ...................   Passed    0.05 sec
-100% tests passed, 0 tests failed out of 6
-Total Test time (real) =   0.53 sec
-
-cmake --build --preset windows-release -j 8
-[19/20] Linking CXX executable Release\easy3d_geometry_lifecycle.exe
-
-ctest --preset windows-release --output-on-failure
-1/6 Test #1: easy3d.core ......................   Passed    0.04 sec
-2/6 Test #2: easy3d.scene .....................   Passed    0.04 sec
-3/6 Test #3: easy3d.math_transform ............   Passed    0.03 sec
-4/6 Test #4: easy3d.mesh ......................   Passed    0.03 sec
-5/6 Test #5: easy3d.camera ....................   Passed    0.03 sec
-6/6 Test #6: easy3d.texture ...................   Passed    0.05 sec
-100% tests passed, 0 tests failed out of 6
-Total Test time (real) =   0.39 sec
-
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4259459
-sha256=55e2b364654d5a37550c9e207c58bc049f874b67285232c2a0220ad16312b03b
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-......................................                                   [100%]
-38 passed in 0.50s
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-
-build\windows-release\Release\easy3d_geometry_lifecycle.exe
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-Easy3D geometry: GPU meshes=4, indexed triangles=783, GPU textures=1, texture bytes=256, depth-test=less, sRGB=enabled
-easy3d_geometry_lifecycle: PASS frames=1032
-EXIT_CODE=0
-```
-
-Interactive computer-use inspection on the Windows 11 desktop raised the
-native SDL window above its console and visibly confirmed the full 8×8
-blue/white checker plus red/green/yellow/magenta `(0,0)`/`(1,0)`/`(0,1)`/`(1,1)`
-corner markers mapped across the plane, three solid meshes correctly
-depth-tested above it, and the expected D3D11 clear. This is genuine visual
-evidence on the NVIDIA GeForce RTX 3070 Ti; no other GPU backend is claimed.
-
-Phase 1.5: **DONE**. Immediate next task: Phase 1.6 — `.obj` loading with
-normals, UVs, material/texture assignment where practical, explicit limits,
-malformed/missing model errors, and shared mesh resources.
-
-Additional graphics-disabled compatibility check:
-
-```text
-cmake -S . -B build/windows-headless -G Ninja -DCMAKE_BUILD_TYPE=Release -DEASY3D_ENABLE_GRAPHICS=OFF -DEASY3D_BUILD_PYTHON=OFF -DEASY3D_BUILD_BENCHMARKS=OFF -DBUILD_TESTING=ON
-cmake --build build/windows-headless -j 8
-ctest --test-dir build/windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 5
-Total Test time (real) =   0.38 sec
-```
-
-The headless build keeps asset types but intentionally excludes image decoding;
-client texture support is unaffected. This is recorded in known issues rather
-than being hidden as an unsupported-server dependency.
-
-## 2026-11-01 — Phase 1.6 OBJ/MTL model assets
-
-### Implemented
-
-- Immutable-pinned tinyobjloader `v2.0.0rc13`, linked privately and converted
-  completely into Easy3D-owned model/material/mesh values.
-- Canonical, case-folded-on-Windows, mutex-protected `ModelCache` sharing parsed
-  model and mesh arrays across references and future instances.
-- Polygon triangulation, shape/material part splitting, 32-bit indices,
-  positions, normalized source normals, optional vertex RGB and UVs.
-- Flat per-triangle normals for incomplete source normals, degenerate rejection,
-  and OBJ-to-Easy3D V-coordinate conversion.
-- MTL diffuse color/alpha and `map_Kd` path assignment, with explicit failures
-  for missing MTLs, unknown materials and missing textures.
-- Typed `ModelInfo`, `ModelPartInfo`, `ModelMaterialInfo`, `load_obj`, and
-  `ModelCache` Python APIs plus explicit advanced-MTL/smoothing limitations.
-
-### Exact verification evidence
-
-```text
-ctest --preset windows-debug --output-on-failure
-1/7 Test #1: easy3d.core ......................   Passed    0.04 sec
-2/7 Test #2: easy3d.scene .....................   Passed    0.03 sec
-3/7 Test #3: easy3d.math_transform ............   Passed    0.03 sec
-4/7 Test #4: easy3d.mesh ......................   Passed    0.03 sec
-5/7 Test #5: easy3d.camera ....................   Passed    0.03 sec
-6/7 Test #6: easy3d.model .....................   Passed    0.05 sec
-7/7 Test #7: easy3d.texture ...................   Passed    0.04 sec
-100% tests passed, 0 tests failed out of 7
-Total Test time (real) =   0.46 sec
-
-ctest --preset windows-release --output-on-failure
-1/7 Test #1: easy3d.core ......................   Passed    0.04 sec
-2/7 Test #2: easy3d.scene .....................   Passed    0.05 sec
-3/7 Test #3: easy3d.math_transform ............   Passed    0.03 sec
-4/7 Test #4: easy3d.mesh ......................   Passed    0.03 sec
-5/7 Test #5: easy3d.camera ....................   Passed    0.03 sec
-6/7 Test #6: easy3d.model .....................   Passed    0.06 sec
-7/7 Test #7: easy3d.texture ...................   Passed    0.04 sec
-100% tests passed, 0 tests failed out of 7
-Total Test time (real) =   0.50 sec
-
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4421319
-sha256=6e4959331fdaa79220cccc9eace60d13f0470edbd31d9e28a918fc9aa2ea7f13
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................                                 [100%]
-40 passed in 0.44s
-
-ctest --test-dir build/windows-headless --output-on-failure
-1/6 Test #1: easy3d.core ......................   Passed    0.03 sec
-2/6 Test #2: easy3d.scene .....................   Passed    0.04 sec
-3/6 Test #3: easy3d.math_transform ............   Passed    0.04 sec
-4/6 Test #4: easy3d.mesh ......................   Passed    0.03 sec
-5/6 Test #5: easy3d.camera ....................   Passed    0.03 sec
-6/6 Test #6: easy3d.model .....................   Passed    0.05 sec
-100% tests passed, 0 tests failed out of 6
-Total Test time (real) =   0.41 sec
-```
-
-Phase 1.6: **DONE**. Immediate next task: Phase 1.7 — render components and
-beginner-facing `Cube`, `Plane`, `Sphere`, and `Model` entities that reference
-the shared mesh/model/texture assets without per-frame Python submission.
-
-## 2026-11-01 — Phase 1.7 render-component continuation
-
-### Bounded approach
-
-The prior session left the Phase 1.7 implementation uncommitted after its live
-visual-inspection step was interrupted. Before accepting the milestone, this
-continuation will audit the native/Python ownership boundary and GPU cache keys,
-rerun MSVC Debug and Release plus graphics-disabled native suites, rebuild the
-Python 3.11 editable install, run pytest and syntax checks, and repeat the
-visible D3D11 scene inspection on the Windows desktop. It will then update the
-public API/architecture documentation, checklist, known limitations, and commit
-only if all evidence is green. Primary risks are a dangling native scene
-pointer, cross-thread mutation while `Game.run()` has released the GIL, and
-incorrect GPU resource sharing across sampler variants.
-
-### Implemented
-
-- Native singleton `RenderComponent` storage in generation-checked world slots,
-  including deterministic teardown on remove, destroy, clear, and slot reuse.
-- Process-shared immutable cube/plane/sphere meshes and per-world canonical
-  texture/model caches; model parts retain parsed OBJ/MTL resources.
-- Native renderer traversal of the loaded active scene, visibility/enabled
-  filtering, world-transform submission, primitive and model-part drawing, MTL
-  diffuse color/texture application, and GPU mesh/texture sharing.
-- GPU texture cache identity includes image plus sampler settings; an audit
-  corrected the initial image-only key before acceptance.
-- Typed Python `Cube`, `Plane`, `Sphere`, `Model`, and live `MeshRenderer` APIs,
-  generic component lookup/removal, transactional constructor rollback, and
-  `Game` scene-to-native-renderer wiring.
-- Public scene/entity/component mutation is rejected while `Game.run()` is
-  traversing the native registry. Runtime updates remain a Phase 2 scheduler
-  responsibility rather than an unsafe cross-thread mutation path.
-
-### Exact verification evidence
-
-Final MSVC Debug suite:
-
-```text
-cmake --build --preset windows-debug -j 8
-ctest --preset windows-debug --output-on-failure
-1/8 easy3d.core                Passed
-2/8 easy3d.scene               Passed
-3/8 easy3d.math_transform      Passed
-4/8 easy3d.mesh                Passed
-5/8 easy3d.camera              Passed
-6/8 easy3d.model               Passed
-7/8 easy3d.render_components   Passed
-8/8 easy3d.texture             Passed
-100% tests passed, 0 tests failed out of 8
-Total Test time (real) = 0.91 sec
-```
-
-Final MSVC Release and graphics-disabled suites:
-
-```text
-cmake --build --preset windows-release -j 8
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 8
-Total Test time (real) = 0.52 sec
-
-cmake --build build\windows-headless -j 8
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 7
-Total Test time (real) = 0.48 sec
-```
-
-Python 3.11 editable packaging and tests:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4443597
-sha256=87f2223f40a41177705cf5878b0c80cd061d270fb914b81b1583fd0a9cf42c98
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-............................................                             [100%]
-44 passed in 0.52s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-```
-
-Visible Windows D3D11 diagnostic:
-
-```text
-build\venv311\Scripts\python.exe tests\manual\render_components.py --seconds 30
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-render_components: PASS frames=48504
-# exit code 0; stderr empty
-```
-
-Computer-use capture on the GUI-capable Windows 11 desktop visibly confirmed a
-gray plane, two independently transformed/colorized shared cube instances, a
-yellow sphere, and a green generated OBJ pyramid in the same depth-tested scene.
-The native Close control ended the process cleanly. This is hardware evidence on
-the NVIDIA GeForce RTX 3070 Ti and does not claim another adapter or backend.
-
-Phase 1.7: **DONE**. Immediate next task: Phase 1.8 — directional and ambient
-lighting, a scene camera/light component boundary, basic lit materials, and a
-debug-rendering baseline.
-
-## 2026-11-01 — Phase 1.8 lighting and debug rendering
-
-### Bounded approach
-
-Add a scene-owned camera value, native ambient/directional light components,
-lit/unlit material selection, normal-aware solid and textured D3D11 shaders,
-and persistent scene debug lines submitted from transient GPU buffers. Expose a
-typed Python `Light` entity, `LightComponent`, `Scene.camera`, and
-`easy3d.debug` helpers without introducing per-frame Python rendering calls.
-Validate light/component lifetime, camera assignment, material mutation, and
-debug-line storage in C++/pytest; regenerate reviewed DXBC with the pinned bgfx
-shader compiler; then run the full build matrix and a visible hardware
-diagnostic. Primary risks are non-uniform-scale normal transforms, shader/uniform
-ABI mismatch, and preserving current scene defaults when no explicit light is
-created.
-
-### Implemented
-
-- Native singleton ambient/directional `LightComponent` storage with validated
-  color/intensity, generation-safe teardown, enabled filtering, ambient
-  accumulation, and first-directional selection.
-- Scene-owned perspective `Camera`; projection still derives its aspect and
-  depth convention from the live bgfx viewport/capabilities after resize.
-- Lit/unlit material selection for primitive/model entities. Both solid and
-  textured shaders use inverse-transpose world normal transforms and Lambert
-  directional plus ambient illumination; scenes without explicit lights retain
-  a usable default rig.
-- Persistent scene debug lines with depth-tested and overlay groups, uploaded
-  through frame-local bgfx transient vertex buffers and rendered unlit.
-- Typed Python `Light`, live `LightComponent`, `Scene.camera`, `MeshRenderer.lit`,
-  primitive `lit=`, and `easy3d.debug.line`/`axes` APIs with runtime mutation
-  guards consistent with native scene traversal.
-- A public-API-only manual diagnostic contrasting lit and unlit materials while
-  exercising a custom camera and four debug lines.
-
-### Exact verification evidence
-
-Pinned Shader Model 5 compiler (all four vertex/fragment sources, `--Werror`):
-
-```text
-build\windows-debug\_deps\bgfx_cmake-build\cmake\bgfx\Debug\shaderc.exe ...
-vs_solid_color.sc.bin.h   7411 bytes
-vs_textured.sc.bin.h      8111 bytes
-fs_solid_color.sc.bin.h   8122 bytes
-fs_textured.sc.bin.h      9396 bytes
-# exit code 0 for all four invocations
-```
-
-MSVC Debug, Release, and graphics-disabled suites:
-
-```text
-cmake --build --preset windows-debug -j 8
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 9
-Total Test time (real) = 1.12 sec
-
-cmake --build --preset windows-release -j 8
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 9
-Total Test time (real) = 0.58 sec
-
-cmake --build build\windows-headless -j 8
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 8
-Total Test time (real) = 0.61 sec
-```
-
-Python 3.11 editable packaging and tests:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=2740343
-sha256=eb3e7bd917b9dd1cae6d5c78e12b8a41fae4fd337bb06dea9f5665948e97096d
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-..............................................                           [100%]
-46 passed in 0.24s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-```
-
-Visible Windows D3D11 diagnostic:
-
-```text
-build\venv311\Scripts\python.exe tests\manual\lighting_debug.py --seconds 2
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-lighting_debug: PASS frames=10537 debug_lines=4
-# exit code 0
-
-python tests\manual\lighting_debug.py --seconds 60
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-lighting_debug: PASS frames=105470 debug_lines=4
-# exit code 0
-```
-
-Computer-use capture on the GUI-capable Windows 11 desktop visibly confirmed
-directional shading across a rotated red cube and cyan sphere, a uniformly unlit
-green comparison cube, the custom scene-camera framing, a shaded plane, RGB
-axes, and a yellow overlay line. The native Close control ended the process
-cleanly. This is hardware evidence on the NVIDIA GeForce RTX 3070 Ti/D3D11 only.
-
-Phase 1.8: **DONE**. Immediate next task: Phase 1.9 — frustum culling,
-instancing/batching, renderer counters, and benchmark scenes.
-
-## 2026-11-01 — Phase 1.9 culling, instancing, and counters
-
-### Bounded approach
-
-Add native frustum extraction for both bgfx depth conventions, conservative
-transformed-mesh bounds, compatibility-keyed D3D11 instancing, coherent frame
-counters, and repeatable public-API diagnostics. Preserve exact non-uniform-scale
-normal handling by falling back to individual draws. Validate mathematical edge
-cases in graphics-independent C++ tests and require live D3D11 diagnostics to
-account for every renderable as visible or culled and to prove instanced draw
-submission through counters.
-
-### Implemented
-
-- Normalized six-plane frusta from projection × view for D3D `[0,1]` and
-  homogeneous `[-1,1]` depth, plus conservative transformed bounds tests.
-- Per-mesh local AABB caching and culling before texture upload or draw
-  submission.
-- Compatibility grouping by GPU mesh, complete material, and texture/sampler;
-  matching uniform-scale groups use transient model-matrix instance buffers and
-  dedicated solid/textured instanced vertex programs.
-- Exact single-draw fallback for non-uniform scale or transient-buffer pressure.
-- Coherent latest-frame `RendererStats` published from native atomics and exposed
-  as a frozen Python value on `Game`.
-- `benchmarks/render_cubes.py` with instance accounting, wall-clock FPS,
-  sampled median/p95/p99 frame time, and Windows working/private-set memory.
-- A five-cube live diagnostic that requires two visible cubes, three culled
-  cubes, and one instanced draw.
-
-### Exact verification evidence
-
-```text
-cmake --build --preset windows-debug -j 8
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 3.00 sec
-
-cmake --build --preset windows-release -j 8
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 0.63 sec
-
-cmake --build build\windows-headless -j 8
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 9
-Total Test time (real) = 0.61 sec
-```
-
-Python 3.11 editable package and public API:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=2747035
-sha256=f2644d41f678362ec98ad7fbaeacdd217511a6d0873ca41767d2686c867b722b
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-..............................................                           [100%]
-46 passed in 0.23s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version(), easy3d.RendererStats())"
-0.1.0 RendererStats(draw_calls=0, visible_instances=0, culled_instances=0, instanced_draw_calls=0)
-```
-
-Short D3D11 benchmark validation on the RTX 3070 Ti:
-
-```text
-build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 200 --seconds 2
-requested_instances=200
-frames=8470
-overall_fps=4154.22
-frame_ms_median=0.16135
-frame_ms_p95=0.5571
-frame_ms_p99=2.4534
-renderer: draw_calls=1, visible_instances=200, culled_instances=0,
-          instanced_draw_calls=1
-# exit code 0
-```
-
-Targeted live culling/instancing diagnostic:
-
-```text
-build\venv311\Scripts\python.exe tests\manual\renderer_optimization.py --seconds 60
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-renderer_optimization: PASS frames=354589
-RendererStats(draw_calls=1, visible_instances=2, culled_instances=3,
-              instanced_draw_calls=1)
-# exit code 0
-```
-
-The D3D11 programs compiled, linked, ran for 60 seconds, and returned internally
-consistent live counters. The attempted dedicated computer-use image inspection
-was interrupted with Escape, so the instanced image itself remains explicitly
-**UNVERIFIED** rather than being overstated. Prior Phase 1.8 D3D11 output remains
-visually verified; this does not block the counter/culling acceptance evidence.
-
-Phase 1.9: **DONE**. Immediate next task: Phase 1.10 — first-world example and
-the recorded 10,000-static-cube acceptance workload.
-
-## 2026-11-01 — Phase 1.10 first-world and 10,000-cube acceptance
-
-### Implemented
-
-- Added native perspective/orthographic projection selection with a fixed
-  positive orthographic height, D3D and homogeneous depth conventions, current
-  pixel-aspect resize behavior, frustum integration, Python typing, scene
-  copy-in/copy-out, and native/Python tests.
-- Added `examples/02_first_world/main.py` and its run guide. The example uses
-  only public API to create transformed primitives, native ambient/directional
-  lights, debug axes, a decoded PNG texture, and a textured OBJ/MTL model. On
-  exit it unloads with `clear=True`, verifies zero entities, and closes the
-  scene.
-- Added a 100-cycle scene load/unload/clear/close Python regression that checks
-  stale-handle invalidation after every cycle.
-- Checked Phase 1.10 after the first-world D3D11 run and full 10,000-instance
-  benchmark. The separate Phase 1 exit-gate requirement for a moving camera is
-  not claimed yet: runtime mutation remains intentionally guarded until Phase
-  2.2 provides safe simulation boundaries.
-
-### Validated machine
-
-```text
-OS: Microsoft Windows 11 Home 10.0.26200 (build 26200)
-CPU: AMD Ryzen 5 5600G with Radeon Graphics (12 logical processors)
-RAM: 34,227,388,416 bytes
-GPU: NVIDIA GeForce RTX 3070 Ti
-GPU driver: 32.0.16.1088
-Renderer: Direct3D 11, vendor=0x10de, device=0x2482
-```
-
-`Win32_VideoController.AdapterRAM` returned a truncated value on this machine,
-so GPU memory capacity is deliberately omitted rather than misreported.
-
-### Exact verification evidence
-
-Native Debug:
-
-```text
-cmake --build --preset windows-debug --parallel
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 1.08 sec
-```
-
-Native Release:
-
-```text
-cmake --build --preset windows-release --parallel
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 0.68 sec
-```
-
-Graphics-disabled/headless:
-
-```text
-cmake --build build\windows-headless --parallel
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 9
-Total Test time (real) = 0.55 sec
-```
-
-Python 3.11 editable build and tests:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4463369
-sha256=6047467a49d73d8962749a44ee9c3c1fd3a2c1c2efd209b465d00cd9b08212b9
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-.................................................                        [100%]
-49 passed in 0.17s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-```
-
-Timed first-world D3D11 run:
-
-```text
-build\venv311\Scripts\python.exe examples\02_first_world\main.py --seconds 3
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-first_world: PASS frames=491 draw_calls=5 visible=4 culled=0 scene_closed=True
-# exit code 0
-```
-
-The native window, D3D11 device, texture/model resource path, rendered frames,
-and teardown all executed on the GUI-capable Windows machine. This timed run
-was not separately image-inspected, so exact visual composition is **UNVERIFIED**
-rather than inferred from counters.
-
-Ten-second 10,000 shared-cube acceptance workload:
-
-```text
-build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 10000 --seconds 10
-requested_instances=10000
-creation_seconds=0.1629028000170365
-run_seconds=10.03159049997339
-frames=3862
-overall_fps=384.9838168743276
-sample_count=926
-frame_ms_median=2.4795
-frame_ms_p95=3.0416000000000003
-frame_ms_p99=3.2948
-renderer: draw_calls=1, visible_instances=9318, culled_instances=682,
-          instanced_draw_calls=1
-memory: working_set_before=22781952,
-        working_set_after_creation=27762688,
-        working_set_after_run=77049856,
-        peak_working_set_after_run=108290048,
-        private_bytes_after_run=83185664
-# exit code 0
-```
-
-Every requested cube was accounted for (`9318 + 682 == 10000`), and all
-visible compatible cubes were submitted as one instanced draw. These figures
-describe this exact machine and workload; they are not a general hardware
-capacity claim.
-
-Phase 1.10: **DONE**. Immediate next task: Phase 2.1 — native input mapping,
-focus/pointer-lock behavior, remappable actions, and headless-testable state.
-
-## 2026-11-01 — Phase 2.1 input mapping and SDL device state
-
-### Implemented
-
-- Added a platform-neutral, mutex-protected native `InputSystem` to graphics and
-  headless builds. It owns canonical physical controls, per-frame pointer data,
-  focus and pointer-lock state, primary-gamepad metadata, and scalar action
-  maps.
-- Added action composition with replace/append remapping, signed scale,
-  one-dimensional deadzone rescaling, clamping, and press/hold/release edges.
-- The SDL3 Windows adapter now translates physical keyboard scancodes, mouse
-  motion/buttons/wheel, primary-gamepad buttons/axes and hot-plug events. Focus
-  loss clears held state and applied relative mouse mode; the declarative lock
-  request is retained for focus regain.
-- Added typed public `game.input`, `Input`, `Binding`, `ActionState`, and
-  `PointerState` APIs plus raw key/mouse/gamepad helpers.
-- Added platform-neutral native coverage, Python validation/remapping coverage,
-  and a timed manual Windows D3D11/SDL relative-mouse diagnostic.
-
-### Exact verification evidence
-
-Native Debug:
-
-```text
-cmake --build --preset windows-debug --parallel
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 1.15 sec
-```
-
-Native Release:
-
-```text
-cmake --build --preset windows-release --parallel
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.71 sec
-```
-
-Graphics-disabled/headless:
-
-```text
-cmake --build build\windows-headless --parallel
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 0.58 sec
-```
-
-Python 3.11 editable build and tests:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4488394
-sha256=ada1c1241b9e592e27214a4db27484625130471891851b8cb5aa22ed192eeadc
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................                 [100%]
-56 passed in 0.48s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-```
-
-Timed live SDL pointer-lock diagnostic:
-
-```text
-build\venv311\Scripts\python.exe tests\manual\input_diagnostic.py --seconds 2
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-input_diagnostic: PASS frames=9507 focus_observed=True pointer_lock_observed=False gamepad_connected=False
-# exit code 0
-
-build\venv311\Scripts\python.exe tests\manual\input_diagnostic.py --seconds 2 --pointer-lock
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-RuntimeError: SDL relative mouse mode never became active (window_focus_observed=True)
-# exit code 1
-```
-
-The desktop automation host briefly delivered focus and then reclaimed it, so
-the strict focus guard correctly prevented a durable applied-lock observation.
-This live pointer-lock check is **UNVERIFIED**, not passed. No physical gamepad
-was attached, so real hardware input and hot-plug behavior are also
-**UNVERIFIED**. Platform-neutral focus, lock-state, controller, and action logic
-is covered by the native test, and SDL compilation/event translation is covered
-by the Windows build.
-
-Phase 2.1: **DONE**. Immediate next task: Phase 2.2 — script lifecycle, fixed
-simulation scheduling, safe deferred mutation, exception policy, and callback
-profiling.
-
-## 2026-11-01 — Phase 2.2 script lifecycle and simulation scheduler
-
-### Implemented
-
-- Added a pybind frame bridge that releases the GIL during the native loop,
-  reacquires it for one gameplay callback after input polling, and returns to
-  C++ before renderer traversal.
-- Added entity `awake`, `start`, `fixed_update`, `update`, `late_update`, and
-  `on_destroy` discovery with once-only lifecycle state and disabled-entity
-  behavior.
-- Added configurable fixed rate, frame-delta clamp, catch-up cap, dropped-time
-  and overrun counters, plus per-hook call/total/maximum/latest timings.
-- Added safe deferred entity destruction and scene clear at callback phase
-  boundaries. Other scene mutations are permitted only from the gameplay thread
-  while its scheduler callback is active.
-- Added identity-rich fail-fast `ScriptCallbackError` propagation and tolerant
-  traceback logging/quarantine through `fail_fast=False` and `script_errors`.
-- Updated the first-world example with an `Entity.update` orbit camera. Its live
-  D3D11 run completes the remaining Phase 1 moving-camera exit evidence.
-
-### Exact verification evidence
-
-Native Debug:
-
-```text
-cmake --build --preset windows-debug --parallel
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 1.21 sec
-```
-
-Native Release:
-
-```text
-cmake --build --preset windows-release --parallel
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.71 sec
-```
-
-Graphics-disabled/headless:
-
-```text
-cmake --build build\windows-headless --parallel
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 0.59 sec
-```
-
-Python 3.11 editable build and tests:
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=2769696
-sha256=0b4361da53ace34d90177b2af936963b77533dd3126a3d114e61329733e9a579
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-................................................................         [100%]
-64 passed in 0.16s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-```
-
-Moving-camera first-world D3D11 run:
-
-```text
-build\venv311\Scripts\python.exe examples\02_first_world\main.py --seconds 3
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-first_world: PASS frames=440 draw_calls=5 visible=4 culled=0 fixed_ticks=145 update_calls=440 scene_closed=True
-# exit code 0
-```
-
-All 440 rendered frames ran the orbit script before native traversal, and 145
-fixed ticks ran independently of render-frame count. The scene then unloaded,
-cleared, and closed. Exact visual composition was not separately image-inspected,
-but camera mutation, callback count, D3D11 presentation, and teardown executed.
-
-Live exception/recovery diagnostic:
-
-```text
-build\venv311\Scripts\python.exe tests\manual\scheduler_diagnostic.py
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-update failed for BrokenScript name='tolerant actor' id=4294967296: intentional scheduler diagnostic failure
-ValueError: intentional scheduler diagnostic failure
-scheduler_diagnostic: PASS frames=14 errors=1
-# exit code 0
-```
-
-The first window's fail-fast error crossed the native boundary and reset engine
-running state. A second window initialized successfully in the same process;
-tolerant mode logged and quarantined exactly one script failure.
-
-Final lifecycle edge-case audit also verified that failed primitive
-construction rolls back without firing `on_destroy`, and that
-`unload_scene(clear=True)` invokes destruction while the scene is still
-attached so scheduler state is released. The final native recheck used the
-existing build trees:
-
-```text
-ctest --test-dir build/windows-debug --output-on-failure -C Debug
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.21 sec
-
-ctest --test-dir build/windows-release --output-on-failure -C Release
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.20 sec
-
-ctest --test-dir build/windows-headless --output-on-failure -C Debug
-100% tests passed, 0 tests failed out of 10
-Total Test time (real) = 0.17 sec
-```
-
-Phase 2.2: **DONE**. Phase 1 exit gate: **PASSED**. Immediate next task: Phase
-2.3 — standalone state machine, timers, cooldowns, event bus, and tween utilities.
-
-## 2026-11-01 — Phase 2.3 standalone gameplay utilities
-
-### Implemented
-
-- Added a named `StateMachine` with lifecycle callbacks, guarded event-driven
-  transitions, direct transitions, state-time accounting and callback
-  reentrancy rejection.
-- Added caller-owned `Timer` and `Cooldown` with one-shot/repeat behavior,
-  pause/resume/cancel/reset, completion counters, explicit simulation/render/
-  wall clock domains, injected wall clocks and bounded callback bursts.
-- Added synchronous `EventBus` subscriptions with stable priority/order,
-  one-shot delivery, mutation-safe snapshot dispatch and bounded recursive
-  emission.
-- Added generic `Tween` interpolation for numeric/vector-like values and tuples,
-  built-in/custom easing, completion callbacks, looping/ping-pong and the same
-  explicit clock-domain policy.
-- Exported the typed utilities at package top level and documented their
-  headless ownership, timing, ordering and exception contracts in README, API,
-  architecture and ADR-0016.
-
-### Exact verification evidence
-
-Focused graphics-independent suite:
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests\python\test_utilities.py -q
-..........                                                               [100%]
-10 passed in 0.08s
-```
-
-Full Python regression suite after final validation tightening:
-
-```text
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 97%]
-..                                                                       [100%]
-74 passed in 0.18s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests
-# exit code 0, no output
-```
-
-This milestone changes no C++ or renderer code. The immediately preceding
-Phase 2.2 final native recheck remains 11/11 Debug, 11/11 Release and 10/10
-headless. Phase 2.3: **DONE**. Immediate next task: Phase 2.4 — pinned Jolt
-integration, per-world collision layers/gravity/body lifetime and headless fixed
-stepping.
-
-## 2026-11-01 — Phase 2.4 Jolt physics foundation
-
-### Implemented
-
-- Pinned Jolt Physics 5.6.0 to immutable commit
-  `e77f175595e64cb44218cc9d9d56fc365ad0e36a`, kept it a private static CMake
-  dependency, and added its MIT license and third-party notice.
-- Added a lazily allocated, scene-owned `PhysicsWorld` with independently
-  configurable gravity, a documented static/dynamic/sensor/character collision
-  matrix, box and sphere bodies, validated capacity and finite inputs, and a
-  single-threaded fixed-step backend suitable for headless tests.
-- Added generation- and world-checked body handles, deterministic destruction
-  and scene-clear teardown, cross-world alias rejection, and Jolt error
-  propagation without leaking allocator-specific strings across the API.
-- Integrated one Jolt step after each Python fixed-update/deferred-mutation
-  boundary. Exposed scene gravity and physics step count through the typed
-  Python API while deliberately deferring public collider/rigid-body components,
-  forces, triggers and queries to Phase 2.5/2.6.
-
-### Failures found and fixed
-
-The first native physics run ended with `91% tests passed, 1 failed` and
-`easy3d.physics ***Exception: SegFault`. Jolt's global allocator/type runtime
-was being initialized after objects that depend on it; making that runtime the
-first physics implementation member fixed construction and guaranteed reverse
-destruction order. The final shape-validation change then failed compilation
-because `ShapeResult::GetError()` uses Jolt's allocator. Copying its bytes into
-`std::string` at the Easy3D boundary fixed the type/allocator mismatch. Neither
-failure was bypassed.
-
-### Exact final verification evidence
-
-```text
-cmake --build build/windows-headless --parallel
-ctest --test-dir build/windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.70 sec
-
-cmake --build build/windows-debug --config Debug --parallel
-ctest --test-dir build/windows-debug -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 1.60 sec
-
-cmake --build build/windows-release --config Release --parallel
-ctest --test-dir build/windows-release -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.96 sec
-
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3224401
-sha256=30ec5f4a21cea7356f5a647896c6c51aae6c0650de6ac3349af3d58d990f47f1
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 94%]
-....                                                                     [100%]
-76 passed in 0.17s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; s=easy3d.Scene(); print(easy3d.engine_version(), s.gravity, s.physics_step_count, isinstance(easy3d.PhysicsError('ok'), easy3d.EngineError))"
-0.1.0 Vec3(0.0, -9.8100004196167, 0.0) 0 True
-```
-
-Phase 2.4: **DONE**. Immediate next task: Phase 2.5 — public collider and rigid
-body components, forces/impulses, physical materials and trigger behavior.
-
-## 2026-11-01 — Phase 2.5 public physics components
-
-### Implemented
-
-- Added scene-owned native `ColliderComponent` and `RigidBodyComponent` state
-  with deterministic entity/body teardown, singleton checks and generation-safe
-  lookups. Box/sphere colliders can be static, dynamic, kinematic or sensors.
-- Added validated `PhysicsMaterial` friction/restitution, positive mass, gravity
-  factor, linear velocity, force, impulse and explicit teleport operations.
-  Units are meters, kilograms, seconds, newtons and newton-seconds.
-- Added solver-to-entity synchronization after fixed steps. Dynamic transform
-  assignment is rejected in favor of explicit teleport; static/kinematic poses
-  push into Jolt. Physics parenting is rejected pending a tested moving-parent
-  contract.
-- Added typed Python `Collider`, `Rigidbody`, and `PhysicsMaterial` facades,
-  `Entity.add_component` integration, top-level/module exports, and matching
-  `collider=True` convenience for cube, plane and sphere primitives.
-- Added native and Python regression coverage for material/mass conversions,
-  impulses, forces, velocity, gravity opt-out, trigger configuration, fixed-step
-  pose synchronization, component removal, entity destruction and validation.
-  Trigger event delivery and queries remain correctly deferred to Phase 2.6.
-
-### Failures found and fixed
-
-The first focused Python run reported `1 failed, 5 passed`: a test compared a
-Jolt `float` friction round-trip (`0.800000011920929`) with Python `0.8` using
-exact dataclass equality. It now uses the documented approximate-float policy.
-The primitive convenience test initially passed tuples to `Vec3.almost_equal`,
-whose contract requires another `Vec3`; the test was corrected without relaxing
-the implementation. No engine failure was bypassed.
-
-### Exact final verification evidence
-
-```text
-cmake --build build/windows-headless --parallel
-ctest --test-dir build/windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.76 sec
-
-cmake --build build/windows-debug --config Debug --parallel
-ctest --test-dir build/windows-debug -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 1.66 sec
-
-cmake --build build/windows-release --config Release --parallel
-ctest --test-dir build/windows-release -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.77 sec
-
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3244778
-sha256=7276c55115d76aada1f324e33a8cefff4945d51f99057417d5ee8e848f6d2389
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest tests\python\test_physics_components.py -q
-......                                                                   [100%]
-6 passed in 0.07s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 86%]
-...........                                                              [100%]
-83 passed in 0.22s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); e=Entity(scene=s); c=e.add_component(Collider, shape='sphere'); b=e.add_component(Rigidbody, mass=2); print(engine_version(), c.shape, b.mass, s.physics_step_count)"
-0.1.0 sphere 2.0 0
-```
-
-Phase 2.5: **DONE**. Immediate next task: Phase 2.6 — native physics queries and
-safe collision/trigger enter, stay and exit event snapshots.
-
-## 2026-11-01 — Phase 2.6 queries and contact events
-
-### Implemented
-
-- Added native nearest/all raycasts, sphere and capsule casts, sphere overlap and
-  oriented-box overlap. Results apply layer-mask, sensor and exact-entity
-  exclusion filters before conversion, are deduplicated where appropriate, and
-  have documented deterministic sort order.
-- Added immutable Python `PhysicsHit` snapshots and typed `easy3d.physics`
-  `raycast`, `sphere_cast`, `capsule_cast`, `overlap_sphere`, and `overlap_box`
-  APIs. Jolt IDs and collector storage never cross the binding boundary.
-- Added a bounded, mutex-protected native contact recorder. Jolt callbacks copy
-  data only; the scheduler dispatches frozen per-recipient `CollisionEvent`
-  values afterward on the gameplay thread through the existing profiling,
-  fail-fast/quarantine and deferred-mutation path.
-- Added collision and trigger `enter`, `stay`, and `exit` hooks for enabled,
-  started script entities. Normals are recipient-relative and stale/destroyed
-  pairs are not exposed.
-- Added sleeping-contact reconciliation: Jolt retiring solver contacts when all
-  moving bodies sleep does not fabricate an exit; reactivation remains stay and
-  real separation produces exit.
-
-### Failures found and fixed
-
-The first scene ray test assumed a previously impulsed body was still at
-`x=0`; aiming through the synchronized body pose fixed the test. One Python
-assertion called the documented `Vec3.length` property as a method and was
-corrected. Most importantly, the first Debug matrix reported
-`easy3d.physics (Failed)` because Jolt removes contacts when bodies sleep and a
-one-step teleport then had no cached removal to report. Contact reconciliation
-now tracks pairs touched in each update, retains all-sleeping pairs, and emits
-exit once an awake pair is no longer detected. A new four-second sleep
-regression asserts no false exit before the real separation. An orphaned yielded
-CTest process briefly caused `LNK1168` while holding the Debug test executable;
-only that exact process/session was ended before rebuilding.
-
-### Exact final verification evidence
-
-```text
-cmake --build build/windows-headless --parallel
-ctest --test-dir build/windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 3.14 sec
-
-cmake --build build/windows-debug --config Debug --parallel
-ctest --test-dir build/windows-debug -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 4.29 sec
-
-cmake --build build/windows-release --config Release --parallel
-ctest --test-dir build/windows-release -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 1.47 sec
-
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3273017
-sha256=0f38adbfce1b588a90370bc0ef114f5f58b533a80537665e399954e8c10b4248
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest tests\python\test_physics_queries_events.py -q
-...                                                                      [100%]
-3 passed in 0.12s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 83%]
-..............                                                           [100%]
-86 passed in 0.48s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); e=Sphere(collider=True, scene=s); h=physics.sphere_cast(s,(0,0,3),.1,(0,0,-1),10); print(engine_version(), h.entity.name, h.distance, isinstance(h, PhysicsHit))"
-0.1.0 Sphere 2.3999998569488525 True
-```
-
-Phase 2.6: **DONE**. Immediate next task: Phase 2.7 — native first-person and
-third-person character motors with Python configuration hooks.
-
-## 2026-11-01 — Phase 2.7 native character motors
-
-### Implemented
-
-- Added generation-checked native character handles and per-world Jolt
-  `CharacterVirtual` ownership. A bottom-aligned capsule provides collision and
-  a smaller inner capsule on the character layer provides ordinary query,
-  sensor, rigid-body and deferred-contact participation.
-- Added fixed-step native acceleration, air control, gravity, moving-ground
-  velocity, jump requests, slope cancellation, floor adhesion and stair
-  walking. First-person mode follows command heading; third-person mode faces
-  movement while both consume camera-heading-relative local input.
-- Added scene-owned `CharacterControllerComponent` state, physics-owned pose
-  synchronization, transactional creation/removal, explicit teleport, collider
-  exclusivity, parenting rejection, entity destruction and scene-clear
-  teardown.
-- Added typed Python `CharacterController` and convenience `Player` APIs with
-  validated radius/height, speed, acceleration, air control, jump speed, slope
-  and step configuration plus grounded/normal/velocity state snapshots.
-- Added native regressions for settling, stepping over a 0.3 m obstacle,
-  jumping/landing, first-/third-person facing, handle lifetime and explicit
-  30-degree walkable versus 60-degree rejected slopes at a 45-degree limit.
-  Python regressions cover the same public lifecycle, character-layer query,
-  transform ownership, validation and scene cleanup.
-
-### Failures found and fixed
-
-The first focused Python run reported `1 failed, 3 passed` after the player
-walked to the edge of a 12 m test floor before jumping; the equivalent native
-course used a 20 m floor and landed correctly. Enlarging only the Python test
-floor to 30 m removed the accidental fall without changing motor behavior. The
-corrected focused suite passes. No production failure was bypassed.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3306411
-sha256=e91fd21c2f89c9ee94859e631dd367335a356bbd6a887cfce5c0781f889043cb
-Successfully installed easy3d-0.1.0
-
-cmake --build build/windows-headless --config Debug --parallel 4
-ctest --test-dir build/windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.66 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 1.62 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.72 sec
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_character_controller.py -q
-....                                                                     [100%]
-4 passed in 0.10s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 80%]
-..................                                                       [100%]
-90 passed in 0.22s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests/python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "from easy3d import *; s=Scene(); p=Player(scene=s); print(engine_version(), p.controller.mode, p.controller.grounded, p.has_component(CharacterController))"
-0.1.0 first_person False True
-```
-
-Phase 2.7: **DONE**. Immediate next task: Phase 2.8 — advanced shapes,
-constraints and continuous collision detection.
-
-## 2026-11-01 — Phase 2.8 advanced physics
-
-### Implemented
-
-- Added native/public capsule and convex-hull colliders plus static OBJ
-  triangle-mesh colliders. Convex inputs are bounded to 4–256 finite points;
-  indexed meshes validate all triangles and reject moving concave bodies.
-- Added `Model(..., collider="mesh" | "convex")`. Native OBJ parts are combined
-  into collision vertices/indices and entity scale is baked once when the
-  advanced collider is created.
-- Added dynamic `Rigidbody(continuous=True)`, mapped to Jolt linear-cast motion
-  quality, with explicit rejection for static/kinematic bodies and unsafe
-  initial/set linear velocity above Jolt's 500 m/s body limit.
-- Added generation-checked, scene-owned fixed and distance constraints with
-  world anchors, automatic or bounded distance, explicit removal and cascading
-  cleanup before endpoint replacement/destruction.
-- Added solver regressions for capsule/hull settling on a real triangle mesh,
-  fixed/distance invariants and stale handles. CCD is tested against a control:
-  a discrete 400 m/s sphere tunnels through a 0.1 m wall while the otherwise
-  identical linear-cast sphere stops before it.
-
-### Failures found and fixed
-
-The first final Debug matrix stopped in `easy3d.physics` with Jolt's assertion
-breakpoint while the optimized headless test passed. Stage diagnostics isolated
-the issue to the CCD control's 1000 m/s initial velocity, which exceeds Jolt's
-default 500 m/s maximum and is clamped only in non-assert builds. The test now
-uses 400 m/s—still enough to cross the wall in one 60 Hz tick—and Easy3D
-validates the 500 m/s limit before calling Jolt. The corrected Debug and Release
-matrices pass; temporary stage diagnostics were removed.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3325230
-sha256=b26ef2195ed09cbb8fd98eb3e9a3ee954b399c4f18b5c02e010d254f6b24203a
-Successfully installed easy3d-0.1.0
-
-cmake --build build/windows-headless --config Debug --parallel 4
-ctest --test-dir build/windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.67 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 1.55 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.77 sec
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_advanced_physics.py -q
-.......                                                                  [100%]
-7 passed in 0.12s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 74%]
-.........................                                                [100%]
-97 passed in 0.24s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests/python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "from easy3d import *; from easy3d import physics; s=Scene(); a=Cube(collider=True,scene=s); b=Cube(position=(0,2,0),collider=True,scene=s); r=b.add_component(Rigidbody,continuous=True); j=physics.distance_constraint(a,b); print(engine_version(),r.continuous,j.type,j.is_alive)"
-0.1.0 True distance True
-```
-
-Phase 2.8: **DONE**. Immediate next task: Phase 2.9 — playable single-player
-obstacle course and Phase 2 exit-gate regression suite.
-
-## 2026-11-01 — Phase 2.9 obstacle course and Phase 2 exit gate
-
-### Implemented
-
-- Added `examples/03_obstacle_course`, a playable public-API-only first-person
-  course with remappable keyboard/gamepad actions, mouse-look request, native
-  character movement, three-step climb, raised runway, slope and balance-beam
-  side challenges, CCD rigid-body obstacles, finish trigger, camera, lighting,
-  fall recovery, clean teardown, and an optional bounded run time.
-- Added a headless course regression that drives the same scene through the
-  fixed-step scheduler, crosses its physics terrain, receives the finish trigger,
-  verifies character/collider/rigid-body participation, and proves scene cleanup.
-- Re-ran the complete Phase 2 native Debug/headless/Release and Python matrices,
-  performed a fresh isolated editable build, and exercised the actual D3D11
-  course window on the interactive Windows desktop.
-
-### Interactive Windows evidence and limits
-
-The exact command `build\venv311\Scripts\python.exe
-examples\03_obstacle_course\main.py` opened a visible 1280x720 native window.
-The renderer reported:
-
-```text
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482
-```
-
-Computer-use inspection showed the complete rendered course: the center steps
-and raised runway, green finish gate, two dynamic balls, left balance beams and
-right slope. The focused window accepted input, rendered continuously, and an
-Escape action followed the public `Game.stop()` path. The process exited with
-code 0 and printed:
-
-```text
-obstacle_course: PASS finished=False frames=10137 draw_calls=12 fixed_ticks=3383
-```
-
-`finished=False` is expected for this visual lifecycle check because the
-automation driver emits taps rather than held movement; deterministic course
-completion is covered by the headless regression below. Pointer capture also
-made synthetic border dragging unreliable, so this run is not claimed as new
-relative-mouse or resize proof. The already-validated Phase 0 interactive
-resize evidence remains applicable to the same SDL/bgfx window path. No
-physical gamepad was available.
-
-### Failures found and corrected
-
-The first compile check used the nonexistent `src\easy3d` path and printed
-`Can't list 'src\\easy3d'`. `compileall` returns zero for that condition, so the
-command was explicitly corrected to the real `python` package directory and
-rerun successfully. The first editable install exceeded its initial output
-yield while the isolated CMake build was still active; process inspection
-confirmed that it was compiling rather than blocked. It completed successfully,
-and a second fully captured run supplied the exact wheel evidence below. No
-test or product failure was bypassed.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=5495632
-sha256=dce5ab388cbb291c24aa4f748a19d0de9afed39c6c29e2852edad6009267a4b2
-Successfully installed easy3d-0.1.0
-
-cmake --build build/windows-headless --config Debug --parallel 4
-ctest --test-dir build/windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 11
-Total Test time (real) = 0.20 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.39 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.26 sec
-
-build\venv311\Scripts\python.exe -m pytest tests\python\test_obstacle_course.py -q
-.                                                                        [100%]
-1 passed in 0.09s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 73%]
-..........................                                               [100%]
-98 passed in 0.41s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-```
-
-Phase 2.9 and the Phase 2 exit gate: **DONE**. Immediate next task: Phase 3.1 —
-platform-neutral transport interfaces, bounded queues, and deterministic
-loss/latency simulation tests. No networking implementation is claimed yet.
-
-## 2026-11-01 — Phase 3.1 transport foundation
-
-### Bounded approach
-
-Add a dependency-free C++ transport contract with opaque 64-bit connection
-IDs, explicit reliable/unreliable intent, immutable transport events, send
-backpressure results, statistics, and a mutex-protected bounded event queue.
-Build a deterministic in-memory two-endpoint link behind that same interface so
-latency, jitter, loss, message-size limits, queue exhaustion, disconnects and
-ordering can be tested without sockets or graphics. Expose the simulator through
-a typed `easy3d.network` Python facade and document the ownership/threading
-boundary. Add native and Python regressions, then rerun headless, Debug, Release,
-editable-install and full pytest matrices.
-
-Files expected to change: new native network header/source, CMake and pybind11
-wiring, `easy3d.network` and its stub/export surface, native/Python tests, and
-network architecture/progress documentation. GameNetworkingSockets, real
-addresses/ports, protocol handshakes, servers, clients and entity replication
-remain explicitly outside this slice. Primary risks are queue-overflow semantics,
-deterministic simulated scheduling and keeping future worker-thread data from
-calling Python directly.
-
-### Implemented
-
-- Added a dependency-neutral native `NetworkTransport` data-plane interface,
-  opaque nonzero 64-bit `ConnectionId`, reliable/unreliable delivery intent,
-  immutable copied events, explicit send outcomes and transport statistics.
-- Added a mutex-protected bounded FIFO `TransportEventQueue`. Capacity
-  exhaustion increments diagnostics and is surfaced by the owning transport as
-  `NetworkError`; queued messages remain drainable afterward.
-- Added a native two-endpoint `SimulatedNetwork` behind the same interface.
-  Its manual seeded clock implements bounded in-flight messages, one-way
-  latency, jitter, loss, equal-time sequence ordering, size rejection,
-  disconnect lifecycle and per-endpoint counters without SDL, bgfx or sockets.
-- Added typed public `easy3d.network` enums, frozen IDs/events/statistics, a
-  runtime-checkable `NetworkTransport` protocol, `SimulatedLink`, endpoint
-  validation and native exception translation. Borrowed Python byte buffers are
-  size-checked by native code before the simulator copies an accepted payload.
-- Added native and Python regressions for FIFO/capacity, delivery metadata,
-  ordering, backpressure, latency, reproducible seeded impairment, complete
-  loss, overflow recovery, validation, statistics and disconnects.
-- Added ADR-0022, the implemented architecture/API contract, and an explicit
-  protocol-status document that does not claim sockets, reliability,
-  encryption, handshake, client/server or replication.
-
-### Failures found and corrected
-
-The first targeted command asked the `windows-headless` preset for `_easy3d`,
-but all checked-in native presets deliberately set `EASY3D_BUILD_PYTHON=OFF`;
-Ninja correctly reported `unknown target '_easy3d'`. The native target was then
-built independently. A later direct build of the scikit-build cache triggered
-CMake regeneration outside pip's isolated environment and failed to locate
-`pybind11Config.cmake`. The supported editable-install entry point supplied its
-declared build dependency and completed successfully. These were command-path
-errors, not product failures, and both exact causes are retained here.
-
-The initial native test build emitted seven `C4834` warnings for intentionally
-ignored `[[nodiscard]]` test setup returns. Explicit `static_cast<void>` markers
-removed the warnings without weakening assertions. The binding initially copied
-`py::bytes` into `std::string` before native size validation; it now borrows the
-CPython buffer for the synchronous send call, and the native simulator copies
-only after accepting the configured limit.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e .[dev]
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=5522836
-sha256=0c81f79c5df5421bc35f4203aa806cd2b14c922506457b53e15cc69572ca54ba
-Successfully installed easy3d-0.1.0
-
-cmake --build build/windows-headless --config Debug --parallel 4
-ctest --test-dir build/windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 12
-Total Test time (real) = 0.80 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 13
-Total Test time (real) = 1.74 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 13
-Total Test time (real) = 0.87 sec
-
-build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py -q
-..........                                                               [100%]
-10 passed in 0.44s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 66%]
-....................................                                     [100%]
-108 passed in 0.43s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "from easy3d import network; x=network.SimulatedLink(latency=.01); print(x.first.poll()[0].type.value, x.first.send(b'hi').value, x.in_flight_count)"
-connected queued 1
-```
-
-Phase 3.1: **DONE**. Immediate next task: Phase 3.2 — integrate a pinned
-GameNetworkingSockets Windows backend and audit its transitive build/license
-dependencies. No real socket transport is claimed by this checkpoint.
-
-## 2026-11-01 — Phase 3.2 GameNetworkingSockets backend (complete)
-
-### Bounded approach
-
-Pin GameNetworkingSockets v1.6.1 and Protobuf 5.29.3 by immutable commit,
-compile both statically through the existing CMake/FetchContent path, and use
-the supported Windows BCrypt provider so Easy3D does not ship or manage an
-OpenSSL binary. Disable ICE/WebRTC, tools, examples and upstream tests because
-this phase targets explicit direct-IP transport and keeps its dependency graph
-bounded. Add a reference-counted native runtime owner that proves initialization,
-interface availability, nested ownership and clean shutdown without exposing
-third-party types. Exercise it in headless, Debug and Release CTest, and expose
-read-only backend metadata to Python for installation diagnostics.
-
-Expected changes: dependency options/pins and link wiring in CMake, a private
-GameNetworkingSockets backend source plus graphics/network-disabled fallback,
-native/binding tests, typed diagnostics, third-party notices and networking
-architecture/progress docs. Connection/listener APIs, wire handshake and
-protocol messages remain Phase 3.3–3.4. Primary risks are matching `protoc` to
-the static runtime, avoiding unwanted install artifacts, preserving `/MD`, and
-ensuring the process-global backend is killed only after its last owner.
-
-### Implemented
-
-- Pinned GameNetworkingSockets 1.6.1 at
-  `d534c19aa760df3fb75fd20db13ba1932b8a5463` and Protobuf 5.29.3 at
-  `b407e8416e3893036aee5af9a12bd9b6a0e2b2e6`. CMake builds a matching
-  `protoc`/runtime pair and compiles both dependency families as C++17 to keep
-  their `string_view` ABI identical.
-- Built GNS statically with Windows BCrypt for AES/SHA, its bundled Donna code
-  for Curve25519/Ed25519, and ICE/WebRTC, tools, examples and upstream tests
-  disabled. Protobuf's optional Zlib integration is absent and unused.
-- Added a mutex-protected, process-reference-counted backend owner. Its native
-  smoke test creates a real GNS socket pair, sends a reliable bounded payload,
-  polls callbacks, compares exact bytes, releases the message and closes both
-  connections. Nested owners and repeated initialization/shutdown are covered.
-- Added immutable Python backend diagnostics and an on-demand loopback smoke
-  function, native/Python regressions, a networking-disabled fallback source,
-  explicit preset wiring, ADR-0023, API/protocol/architecture documentation and
-  complete immutable transitive license pins.
-- Prevented GNS/Protobuf and pre-existing private tinyobjloader libraries,
-  headers and CMake packages from leaking into the editable wheel. The audited
-  installed payload contains only editable-loader metadata, Easy3D metadata,
-  the project license and `easy3d/_easy3d.cp311-win_amd64.pyd`.
-
-### Failures found and corrected
-
-- The first configure failed with `No known features for C compiler "" version
-  .` because the project enabled only CXX while Protobuf builds C sources.
-  Enabling C and CXX fixed discovery under MSVC.
-- The initial static GNS configure rejected its install export because the
-  in-tree `libprotobuf` target was not in the export set. Private dependency
-  install rules are now suppressed, with a generated no-op child install
-  script for CMake's parent include.
-- Initial message generation could not import
-  `steamnetworkingsockets_messages_certs.proto`; the compatibility wrapper now
-  uses Protobuf's `APPEND_PATH` behavior.
-- The first Debug link reported unresolved Protobuf/Abseil `string_view` and
-  logging symbols because Protobuf had selected its C++14 fallback ABI while
-  GNS used C++17. Building both as C++17 fixed the ABI mismatch.
-- Running the editable install from ordinary PowerShell selected MinGW GCC
-  15.1 and failed in upstream Protobuf `generated_message_tctable_lite.cc` with
-  `cannot tail-call: callee required more stack slots`. The failed cache was
-  retained as `build/scikit-build/cp311-cp311-win_amd64-mingw-failed-20261101165511`.
-  The documented and supported x64 MSVC developer environment builds cleanly;
-  the MinGW failure is not bypassed or claimed supported.
-- The first successful MSVC compile reached all 1112 targets but wheel install
-  expected a suppressed GNS `cmake_install.cmake`. The explicit private no-op
-  script fixed packaging. A subsequent wheel audit found pre-existing
-  tinyobjloader install artifacts; applying the same private-install policy
-  reduced the wheel from 4,177,905 to 3,891,419 bytes.
-- One parallel verification launcher over-escaped the quoted developer prompt
-  path and three commands immediately returned `is not recognized as an
-  internal or external command`. The corrected PowerShell-composed `cmd /c`
-  invocations below all passed; this was a command quoting error, not a product
-  failure.
-- MSVC emits upstream Protobuf `C4141` duplicate-`inline` warnings. CMake also
-  reports optional Zlib, PkgConfig and LibUSB absence. None is used by this
-  static direct-IP Windows configuration, and no warning is hidden.
-
-### Exact final verification evidence
-
-All CMake commands below were run after entering the x64 Visual Studio Build
-Tools developer environment with `VsDevCmd.bat -arch=amd64 -host_arch=amd64`.
-
-```text
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3891419
-sha256=e9f2ed368a29d44a439fb98525739910ac8bbb25feb48944a029d368db23d3ab
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pip show -f easy3d
-Files:
-  __pycache__\_editable_skbc_easy3d.cpython-311.pyc
-  _editable_skbc_easy3d.pth
-  _editable_skbc_easy3d.py
-  easy3d-0.1.0.dist-info\...
-  easy3d\_easy3d.cp311-win_amd64.pyd
-
-build\venv311\Scripts\python.exe -c "import easy3d; from easy3d import network; print(easy3d.engine_version()); print(network.backend_info()); print('smoke=', network.backend_smoke_test())"
-0.1.0
-NetworkBackendInfo(available=True, name='GameNetworkingSockets', version='1.6.1', crypto_provider='Windows BCrypt')
-smoke= True
-
-cmake --build build\windows-headless --config Debug --parallel 4
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 13
-Total Test time (real) = 0.80 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 14
-Total Test time (real) = 0.71 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 14
-Total Test time (real) = 0.53 sec
-
-build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py -q
-...........                                                              [100%]
-11 passed in 0.11s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 66%]
-.....................................                                    [100%]
-109 passed in 0.35s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-cl /nologo /std:c++20 /EHsc /Iengine\include /c engine\src\network\backend_stub.cpp /Fobuild\network_backend_stub.obj
-backend_stub.cpp
-# exit code 0
-```
-
-Phase 3.2: **DONE**. Immediate next task: Phase 3.3 — define the bounded
-binary wire envelope and versioned connection handshake, including malformed,
-oversize and incompatible-peer tests. No public client/server or replication
-API is claimed by this checkpoint.
-
-## 2026-11-01 — Phase 3.3 bounded protocol handshake (complete)
-
-### Bounded approach
-
-Define a transport-independent, fixed little-endian handshake envelope with a
-small immutable wire-format version. Use an explicit three-message sequence:
-client hello, server accept, client confirm. Every peer declaration carries an
-application protocol version, schema version, role and maximum message size;
-the server and client accept exact version/schema matches, opposite roles and a
-nonzero bounded limit, then negotiate the minimum message size. Rejects carry a
-stable numeric disconnect code plus bounded validated UTF-8 text.
-
-Keep the state machine native and independent of addresses, sockets, timeouts
-or callbacks so Phase 3.4 can drive it over either GNS or the deterministic
-transport. Add regressions for compatible peers, every mismatch, malformed and
-truncated frames, oversized length declarations, invalid roles/limits/reasons,
-unexpected state transitions and rejection propagation. No public `Client`,
-`Server`, authentication, replication or arbitrary application payload codec is
-part of this milestone.
-
-### Implemented
-
-- Added an Easy3D-owned 12-byte little-endian envelope with `E3DN` magic,
-  immutable wire-format version, typed message byte, zero reserved flags and an
-  exact 32-bit payload length. The complete handshake frame is capped at 512
-  bytes and length is checked before payload parsing.
-- Added fixed peer declarations carrying application protocol version, schema
-  version, explicit client/server role and a nonzero message limit capped at 1
-  MiB. Compatibility is exact for format 1; the negotiated application limit is
-  the smaller peer declaration, 64 KiB by default.
-- Added a transport-independent client hello → server accept → client
-  confirm state machine. The client cannot accept a server-selected limit above
-  its own or change the value in confirmation; the server establishes only
-  after validating that confirmation.
-- Added stable wire disconnect codes for malformed, version, schema, role,
-  limit, state and oversize failures. Reasons are 1–256 bytes of strictly
-  validated UTF-8 with C0/C1 controls, overlong sequences, surrogates and
-  out-of-range code points rejected.
-- Added native regressions covering the successful three-message sequence,
-  negotiated minimum, repeated local start, protocol/schema/role mismatch,
-  invalid local and peer limits, bad magic/reserved bytes/types/lengths,
-  truncation, declared and actual oversize frames, out-of-order messages,
-  malicious accept/confirm limits, invalid rejection UTF-8, post-establishment
-  messages, rejection propagation and stable reason names. The complete
-  exchange also runs as reliable messages across the bounded simulated
-  `NetworkTransport`, not only as direct state-machine calls.
-- Documented the exact wire fields, state transitions, limits and non-claims in
-  the protocol, architecture, API and known-issues docs, with ADR-0024.
-
-### Failures found and corrected
-
-No implementation or regression failure occurred in this milestone. The first
-targeted build and test passed. Existing upstream configure diagnostics remain
-the optional Protobuf Zlib absence and dependency CMake deprecation notices;
-they are unchanged from Phase 3.2 and do not affect the handshake.
-
-### Exact final verification evidence
-
-```text
-cmake --build build\windows-headless --config Debug --target easy3d_network_protocol_tests --parallel 4
-ctest --test-dir build\windows-headless -C Debug -R easy3d.network_protocol --output-on-failure
-1/1 Test #12: easy3d.network_protocol ..........   Passed    0.03 sec
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 0.07 sec
-
-cmake --build build\windows-headless --config Debug --parallel 4
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 14
-Total Test time (real) = 2.17 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 15
-Total Test time (real) = 1.20 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 15
-Total Test time (real) = 1.02 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3891419
-sha256=86abe724302219e0c539b067f3b18a368dfb4ea94f82315c56f53e958f18922f
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 66%]
-.....................................                                    [100%]
-109 passed in 0.37s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
+# RIX implementation progress
+
+## 2026-11-05 — Default colliders and readable beginner lighting
+
+Changed `Cube`, `Sphere`, `Plane`, `Model`, and `Billboard` to create native
+colliders by default. `Model()` defaults to a triangle mesh and accepts
+`collider=True` as a `"mesh"` shorthand. `collider=False` remains the explicit
+choice for decoration, parented visuals, or ordinary universal-motion entities;
+those cases cannot safely own a moving/parented static Jolt shape. Internal
+enemy visuals, tutorials, and Pygame examples now state that opt-out where
+needed.
+
+Replaced the automatic scene's high ambient/single directional source with a
+lower ambient (`0.16`), elevated warm shadow-casting key (`0.95`) directed
+through the initial camera octant, and neutral-cool non-shadowing fill (`0.55`) aimed
+almost horizontally across the opposite X/Z octant. This gives the three
+initially visible cube faces distinct light levels without leaving the rear
+vertical faces near-black. Setting
+`game.lighting.directional` preserves the key/fill ratio. The first custom
+directional source destroys both defaults, so authored lighting remains fully
+controlled by the developer.
+
+Exact validation from `C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests\python\test_beginner_api.py tests\python\test_primitives.py tests\python\test_entity_motion.py tests\python\test_autotexture.py tests\python\test_pygame_surfaces.py tests\python\test_pygame_viewport.py -q
+# exit 0; 65 passed in 1.20 s
+
+.venv\Scripts\python.exe -m pytest -q
+# first run: 1 failed, 214 passed; obstacle-course finish trigger inherited the
+# new box collider and then attempted to attach a second sensor collider
+# final exit 0 after explicit collider=False on that sensor visual;
+# 216 passed in 14.25 s
+
+.venv\Scripts\python.exe -m mypy
+# exit 0; Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m pip check
+# exit 0; No broken requirements found.
+
+.venv\Scripts\python.exe -m compileall -q python examples
+# exit 0; no errors
+
+.venv\Scripts\python.exe -c "import runpy, threading, pygame; threading.Timer(1.0, lambda: pygame.event.post(pygame.event.Event(pygame.QUIT))).start(); runpy.run_path(r'examples\pygame\01_cube.py', run_name='__main__'); print('RIX_CUBE_DEFAULT_LIGHTING_PASS')"
+# exit 0; actual NVIDIA 0x10de/0x2482 Direct3D 11 renderer, medium preset;
+# RIX_CUBE_DEFAULT_LIGHTING_PASS
+
+.venv\Scripts\python.exe tests\manual\pygame_viewport_gpu.py
+# exit 0; actual NVIDIA Direct3D 11 renderer;
+# RIX_VIEWPORT_GPU_PASS front=d9fadaa94466e937 side=c73e59fe6ea188f3 buffered=true
+
+.venv\Scripts\python.exe -m pip install -e ".[pygame,dev]"
+# exit 0; rebuilt generated shaders and native extension;
+# wheel 5,795,732 bytes, SHA-256
+# 82b009ea71e6ace6130d564c3a098e063c2a1a5137ab89ac2316b2126eb9811f
+
+.venv\Scripts\python.exe tests\manual\face_culling_gpu.py
+# exit 0; face_culling_gpu: PASS separated=2/1 merged=1/1
+
+.venv\Scripts\python.exe tests\manual\lighting_debug.py --seconds 1 --preset medium
+# exit 0; lighting_debug: PASS, 2,776 frames, actual NVIDIA D3D11
+
+.venv\Scripts\python.exe tests\manual\render_components.py --seconds 1
+# exit 0; render_components: PASS, 2,651 frames, actual NVIDIA D3D11
+```
+
+A 640x480 D3D11 Surface-mode front/rear capture pair was inspected at
+`build/default-lighting-front-final.png` and
+`build/default-lighting-rear-final.png`. The faces have visibly distinct
+shades on both camera octants. This confirms the reported flat-face problem is
+corrected on the recorded GPU, not merely in light-registry unit tests.
+
+Follow-up front/rear captures exposed and corrected a deeper D3D11 shader bug:
+the renderer's winding/cull convention makes `gl_FrontFacing` false on the
+ordinary surviving outward side, but both material shaders treated that branch
+as a backface and inverted all normal vectors. Regenerated pinned DXBC now
+preserves outward normals on ordinary geometry and flips only the reverse side
+of two-sided/front-cull materials. The key was raised, the fill made nearly
+horizontal and more neutral (`0.55`), and `01_cube.py` changed from near-black
+`#060566` to readable `#6677dd`. Final sampled RGB values were front
+top/left/right `(85,91,149)/(81,86,138)/(70,75,124)` and rear
+`(85,91,149)/(50,65,142)/(52,68,147)` on the actual D3D11 renderer.
+
+The first-person example's cubes are geometrically grounded: a unit cube at
+`y=0.5` spans `y=0..1`, and its plane mesh is at `y=0`. The apparent Ultra-only
+gap came from directional shadow peter-panning. The default key bias is now
+`0.0005` instead of `0.002`, reducing separation across the 100-unit
+orthographic shadow depth without moving or intersecting the geometry.
+
+The first direct shader invocation used `--Werror` and failed because the
+existing bounded light loops generate HLSL compiler warnings; rerunning with
+the CMake-equivalent non-`--Werror` flags generated both headers successfully.
+An attempted incremental extension build then re-entered a stale historical
+MinGW CMake cache and could not locate pybind11. The supported isolated editable
+install above rebuilt and installed the MSVC artifact successfully. The first
+face-culling probe after rebuild counted the procedural skybox as a third draw;
+the batching-only probe now disables that unrelated sky draw and passes its
+original `2 -> 1` batch assertions.
+
+## 2026-11-05 — RIX rebrand and Pygame CE integration
+
+Completed the public rename from Easy3D to RIX. `rix` and the native
+`rix._rix` module are authoritative; `easy3d` is a warning-only migration
+facade over the same Python modules and native runtime. Packaging now pins
+Pygame Community Edition 2.5.8 behind the `pygame` extra, uses canonical
+`RIX_*` CMake options and `rix.*` CTest names, and retains the internal
+`easy3d` C++ namespace/target paths only as private implementation and source
+compatibility details.
+
+Added a Pygame-owned `World` adapter with bounded fixed stepping, external HWND
+attachment, D3D11 presentation ownership, Pygame event forwarding, controller
+and player-control integration, statistics, resize handling, and deterministic
+shutdown. The Surface bridge owns copied RGBA texture data and supports dynamic
+updates. Hybrid rendering includes Pygame overlays, camera-facing billboards,
+and independent-camera `Viewport` targets. Viewports cache exact-size render
+targets and use request/poll/wait readbacks; polling advances one renderer frame
+so a standalone Surface-mode viewport cannot remain pending when no main-world
+render occurs.
+
+Fourteen public examples cover the Pygame loop, first-person control, overlay,
+static/dynamic surfaces, inventory and split viewports, billboards, menus,
+physics, standalone mode, migration, and a hybrid mini-game. The migration
+guide preserves an existing Pygame loop, sprites, fonts, mixer, controls, and
+UI while adding either GPU-owned 3D presentation or a Surface-compatible
+viewport.
+
+Exact final validation commands from
+`C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+cmd.exe /d /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && cmake --build --preset windows-debug && cmake --build --preset windows-release'
+# exit 0; both Debug and Release native trees built
+
+cmd.exe /d /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && ctest --preset windows-debug --output-on-failure && ctest --preset windows-release --output-on-failure'
+# exit 0; Debug: 14/14 rix.* tests passed in 1.87 s
+# exit 0; Release: 14/14 rix.* tests passed in 0.76 s
+
+.venv\Scripts\python.exe -m pip install -e ".[pygame,dev]"
+# exit 0; rix-0.1.0 cp311 win_amd64 editable wheel built and installed
+# wheel size 5,795,624 bytes; SHA-256
+# 076396ff5e16364932921da6781e916c38dd8905494fd18b6e1c690552560954
+
+.venv\Scripts\python.exe -m pytest -q
+# exit 0; 215 passed in 14.92 s
+
+.venv\Scripts\python.exe -m mypy
+# exit 0; Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m pip check
+# exit 0; No broken requirements found.
+
+.venv\Scripts\python.exe -m compileall -q python examples
+# exit 0; no output
+
+.venv\Scripts\python.exe -c "import rix; print('RIX_IMPORT_PASS', rix.engine_version(), rix.__version__); import warnings; warnings.simplefilter('always'); import easy3d; print('EASY3D_SHIM_PASS', easy3d.engine_version())"
+# exit 0; RIX_IMPORT_PASS 0.1.0 0.1.0
+# DeprecationWarning: easy3d was renamed to rix; replace 'import easy3d' with 'import rix'
+# EASY3D_SHIM_PASS 0.1.0
+
+.venv\Scripts\python.exe tests\manual\pygame_viewport_gpu.py
+# exit 0; Direct3D 11, NVIDIA vendor 0x10de/device 0x2482, medium preset
+# RIX_VIEWPORT_GPU_PASS front=aca79a9426b51e10 side=77151150d13c982e buffered=true
+
+.venv\Scripts\python.exe tests\manual\pygame_lifecycle.py
+# exit 0; RIX_PYGAME_LIFECYCLE_PASS cycles=5
+
+.venv\Scripts\python.exe tests\manual\pygame_physics_timing.py
+# exit 0; RIX_PYGAME_PHYSICS_PASS ball_y=0.550 player_distance=4.423 jump_delta=0.569
+
+.venv\Scripts\python.exe tests\manual\pygame_fullscreen.py
+# exit 0; RIX_PYGAME_FULLSCREEN_PASS sizes=[(640, 360), (640, 480), (700, 420)] hwnd_changes=0
 
 git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
+# exit 0; no whitespace errors; Git emitted only expected LF-to-CRLF warnings
 ```
 
-Phase 3.3: **DONE**. Immediate next task: Phase 3.4 — adapt real GNS
-listen/connect connections to the bounded transport queue and handshake, with
-IP/port validation, timeouts, callbacks, errors and native metrics. No public
-client/server or entity replication is claimed by this checkpoint.
+All fourteen files in `examples\pygame` were executed with timed clean
+shutdowns on the same Windows D3D11 system. Examples 01–11 and 14 received a
+real Pygame `QUIT` timer event; standalone examples 12 and 13 used the public
+RIX stop path. All fourteen exited 0. This is automated execution evidence,
+not a claim that every control or visual was physically inspected.
 
-## 2026-11-01 — Phase 3.4 live client connection adapter (complete)
+Representative final benchmark commands and results (full table and hardware
+notes are in `docs/benchmarks.md`):
 
-### Bounded approach
+```powershell
+.venv\Scripts\python.exe benchmarks\pygame_integration.py --mode viewport --objects 100 --frames 20 --size 960 540 --viewport-size 256 256
+# mean 0.859 ms; p95 1.171 ms; 1163.9 fps; working set 111,280,128 bytes
 
-Add a single-owner asynchronous native client over direct numeric IPv4/IPv6
-GameNetworkingSockets addresses. Drive GNS callbacks and message receipt only
-from `poll()`, feed reliable pre-connection messages through the Phase 3.3
-handshake, enforce a monotonic handshake deadline and publish only copied,
-bounded events. Map local, remote, timeout, protocol and transport failures to
-stable disconnect codes; never invoke Python from the GNS callback.
+.venv\Scripts\python.exe benchmarks\pygame_integration.py --mode viewport --objects 100 --frames 10 --size 960 540 --viewport-size 960 540
+# mean 3.127 ms; p95 3.353 ms; 319.8 fps; working set 113,950,720 bytes
 
-Expose a typed Python `Client` facade with nonblocking `connect`, `send`,
-`disconnect`, `poll`, state, connection ID, counters and GNS ping/rate/pending
-metrics. Dispatch optional Python connect/disconnect callbacks synchronously
-from the caller's `poll()`. Validate with a real ephemeral localhost GNS test
-listener that performs the handshake and echoes reliable/unreliable payloads,
-plus timeout, invalid address/port, oversize, queue and lifecycle regressions.
-The public authoritative `Server` owner remains Phase 3.5; the native test
-listener is not a gameplay server API.
+.venv\Scripts\python.exe benchmarks\pygame_integration.py --mode gpu --objects 0 --frames 60 --size 960 540 --physics-bodies 200
+# mean 0.209 ms; p95 0.257 ms; update mean 0.960 ms; update p95 2.473 ms
+```
 
-### Implemented
+An additional exploratory command, not the configured typing gate, remains
+red:
 
-- Added a native `NetworkClient` implementing `NetworkTransport` over one GNS
-  direct-IP connection. Numeric IPv4 and IPv6 addresses are normalized, ports
-  must be nonzero, repeated active connects are rejected, and opaque local
-  connection generations are invalidated on close rather than exposing GNS
-  handles.
-- Made `poll()` the sole native pump. It runs connection callbacks, consumes at
-  most 256 messages, sends/validates the reliable Phase 3.3 handshake, enforces
-  one monotonic connection/handshake deadline, applies the negotiated payload
-  limit, surfaces bounded queue overflow, and drains copied events. GNS user
-  data is cleared before close/destruction so stale callbacks cannot target a
-  destroyed client.
-- Added stable timeout/transport disconnect codes and a code field on every
-  transport event. Clean local close, remote close, protocol rejection,
-  oversize input, transport errors and silent-peer timeout each converge on one
-  disconnected event. Backend codes outside Easy3D's app range remain raw
-  integers for accurate diagnosis.
-- Added application message/byte/rejection/overflow counters and GNS
-  observational ping, recent byte-rate and pending-byte metrics. Reliable and
-  unreliable send status maps explicit inactive, oversize and backpressure
-  outcomes without blocking.
-- Added typed `easy3d.network.Client`, `ClientState`, `ClientMetrics` and
-  `DisconnectCode` APIs. Python connect/disconnect callbacks are dispatched in
-  event order only by the Python caller's `poll()`; native callbacks never call
-  Python. The networking-disabled fallback compiles and fails construction
-  explicitly.
-- Added a real localhost native listener fixture that validates IPv4 and IPv6
-  connection/handshake, exact reliable and unreliable echo, negotiated limits,
-  normalized address, clean disconnect, invalid address/port/reason handling,
-  metrics/counters, a deliberately silent peer timeout and event-queue overflow
-  recovery. The fixture is linked only into native tests and is not a hidden
-  public server API.
-- Documented lifecycle, ownership, callbacks, metrics, limitations and the
-  direct-IP decision in the README, protocol/API/architecture/known-issues docs
-  and ADR-0025.
+```powershell
+.venv\Scripts\python.exe -m mypy python tests/typecheck/public_api.py
+# exit 1; 197 errors in 17 files
+```
 
-### Failures found and corrected
+Those errors are pre-existing full-implementation annotation/stub debt (the
+configured strict public-consumer gate above passes); they are not hidden with
+a blanket ignore. A raw CMake build outside `VsDevCmd.bat` also failed because
+MSVC standard-library include paths were unavailable. The documented developer
+prompt command is the supported and passing path.
 
-- The first native client-test compile failed with
-  `fatal error C1083: Cannot open include file: 'steam/steamnetworkingsockets.h'`
-  because Easy3D correctly keeps backend includes private. The test fixture now
-  explicitly links `GameNetworkingSockets::static`; production consumers still
-  receive no third-party headers.
-- The first localhost fixture run failed with
-  `could not create the localhost test listener`. GNS direct-IP listen sockets
-  require an explicit nonzero port rather than port `0`; the test now probes a
-  bounded 100-port localhost-only range and rejects collisions instead of
-  assuming OS ephemeral binding.
-- A final editable-install retry from ordinary PowerShell selected the
-  unsupported MinGW GCC 15.1 toolchain and reproduced upstream Protobuf's
-  `cannot tail-call: callee required more stack slots` failure. The derived
-  cache was preserved as
-  `build/scikit-build/cp311-cp311-win_amd64-mingw-failed-phase34`. Running the
-  acceptance command verbatim from the documented Visual Studio x64 developer
-  environment selected MSVC and succeeded; MinGW is still not claimed as a
-  supported Windows compiler.
-- No product regression failed after those fixture corrections. The live
-  client test passed 20 consecutive repetitions, and the focused Python suite
-  passed five consecutive repetitions before the final matrices.
+The actual D3D11 tests exercised HWND attachment, presentation, independent and
+buffered readback, programmatic resize/fullscreen transitions, physics timing,
+close, and five complete create/destroy cycles. Physical mouse and controller
+input/hotplug, fractional high-DPI alignment, maximize visuals, Alt-Tab
+fullscreen appearance, and graphics-device-loss recovery remain
+**UNVERIFIED**. A live desktop visual-inspection attempt was stopped by the
+user, so no interactive visual pass is claimed for those items.
 
-### Exact final verification evidence
+## 2026-11-04 — Simple Source-style character movement
 
-```text
-# Negative compiler-selection check from ordinary PowerShell:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-The C compiler identification is GNU 15.1.0
-generated_message_tctable_lite.cc:256:37: error: cannot tail-call: callee required more stack slots than the caller
-ERROR: Failed building editable for easy3d
-# exit code 1; unsupported MinGW path, retained and followed by the supported MSVC run below
+Replaced the assisted held-jump controller with normalized wish input,
+Source-style ground friction, projection-based ground and air acceleration, an
+air projection cap, and edge-triggered jumps. The native coyote and jump-buffer
+timers were removed. Jumping on the first grounded landing tick skips friction,
+so correctly timed bunny hops retain momentum; holding Space does not auto-hop.
+Sprint and crouch alter wish speed without directly cropping existing velocity.
+`horizontal_speed_limit=None` leaves emergent strafe gain uncapped by default.
 
-ctest --preset windows-debug -R easy3d.network_client --output-on-failure
-1/1 Test #14: easy3d.network_client ............   Passed    0.20 sec
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 0.23 sec
+The public `Player` and `CharacterController` tuning surface now exposes
+`air_acceleration`, `ground_friction`, `stop_speed`, `air_speed_cap`, and
+`horizontal_speed_limit`. The previous `air_control`, `coyote_time`, and
+`jump_buffer_time` parameters were removed as an intentional pre-1.0 break.
 
-ctest --test-dir build\windows-headless -C Debug -R easy3d.network_client --repeat until-fail:20 --output-on-failure
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 3.35 sec
+Exact validation commands from `C:\Users\Ryan\Desktop\code\Easy3D`:
 
-cmake --build build\windows-headless --config Debug --parallel 4
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 15
-Total Test time (real) = 1.45 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.45 sec
-
+```powershell
 cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.56 sec
+# exit 1: invoked outside the MSVC developer environment; cl could not find cstddef
 
-# From the documented Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3905584
-sha256=fe809fd23afbf1c2eb6dae5e5a49f1719c3d86379b0c79fc3140cec135cc5253
-Successfully installed easy3d-0.1.0
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && cmake --build --preset windows-release --parallel 4'
+# exit 0
 
-build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py -q
-...................                                                      [100%]
-19 passed in 0.17s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 61%]
-.............................................                            [100%]
-117 passed in 0.43s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.network.backend_info()); c=easy3d.network.Client(); print(c.state.value, c.connection, c.metrics.ping_milliseconds)"
-0.1.0
-NetworkBackendInfo(available=True, name='GameNetworkingSockets', version='1.6.1', crypto_provider='Windows BCrypt')
-disconnected None -1
-
-cl /nologo /std:c++20 /EHsc /Iengine\include /c engine\src\network\client_stub.cpp /Fobuild\network_client_stub.obj
-client_stub.cpp
-# exit code 0
-
-build\venv311\Scripts\python.exe -m pip show -f easy3d
-# editable metadata plus easy3d/_easy3d.cp311-win_amd64.pyd; no private dependency artifacts
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-Phase 3.4: **DONE**. Immediate next task: Phase 3.5 — implement the public
-authoritative headless `Server`, multi-connection handshake ownership and
-fixed-step Python server logic without SDL or bgfx. No replication or entity
-synchronization is claimed by this checkpoint.
-
-## 2026-11-01 — Phase 3.5 headless authoritative server (complete)
-
-### Bounded approach
-
-Add a single-owner native GameNetworkingSockets listener with a bounded player
-count, per-connection Phase 3.3 server handshake/deadline, opaque connection
-IDs, poll-group message draining, reliable/unreliable sends, explicit stop and
-copied transport events. Keep every GNS callback native and make `poll()` the
-only state/message pump. A networking-disabled source must still compile and
-fail explicitly.
-
-Expose a Python `easy3d.network.Server` that owns the native listener plus the
-existing `SimulationScheduler`. It will attach one `Scene`, run a monotonic
-fixed-rate blocking loop with thread-safe `stop()`, dispatch connect/message/
-disconnect callbacks only on the run/poll thread, and offer a deterministic
-single-tick method for tests. It must never instantiate `Engine`, SDL or bgfx.
-This milestone does not add listen-host client roles, LAN discovery,
-replication, identities, prefabs or RPCs.
-
-Planned files: network headers/sources, CMake, pybind bindings/stubs, Python
-network and package exports, native/Python tests, a minimal dedicated-server
-example, protocol/API/architecture/known-issues/decision docs and the 3.5
-checkbox only after verification. Primary risks are listener callback
-ownership before accept, per-peer timeout/queue cleanup, stopping a paced
-Python loop from another thread, and proving headless operation in the
-graphics-disabled native matrix.
-
-Planned verification: targeted native server tests (including multiple real
-localhost clients), graphics-disabled compilation/tests, Python deterministic
-tick and threaded run/stop tests, editable install/import, full Debug/Release/
-headless CTest matrices, full pytest and package audit.
-
-### Implemented
-
-- Added native `NetworkServer`, a numeric IPv4/IPv6 GNS listener with one poll
-  group, bounded maximum including handshaking sockets, monotonic opaque IDs,
-  per-peer Phase 3.3 handshake/deadline/negotiated limit, copied bounded events,
-  reliable/unreliable sends, aggregate counters and explicit restartable stop.
-- Kept `poll()` as the only callback/message pump and capped each pass at 256
-  transport messages. Incoming peers stay invisible to application code until
-  client confirmation. Protocol mismatch, server-full, silent peer timeout,
-  message bounds, remote/local close and transport errors clean their native
-  records without exposing GNS handles or calling Python.
-- Preserved graceful close semantics across GNS's 1000+ application-reason
-  restriction with a private transport sentinel mapped back to Easy3D's stable
-  public code `1`. Added stable server-stopped `1009` and server-full `1010`
-  codes. Accepted peers close before the listen socket so GNS cannot replace
-  the server reason with an ungraceful listener teardown.
-- Added typed `easy3d.network.Server` and root `easy3d.Server`. It exclusively
-  owns one `Scene`, composes the existing `SimulationScheduler`, paces a
-  fixed-rate `run()`, offers exact single-tick `step()`, thread-safe stop
-  requests, sends/broadcast/disconnect, immutable state/counters, and
-  connect/message/disconnect callbacks on the owning Python thread. It never
-  constructs `Engine`, `Input`, SDL or bgfx.
-- Added a real native multi-client localhost suite covering bidirectional
-  reliable/unreliable payloads, two simultaneous players, connection limits,
-  protocol rejection, silent raw-GNS handshake timeout, exact clean/stop codes,
-  send bounds, counter reset and listener restart. Added Python configuration,
-  scene/physics tick, paced run/stop, callback and real client/server exchange
-  regressions.
-- Added `examples/04_dedicated_server` using only public API, graphics-disabled
-  fallback compilation, API/protocol/architecture/known-issue documentation
-  and ADR-0026. Listen-host roles, discovery, identity and replication remain
-  explicitly unclaimed.
-
-### Failures found and corrected
-
-- The first Python pass had two failures. The headless tick test expected a
-  physics-step counter without creating the lazily owned physics world; setting
-  scene gravity made the test exercise a real native physics owner. More
-  importantly, a server stop emitted its local event but the client remained
-  connected. GNS documents that `CloseListenSocket` ungracefully closes all
-  accepted peers; shutdown had closed the listener first. Reversing that order
-  preserved code `1009`, and the remote regression now passes.
-- Reviewing normal close behavior found that Easy3D code `1` is outside GNS's
-  accepted application range. Passing zero would be rewritten to GNS generic
-  `1000`, colliding with Easy3D's malformed-message code. A private `1011`
-  adapter sentinel now maps to/from public `1`; both client→server and
-  server→client clean closes are covered.
-- The first parallel matrix launcher preserved escaped quotes around
-  `VsDevCmd.bat`; all three commands returned `is not recognized` before a
-  build began. The established PowerShell-composed `cmd /c` invocation then
-  built and passed every matrix. This was recorded rather than presented as a
-  product failure.
-
-### Exact final verification evidence
-
-```text
-cmake --build build\windows-headless --config Debug --parallel 4
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.54 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.65 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.78 sec
-
-ctest --test-dir build\windows-headless -C Debug -R easy3d.network_server --repeat until-fail:20 --output-on-failure
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 5.09 sec
-
-# From the documented Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3927230
-sha256=bf6364df1d86dea750b1daae0458513f91a4e6d97c8369c0621323fe990234da
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 59%]
-.................................................                        [100%]
-121 passed in 0.51s
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-cl /nologo /std:c++20 /EHsc /Iengine\include /c engine\src\network\server_stub.cpp /Fobuild\network_server_stub.obj
-server_stub.cpp
-# exit code 0
-
-build\venv311\Scripts\python.exe examples\04_dedicated_server\main.py --bind 127.0.0.1 --port 32391 --tick-rate 120 --seconds 0.05
-Easy3D dedicated server listening on 127.0.0.1:32391 at 120 Hz
-server stopped after 6 authoritative ticks
-
-build\venv311\Scripts\python.exe -m pip show -f easy3d
-# editable metadata plus easy3d/_easy3d.cp311-win_amd64.pyd; no private dependency artifacts
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-Phase 3.5: **DONE**. Immediate next task: Phase 3.6 — compose a listen server
-from isolated authoritative `Server` and local `Client` roles without duplicate
-authority callbacks or shared transport identity. No discovery or replication
-is claimed by this checkpoint.
-
-## 2026-11-01 — Phase 3.6 isolated listen-host composition (complete)
-
-### Bounded approach
-
-Build `easy3d.network.ListenServer` as explicit composition rather than a new
-socket backend: one Phase 3.5 authoritative `Server` owns the only scene,
-scheduler and fixed-update path, while one Phase 3.4 `Client` connects through
-the real loopback transport and owns only the local client role. Expose the two
-roles as separate typed properties and tag polled events with their role so an
-identical numeric value in each role's process-local ID space cannot imply a
-shared identity.
-
-Make startup synchronously establish the private loopback host before returning
-or advertising readiness, then let `step()` pump both roles and execute exactly
-one authoritative tick. Reuse the server's paced loop through an internal
-per-tick client pump so scene mutation guards remain active and the local role
-never executes authoritative scripts. `stop()` remains a thread-safe request
-while running. Do not add LAN discovery, rendering/Game integration, entity
-replication, host privileges or identity claims.
-
-Planned tests: exact one-per-role connect/message/disconnect delivery, one
-authoritative fixed-update per listen-host tick, no client-side scene owner,
-threaded/paced stop, an additional remote client, clean restart/failure cleanup,
-full Python regression and the existing native matrices. Document role and ID
-boundaries plus the no-host-advantage/non-duplication invariant before checking
-3.6.
-
-### Implemented
-
-- Added typed `easy3d.network.ListenServer` and root `easy3d.ListenServer` as
-  composition of the existing real `Server` and `Client`; no new socket mode or
-  in-process data shortcut was introduced. Startup binds the authority and
-  completes its private loopback handshake before returning readiness, with
-  cleanup of both roles on bind/address/callback failure.
-- Kept `authority` and `client` as separate typed owners and connection-ID
-  namespaces. `ListenEvent` tags every event with `ListenRole.AUTHORITY` or
-  `CLIENT` plus `local_host`; matching numeric IDs across roles are explicitly
-  not identity. A second remote client is tagged `local_host=False` and uses the
-  same authority listener.
-- Delegated the only scene, scheduler, physics and lifecycle ownership to the
-  authority. `step()` performs one authority tick and pumps the client afterward.
-  `run()` reuses the server's paced/mutation-guarded owner loop with an internal
-  post-tick client pump, so the client never executes authoritative scripts or
-  physics. Thread-safe stop requests and manual-step shutdown close both roles.
-- Added exact connect/message/disconnect role tests, host/remote distinction,
-  bidirectional host bytes, restart with new local generations, partial-start
-  cleanup, callback-failure cleanup and paced four-tick non-duplication proof.
-  The focused real-loopback suite passed 20 consecutive invocations.
-- Added `examples/05_listen_host` using only public API, ADR-0027, public API/
-  protocol/architecture/known-limit documentation and explicit nonclaims for
-  rendering attachment, discovery, identity, replication or host privilege.
-
-### Failures found and corrected
-
-- The first focused suite passed authority receipt of the host's input but
-  timed out waiting for the client-side reply. `Client` intentionally dispatches
-  only connect/disconnect callbacks; application messages are returned from
-  `poll()`. The composition now consumes returned client message events and tags
-  them through the same role stream. The focused suite then passed.
-- Review of partial startup found that a user `on_event` exception could fire
-  again during cleanup and prevent the remaining role from closing. Cleanup now
-  suppresses repeat user callbacks while draining/closing both native owners,
-  preserves the original exception, clears pending role events and has a
-  regression that deliberately raises on the first startup event.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests\python\test_listen_server.py -q
-....                                                                     [100%]
-4 passed in 0.43s
-
-# The focused command above was invoked 20 consecutive times after the final fix.
-# Every invocation passed 4/4; observed durations were 0.35–0.37s.
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 57%]
-.....................................................                    [100%]
-125 passed in 0.82s
-
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 0.89 sec
-
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 0.89 sec
-
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 0.72 sec
-
-# From the documented Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3927444
-sha256=708b39f21ad77d52087f7ea5f47442345d987a98043e1b64339dba3c2ba0c565
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe examples\05_listen_host\main.py --port 32500 --tick-rate 120
-client    host=True connected    id=1 payload=b''
-authority host=True connected    id=1 payload=b''
-authority host=True message      id=1 payload=b'local host input'
-client    host=True message      id=1 payload=b'authoritative host snapshot'
-authority host=True disconnected id=1 payload=b''
-client    host=True disconnected id=1 payload=b''
-listen host stopped after 12 authoritative ticks
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -m pip show -f easy3d
-# editable metadata plus easy3d/_easy3d.cp311-win_amd64.pyd; no private dependency artifacts
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-Phase 3.6: **DONE**. Immediate next task: Phase 3.7 — add explicit opt-in,
-bounded LAN discovery with defensive parsing and Windows firewall/subnet
-guidance. Direct IP remains the required fallback; no replication is claimed.
-
-## 2026-11-01 — Phase 3.7 bounded opt-in LAN discovery (complete)
-
-### Bounded approach
-
-Implement discovery as a separate, explicitly started, poll-owned IPv4 UDP
-control plane in `easy3d.discovery`; do not alter the GNS gameplay transport or
-make `Client.connect()` discover automatically. A browser sends a fixed binary
-query containing a random nonce to a configured limited/directed broadcast
-address. An announcer validates the complete datagram and returns one bounded
-unicast response to the query source. The browser accepts responses only for
-its current nonce and response window, validates all lengths/UTF-8 before
-allocation, and exposes addresses for an explicit direct-IP connection choice.
-
-Cap datagrams at 512 bytes, server names at 128 UTF-8 bytes, packets processed
-per poll, discovered entries, and per-source announcer rate-limit state. Expire
-results by a finite TTL. Use no background thread, callbacks, DNS, serialization
-framework, firewall mutation, multicast service, authentication claim or
-automatic connection. Keep direct numeric IPv4/IPv6 GNS connection unchanged;
-the initial LAN discovery mechanism is IPv4 broadcast only.
-
-Test codecs deterministically with malformed/truncated/oversized/control-text
-inputs, then exercise a real nonblocking UDP query/response over loopback with
-an ephemeral discovery port. Test nonce rejection, cache capacity/expiry,
-per-source response throttling, lifecycle/restart and port collision. Document
-Windows Defender Firewall prompts/rules, router/subnet broadcast boundaries,
-VPN/guest-network isolation and exact direct-IP fallback before checking 3.7.
-
-### Implemented
-
-- Added typed `easy3d.discovery.LanDiscoveryAnnouncer` and
-  `LanDiscoveryBrowser`, also exported at package root. Both are explicitly
-  started, caller-polled and independent of the GNS gameplay transport. The
-  browser never connects automatically; results expose numeric addresses for a
-  later explicit `Client.connect()` decision.
-- Added a fixed little-endian `E3DD` format-1 envelope, nonzero random query
-  nonce, unicast response, stable optional instance ID, numeric game port,
-  protocol/schema versions and control-free UTF-8 name. Exact length, type,
-  flags, version, required-field and UTF-8 checks reject malformed peer bytes.
-- Bounded datagrams to 512 bytes, names to 128 UTF-8 bytes, work per poll,
-  per-source-address response rate state, response duration, result TTL and LRU
-  cache capacity. The browser requires its current nonce and configured source
-  discovery port. Immutable stats expose malformed, unmatched, rate-limited
-  and eviction counts.
-- Added real Windows UDP loopback query/response tests plus malformed,
-  oversized, invalid-text, wrong-nonce/source-port, compatibility, rate-limit,
-  cache expiry/eviction, maximum work, restart and port-collision coverage. The
-  focused suite passed 30 consecutive invocations.
-- Documented Windows Private-profile firewall behavior and an optional scoped
-  development rule/removal command, limited/directed broadcast, guest Wi-Fi,
-  VPN/virtual-adapter/router boundaries and numeric direct-IP fallback. IPv6
-  direct IP remains supported, but discovery format 1 is explicitly IPv4 only.
-- Added ADR-0028 and protocol/API/architecture/known-limit documentation. No
-  dependency or third-party notice changed; discovery uses Python's standard
-  library for this low-frequency control plane.
-- Made the existing model/render-component native tests allocate atomically
-  unique temporary directories. This preserves the source-removal lifetime
-  assertion while allowing Debug, Release and headless matrices to run at the
-  same time without deleting each other's fixtures.
-
-### Failures found and corrected
-
-- A repeated discovery test intermittently retained a 20 ms TTL entry after a
-  nominal 25 ms sleep. This CPython reports `GetTickCount64()` with a 15.625 ms
-  monotonic resolution, so the sleep could advance only 16 ms. The test now
-  waits against observed monotonic expiry; 30 consecutive final runs passed.
-- Running all three native CTest matrices concurrently exposed pre-existing
-  shared `%TEMP%` fixture names: one model test saw another process remove its
-  texture, and one render test saw the other process hold its OBJ. Each test
-  now atomically creates and owns a unique directory. All three matrices then
-  passed concurrently, and both affected tests passed 20 repeated invocations
-  in every build tree.
-- The first rebuild after that test fix was launched from an ordinary shell and
-  MSVC could not find standard header `cstddef`. Re-running the exact build in
-  the documented x64 Visual Studio developer environment succeeded. This was a
-  command-environment error, not a source workaround.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests\python\test_discovery.py -q
-..........                                                               [100%]
-10 passed in 0.20s
-
-# The focused command above was then invoked 30 consecutive times.
-30 consecutive focused discovery runs passed
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 53%]
-...............................................................          [100%]
-135 passed in 0.85s
-
-cmake --build build\windows-headless --config Debug --parallel 4
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.15 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.19 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.03 sec
-
-# Each command ran concurrently for the three build trees:
-ctest --test-dir <build-tree> -C <config> -R "easy3d\.(model|render_components)" --repeat until-fail:20 --output-on-failure
-# 2/2 passed in every tree; observed totals 0.95–1.09 sec.
-
-# From the documented Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3928239
-sha256=a228e6b4dd690470aa1186e8d56e40ecf13ff656db74e3e42406f36cc049e4f6
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.LanDiscoveryBrowser)"
-0.1.0
-<class 'easy3d.discovery.LanDiscoveryBrowser'>
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-The real UDP protocol, limits and lifecycle are verified on one Windows host
-over IPv4 loopback. Broadcast across two physical machines, actual Defender
-prompt/rule behavior, guest/VPN/router policies and abrupt process loss remain
-**UNVERIFIED** and are not claimed; Phase 3.8 owns the two-process/local-LAN
-sample and integration matrix.
-
-Phase 3.7: **DONE**. Immediate next task: Phase 3.8 — provide a supported
-two-process server/client sample and subprocess integration coverage for
-loopback exchange, port collision and abrupt peer loss. No replication is
-claimed by this checkpoint.
-
-## 2026-11-01 — Phase 3.8 two-process transport exit gate (complete)
-
-### Bounded approach
-
-Add one public-API-only `examples/06_two_process` command with `server` and
-`client` roles. The server binds a numeric address, publishes a flushed ready
-line (and optional automation marker), echoes one fixed bounded request, and can
-run persistently or exit after a one-client exchange. The client connects by
-explicit numeric address, pumps the existing handshake, sends the fixed request,
-validates the exact reply and closes cleanly. Document two-terminal loopback
-and two-machine LAN use, discovery as optional address selection, firewall
-requirements and the absence of entity synchronization.
-
-Exercise the actual installed extension in child Python processes. Cover a
-complete server/client handshake and byte exchange, a second server's bind
-collision without disturbing the first listener, and abrupt server process
-termination observed by an already-established client. Bound every process,
-wait, message and output capture with monotonic deadlines; always terminate and
-reap children in test cleanup. Keep abrupt-loss timing tolerant of GNS liveness
-detection, but do not weaken assertions into sleeps or mocks. Re-run the full
-Python/native matrices, then check 3.8 only if process-boundary evidence passes.
-
-### Implemented
-
-- Added `examples/06_two_process` with public `server` and `client` roles. The
-  server binds a numeric address, prints flushed readiness, accepts a fixed
-  bounded request and returns an exact reply. The client completes the real GNS
-  and Phase 3.3 handshake, validates the reply and closes. One-shot and bounded
-  timeout modes support both two-terminal use and deterministic automation.
-- Added finite positive `peer_timeout` to native/Python `Client`, `Server` and
-  composed `ListenServer`, distinct from initial connection/handshake timeout.
-  It maps per connection/listener to GNS `TimeoutConnected`, defaults to 10
-  seconds, accepts 1 ms through `INT32_MAX` ms and makes no exact callback-time
-  promise because callback progress remains poll/backend driven.
-- Added independent-process integration for clean reliable exchange, second
-  server bind collision followed by successful use of the first listener,
-  abrupt OS termination of the server observed by the connected client, and
-  abrupt OS termination of the client observed by the established server.
-  Every child has readiness/deadline/output bounds and is killed/reaped in
-  cleanup. Abrupt tests require disconnect events but do not mislabel backend/
-  OS failure codes as stable Easy3D protocol reasons.
-- Added separate bind-ready, client-established and authority-established
-  markers. This preserves the protocol invariant that a client may report after
-  sending confirmation before the server has polled and validated it.
-- Added native/Python peer-timeout validation regressions, ADR-0029, protocol/
-  architecture/API/known-limit docs, and two-terminal loopback/LAN/firewall
-  instructions. No dependency or license inventory changed.
-
-### Failures found and corrected
-
-- The first three-case subprocess suite passed. Adding abrupt client death
-  initially timed out the server because the test killed the client after only
-  the client-side connected event; at that point the server had not yet polled
-  its confirmation, so no application peer existed to disconnect. A distinct
-  server-established marker now gates the kill.
-- With both sides established, the first reverse abrupt-loss run still reached
-  the sample's 20-second deadline under the upstream default liveness policy;
-  its final graceful cleanup emitted server-stop code `1009`, correctly showing
-  that no abrupt event had arrived in time. The native owners now expose and set
-  per-owner GNS connected-peer timeouts. With a 2-second policy and tolerant
-  process deadline, abrupt loss is observed in both directions on all final
-  repeated runs.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests\python\test_two_process_network.py -q
-....                                                                     [100%]
-4 passed in 17.27s
-
-# The focused command above was then invoked three consecutive times.
-# All runs passed 4/4 in 17.20s, 17.20s and 17.22s.
-3 consecutive two-process integration runs passed
-
-build\venv311\Scripts\python.exe -m pytest tests\python\test_network_transport.py tests\python\test_server.py tests\python\test_listen_server.py -q
-.............................                                            [100%]
-29 passed in 0.60s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 51%]
-.....................................................................    [100%]
-141 passed in 18.03s
-
-cmake --build build\windows-headless --config Debug --parallel 4
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.62 sec
-
-cmake --build --preset windows-debug --parallel 4
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.76 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.83 sec
-
-# From the documented Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3928707
-sha256=7fe5b414afb040523db99dd3bb43c31ef87831604b0eb42c5cd510a35c1882a5
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -m pip check
-No broken requirements found.
-
-build\venv311\Scripts\python.exe -m pip show -f easy3d
-# editable metadata, project license and easy3d/_easy3d.cp311-win_amd64.pyd;
-# no runtime or private dependency packages
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-The sample is documented for numeric LAN use, but two physical machines,
-actual Defender prompt/rule behavior and routed/guest/VPN networks remain
-**UNVERIFIED** and are not claimed. Process-boundary IPv4 loopback, clean close,
-port collision and abrupt loss in both directions are independently verified.
-
-Phase 3.8 and the Phase 3 exit gate: **DONE**. Immediate next task: Phase 4.1 —
-define stable network-object IDs, bounded prefab/schema registration and
-server-owned spawn/despawn/late-join state. No entity synchronization is
-claimed by this checkpoint.
-
-## 2026-11-01 — Phase 4.1 stable IDs and server-owned lifecycle (complete)
-
-### Bounded approach
-
-Add a typed `easy3d.replication` layer over reliable Phase 3 messages. Use
-explicit nonzero 32-bit prefab IDs and monotonic nonzero 64-bit network-object
-IDs that are never derived from scene handles and never reused within one
-authority lifetime. A bounded prefab registry maps each explicit ID and safe
-name to a factory and computes an order-independent schema fingerprint from the
-registry's declared schema version and canonical ID/name pairs.
-
-Attach one server replicator to an existing `Server` without creating a second
-authority. It alone allocates IDs, creates prefab entities in the authority
-scene, broadcasts fixed binary spawn/despawn frames, and sends a bounded
-begin/spawn/end snapshot to each post-handshake connection. Failed replication
-queueing disconnects that peer so it can recover from a fresh late-join
-snapshot rather than silently diverging. Preserve pre-existing user callbacks.
-
-The client replicator consumes only fixed-magic lifecycle frames from its
-existing `Client`, validates exact lengths/version/schema/fingerprint/count and
-creates/destroys prefab entities in a client scene. Bound object count and
-snapshot count, reject duplicate/unknown IDs, clear client replicas on
-disconnect, and never accept client-authored spawn/despawn. Test registry
-determinism, non-reuse, callback composition, live lifecycle, late join,
-schema mismatch and malformed/duplicate frames over real loopback. Do not add
-network variables, transform state, RPCs, ownership, prediction or relevance.
-
-### Implemented
-
-- Added typed `NetworkObjectId`, `PrefabId`, `PrefabRegistration`, bounded
-  `PrefabRegistry`, `ReplicatedObject`, `ServerReplication` and
-  `ClientReplication` in `easy3d.replication`, with principal types exported at
-  package root. No Python object serialization or scene handle crosses the wire.
-- Prefab registration uses explicit nonzero uint32 IDs, unique safe names,
-  declared schema version and an order-independent 16-byte canonical
-  fingerprint. Attaching a replicator freezes the non-empty registry.
-- The sole server replicator allocates monotonic nonzero uint64 IDs without
-  reuse, creates/destroys entities through registered authority-scene factories,
-  preserves existing server callbacks and rejects client-authored lifecycle
-  magic. Replication backpressure disconnects only the affected peer.
-- Added a fixed 64-byte-maximum `E3DR` format with exact begin/spawn/despawn/end
-  lengths. Late join declares epoch, object count, schema and fingerprint, then
-  sends current objects in stable ID order. The client validates the complete
-  stream, bounds object count, rejects unknown/duplicate IDs and clears client
-  replicas on disconnect.
-- Added real-loopback coverage for preexisting and live objects, despawn,
-  second-client late join after a removal, callback composition and stable ID
-  equality across different scenes. Added deterministic registry capacity,
-  order/fingerprint, schema mismatch and duplicate-frame tests. The focused
-  suite passed 20 consecutive invocations.
-- Added ADR-0030 plus API/protocol/architecture/known-limit docs. Network vars,
-  transforms, ownership, RPC, relevance, prediction and cross-restart ID
-  persistence remain explicit later work. No dependency/license changed.
-
-### Failure found and corrected
-
-The first focused run reported `1 failed, 4 passed`: registering a duplicate ID
-in an already-full registry reported capacity exhaustion before checking the
-more specific duplicate invariant. Duplicate ID/name validation now precedes
-the capacity check. The focused suite then passed 5/5 and 20 consecutive runs.
-
-### Exact final verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests\python\test_replication_lifecycle.py -q
-.....                                                                    [100%]
-5 passed in 0.26s
-
-# The focused command was invoked 20 consecutive times before final packaging.
-20 consecutive replication lifecycle runs passed
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 49%]
-........................................................................ [ 98%]
-..                                                                       [100%]
-146 passed in 18.28s
-
-ctest --test-dir build\windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 0.95 sec
-
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 0.99 sec
-
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 0.82 sec
-
-# From the documented Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3929313
-sha256=d1bb744285e5ccc9ab0ee227f33348b2debc0ebae06490c5648b18a4a8d78a54
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m compileall -q python examples tests\python
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -m pip check
-No broken requirements found.
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.NetworkObjectId(1)); print(easy3d.PrefabRegistry)"
-0.1.0
-NetworkObjectId(value=1)
-<class 'easy3d.replication.PrefabRegistry'>
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-Phase 4.1: **DONE**. Immediate next task: Phase 4.2 — add bounded typed
-`NetworkVar` registration, dirty tracking, authoritative write checks and
-versioned value serialization on top of this lifecycle. No transform or RPC
-claims are made by this checkpoint.
-
-## 2026-11-01 — Phase 4.2 typed authoritative network variables (complete)
-
-### Bounded approach
-
-Extend each prefab's frozen schema with explicit nonzero uint16 field IDs,
-unique safe names, one supported wire type, a validated default and a per-value
-byte bound. Include canonical field definitions/defaults in the existing
-registry fingerprint so late join fails before accepting lifecycle when either
-side disagrees. Start with exact bool, signed int64, finite float64, safe UTF-8
-string and copied bytes; keep transforms in Phase 4.3.
-
-Create one `NetworkVar` state per declared field when an object spawns. Authority
-variables are writable and mark dirty only on actual value change; client
-mirrors reject writes. `ServerReplication.flush()` sends reliable fixed-header
-updates containing object ID, field ID, declared type, monotonically increasing
-field version and bounded encoded bytes, clearing dirty state after queueing or
-disconnecting a backpressured peer. Late-join snapshots send every current value
-between its spawn and end frames. Clients require known object/field/type,
-strictly increasing version and exact bounded decoding. Test each type/bound,
-no-op dirtiness, authority rejection, live batching, late join and malformed/
-stale updates. Do not add ownership transfer, delta compression, transforms,
-RPCs or client writes.
-
-### Implemented and verified
-
-- Added explicit per-prefab `NetworkVarSpec` schema for bool, signed int64,
-  finite float64, safe UTF-8 and copied bytes, including defaults and bounds in
-  the canonical prefab fingerprint. Fixed-width values also honor their bound.
-- Added writable authority `NetworkVar` state, read-only client mirrors, no-op
-  change detection, uint64 versions, dirty tracking and deterministic
-  `ServerReplication.flush()` ordering. Backpressured peers disconnect.
-- Added bounded type-5 value frames and strict object/field/type/length/version
-  parsing. Late join streams every current field without accumulating a frame
-  list and requires each declared snapshot field exactly once before sync.
-- Tests cover every type, invalid types/ranges/bounds, no-op dirtiness, client
-  write rejection, five-field live flush, no-dirty flush, current-value late
-  join, fingerprint change and stale update rejection. The combined focused
-  lifecycle/value suite passed 20 consecutive runs.
-
-Review after the first green run found that primitive encoders returned before
-checking declared byte caps, and snapshots accumulated frames and permitted a
-same-version field more than once. Encoding now applies one common bound;
-snapshot frames stream directly and track unique expected fields. All focused
-and full tests remained green after the fixes.
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests\python\test_network_vars.py tests\python\test_replication_lifecycle.py -q
-........                                                                 [100%]
-8 passed in 0.39s
-
-# The focused command was invoked 20 consecutive times before final packaging.
-20 consecutive NetworkVar/replication runs passed
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 48%]
-........................................................................ [ 96%]
-.....                                                                    [100%]
-149 passed in 18.22s
-
-# Native source did not change; the immediately preceding verified matrices remain:
-# headless 16/16, Debug 17/17, Release 17/17.
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3929446
-sha256=69b61beed022b3a20d2c056988445600c43258b1a25b01b18c3d9ab92a3fdf05
-Successfully installed easy3d-0.1.0
-
-git diff --check
-# exit code 0; only Git's existing LF-to-CRLF checkout notices
-```
-
-Phase 4.2: **DONE**. Immediate next task: Phase 4.3 — implement bounded
-tick/sequence transform snapshots, remote interpolation and basic relevance
-filtering. RPCs and client ownership remain unimplemented.
-
-## 2026-11-01 — Phase 4.3 transform snapshots and interpolation (active)
-
-### Bounded approach
-
-Register transform replication explicitly per prefab rather than as three
-generic `NetworkVar` fields. The authority samples an entity's world-independent
-local position/quaternion/scale at an explicit nondecreasing simulation tick,
-assigns a monotonic snapshot sequence and sends a fixed numeric frame. Keep
-spawn/lifecycle reliable; transform snapshots may use unreliable delivery so
-newer state supersedes loss.
-
-Each client keeps a fixed-capacity per-object snapshot deque, rejects duplicate
-or older sequence/tick data, and interpolates at a caller-provided render tick
-between the surrounding samples. Clamp before the oldest/after the newest;
-lerp position/scale and normalized-shortest-path interpolate quaternion without
-extrapolation. Apply only to client replica entities and expose counters.
-
-Add basic server relevance as an optional per-connection predicate evaluated
-before each snapshot send, defaulting visible-to-all. Relevance suppresses
-transform traffic only in this slice; it does not despawn lifecycle objects or
-claim spatial indexing. Bound tracked objects, samples, finite components,
-tick/sequence ranges and per-flush sends. Test loss/out-of-order/duplicate
-handling, interpolation endpoints/midpoints, quaternion normalization, late
-join baseline and two-client relevance over real loopback. Do not add client
-prediction, reconciliation, interest-grid optimization or ownership.
-
-### Implemented and verified
-
-- Added explicit `NetworkTransform` prefab schema registration and included the
-  declaration in the canonical registry fingerprint.
-- Added fixed type-6 frames containing object ID, monotonic sequence,
-  nondecreasing simulation tick, float32 local position, normalized quaternion
-  and nonzero scale. Live snapshots use unreliable delivery; lifecycle and
-  `NetworkVar` traffic remain reliable.
-- Added `flush_transforms(tick)` with a bounded object/connection product,
-  reusable frame encoding, per-connection relevance predicate, and immutable
-  queued/filtered/backpressured counters. Replaceable queue pressure is counted
-  rather than disconnecting the peer.
-- Added fixed-capacity client histories, stale/duplicate/out-of-order and
-  unknown-object drops, same-tick replacement, history eviction counters,
-  endpoint clamping, position/same-sign-scale lerp, safe mirrored-scale sign
-  stepping and normalized shortest-path quaternion interpolation. Only client
-  replica entities are mutated.
-- Late join receives the current relevant transform baseline between its spawn
-  and snapshot end. Relevance suppresses transform traffic only and does not
-  imply lifecycle hiding, ownership or spatial interest management.
-- Added deterministic codec/interpolation/bounds coverage plus real GNS
-  loopback tests with two differently relevant clients and a late join.
-
-```text
-build\venv311\Scripts\python.exe -m pytest -q tests/python/test_network_transform.py tests/python/test_network_vars.py tests/python/test_replication_lifecycle.py
-...........                                                              [100%]
-11 passed in 0.50s
-
-# test_network_transform.py was invoked 20 consecutive times before the full run.
-20/20 transform iterations passed (3 passed per run)
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 47%]
-........................................................................ [ 94%]
-........                                                                 [100%]
-152 passed in 18.54s
-
-cmake --build build\windows-headless --config Release
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16; 0.86 sec
-
-cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 17; 0.95 sec
-
-cmake --build --preset windows-release
 ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 17; 0.76 sec
-
-# In an ordinary shell, pip selected MinGW 15.1 and reproduced the documented
-# upstream Protobuf generated_message_tctable_lite.cc `musttail` failure.
-# The supported MSVC command was then run exactly as documented:
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3929718
-sha256=4b38e66af6fecbb825a2c8e1a148b2c3e60551592a70485918aa0a657beead06
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.NetworkTransform)"
-0.1.0
-<class 'easy3d.replication.NetworkTransform'>
-```
-
-Phase 4.3: **DONE**. Immediate next task: Phase 4.4 — explicit RPC schema,
-direction/ownership authorization, rate limiting, delivery selection and
-defensive bounded parsing. Prediction, reconciliation and spatial interest
-management remain later work.
-
-## 2026-11-01 — Phase 4.4 bounded authorized RPCs (active)
-
-### Bounded approach
-
-Extend the frozen prefab fingerprint with explicit nonzero uint16 RPC IDs,
-unique safe names, one allowed direction, a finite positional argument schema,
-delivery policy, ownership requirement and server rate limit. Reuse the exact
-bounded primitive codecs from `NetworkVar`; do not serialize Python objects,
-keyword dictionaries or class names.
-
-Add one type-7 call frame with object ID, RPC ID, caller-monotonic invocation
-sequence, declared argument count and typed length-prefixed values. Cap argument
-count, each value, total frame and per-poll execution. Client-to-server frames
-must reference a live known object and matching direction; enforce optional
-owner connection equality before execution and a per-connection/object/RPC
-one-second sliding rate window. Malformed, wrong-direction, unknown-schema,
-duplicate-sequence and ownership-tampered calls disconnect; rate excess is
-dropped and counted without executing user code.
-
-Expose explicit authority calls to one/all clients and client calls to the
-server, selecting reliable or unreliable transport from frozen schema. Dispatch
-registered handlers only on the existing owner poll thread and preserve normal
-application messages. Test exact encoding, every primitive argument, both
-directions/delivery modes, ownership denial, rate limiting, duplicate/malformed
-input and real loopback dispatch. Do not grant ownership through RPC, expose
-arbitrary callable lookup, add prediction, or claim gameplay-condition
-validation beyond the registered handler.
-
-### Implemented and verified
-
-- Added canonical per-prefab `RpcSpec` registration with stable uint16 ID,
-  safe name, direction, up to 16 bounded primitive positional arguments,
-  reliable/unreliable delivery, ownership policy and 1–1000 calls/second rate.
-  The full definition participates in the frozen prefab fingerprint; handlers
-  never appear on the wire.
-- Added bounded type-7 frames with object/RPC IDs, caller-monotonic uint64
-  invocation sequence, declared argument count and typed length-prefixed values.
-  Exact bool, int64, finite float64, safe UTF-8 and copied bytes codecs are
-  shared with `NetworkVar`; the total payload is capped at 60 KiB.
-- Added `ClientReplication.call_server`, `ServerReplication.call_client` and
-  `broadcast_rpc`, all selecting delivery from schema. Server and client
-  dispatch occurs synchronously through the existing poll owner.
-- Added authority-only `set_owner`/`owner`; assignments require an established
-  connection and clear on disconnect. Client-to-server receive validates live
-  object, schema, direction, invocation sequence and optional exact owner before
-  a one-second per-connection/object/RPC rate window and handler execution.
-- Malformed, unknown, wrong-direction, duplicate/replayed and ownership-tampered
-  calls disconnect without running a handler. Rate excess is dropped and
-  reported through immutable `RpcStats`.
-- Real GNS loopback tests cover all primitive arguments, reliable client calls,
-  unreliable targeted authority notification, direction rejection, rate
-  suppression, second-client ownership tampering and replay disconnect.
-
-```text
-build\venv311\Scripts\python.exe -m pytest -q tests/python/test_network_rpc.py tests/python/test_network_transform.py tests/python/test_network_vars.py tests/python/test_replication_lifecycle.py
-..............                                                           [100%]
-14 passed in 0.61s
-
-# test_network_rpc.py was invoked 20 consecutive times.
-20/20 RPC iterations passed (3 passed per run)
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 46%]
-........................................................................ [ 92%]
-...........                                                              [100%]
-155 passed in 18.68s
-
-# Native code did not change after the Phase 4.3 matrices in this same session:
-# headless 16/16, Debug 17/17, Release 17/17.
-```
-
-Phase 4.4: **DONE**. Immediate next task: Phase 4.5 — game-context/script
-authority guards and listen-host double-execution prevention around the new
-replication/RPC surface. Replicated match state remains Phase 4.6.
-
-## 2026-11-01 — Phase 4.5 script authority context
-
-Added `ScriptRole` (`offline`, `server`, `client`), `server_only` and
-`client_only` lifecycle guards, plus `current_script_role()`. The scheduler
-enforces guards centrally and scopes/resets the context around every callback.
-Headless `Server` uses the server role; graphical offline `Game` retains the
-offline default. `ListenServer` still owns only the authoritative server
-scheduler and its transport-only local client has no scene/scheduler, so host
-callbacks cannot execute twice.
-
-```text
-build\venv311\Scripts\python.exe -m pytest -q tests/python/test_scheduler.py tests/python/test_server.py tests/python/test_listen_server.py
-.................                                                        [100%]
-17 passed in 0.49s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 46%]
-........................................................................ [ 92%]
-............                                                             [100%]
-156 passed in 18.44s
-```
-
-Phase 4.5: **DONE**. Immediate next task: Phase 4.6 — replicated match states
-and authority-only simulation timers with late-join correctness.
-
-## 2026-11-01 — Phase 4.6 replicated match state (active)
-
-### Bounded approach
-
-Build match state from the proven authority-only `NetworkVar` path rather than
-introducing a second replication protocol. Define a finite explicit state enum,
-authority tick deadlines (not wall-clock client timers), legal transitions and
-one registered match object prefab. Replicate current state, round number and
-deadline tick; clients derive display time but cannot advance state. Test illegal
-transitions, server-only timer expiry, listen-host single advancement and late
-join during every state. Do not add scoring/combat rules from Phase 4.7.
-
-### Implemented and verified
-
-- Added canonical `MatchPhase`, four-field match schema registration and typed
-  public `ServerMatchState`/`ClientMatchState` views.
-- Authority transitions enforce waiting → countdown → playing → round end or
-  match end, with explicit reset, nondecreasing signed-int64 simulation ticks,
-  overflow checks, round/revision tracking and no wall-clock authority.
-- Countdown/intermission deadlines advance only through the server-only wrapper;
-  client state is read-only and derives clamped remaining ticks for display.
-- State uses the existing reliable dirty-variable path. Real GNS late joins
-  independently validated waiting, countdown, playing, round-end and match-end
-  snapshots; a mid-countdown join also continued through the entire two-round
-  transition sequence with the original client.
-
-```text
-build\venv311\Scripts\python.exe -m pytest -q tests/python/test_match_state.py tests/python/test_network_vars.py tests/python/test_listen_server.py
-..............                                                           [100%]
-14 passed in 0.92s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 44%]
-........................................................................ [ 88%]
-...................                                                      [100%]
-163 passed in 19.04s
-```
-
-Phase 4.6: **DONE**. Immediate next task: Phase 4.7 — build the public-API
-2–8-player cooperative sandbox sample with synchronized spawn, movement,
-interaction/damage and destruction.
-
-## 2026-11-01 — Phase 4.7 cooperative sandbox (active)
-
-### Bounded approach
-
-Build a finite real-loopback public-API sample for 2–8 clients around one
-headless authority. Register player/crate prefabs, player transform and health
-state, plus owner-gated move/hit RPCs and a server-to-client assignment RPC.
-Spawn/despawn players from validated connection callbacks, validate movement
-bounds and hit distance on the server, replicate movement snapshots, decrement
-crate health and destroy it authoritatively.
-
-Run the scenario to completion without graphics: every client must receive all
-players and the crate, learn only its assigned player ID, submit movement,
-observe all remote positions, cooperate to damage/destroy the crate, observe
-the despawn and exit cleanly. Expose a reusable `run_sandbox()` result for an
-automated integration test and a documented CLI with `--clients 2..8`. Do not
-claim prediction, rendered-Game attachment, internet discovery or Phase 5
-bandwidth/scale behavior.
-
-### Implemented and verified
-
-- Added `examples/07_coop_sandbox` using only public `Server`, `Client`, prefab,
-  variable, transform, ownership and RPC APIs over real GNS loopback.
-- One authoritative player is spawned/owned per validated connection; a
-  reliable assignment RPC identifies only that client's player. Owner-gated
-  unreliable move and reliable hit requests validate bounds/proximity on the
-  server. Every client receives/interpolates every player, and two clients
-  cooperatively reduce then authoritatively despawn the crate.
-- The 4/8-client gate exposed a core batched-connection race: `connections`
-  already contained peers whose replication connect callback had not queued a
-  snapshot, so an earlier callback's live spawn could precede their begin.
-  Added a snapshot-ready connection set and restricted all live lifecycle,
-  value, transform and RPC sends to it. The sample is the regression test.
-- Automated runs cover 2, 4 and 8 clients plus invalid bounds. The complete
-  eight-client scenario passed 20 consecutive runs.
-
-```text
-build\venv311\Scripts\python.exe examples/07_coop_sandbox/main.py --clients 2
-sandbox complete: clients=2 players=2 interpolated=4 crate_destroyed=True rpc_executed=4
-
-build\venv311\Scripts\python.exe examples/07_coop_sandbox/main.py --clients 8
-sandbox complete: clients=8 players=8 interpolated=64 crate_destroyed=True rpc_executed=10
-
-build\venv311\Scripts\python.exe -m pytest -q tests/python/test_coop_sandbox.py tests/python/test_replication_lifecycle.py tests/python/test_network_rpc.py
-............                                                             [100%]
-12 passed in 0.54s
-
-# Full eight-client CLI scenario invoked 20 consecutive times.
-20/20 eight-client sandbox runs passed
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 43%]
-........................................................................ [ 86%]
-.......................                                                  [100%]
-167 passed in 18.99s
-```
-
-Phase 4.7: **DONE**. Immediate next task: Phase 4.8 — consolidate adversarial
-replication integration for malformed RPC, ownership tampering, out-of-order
-updates, explicit state resync, and join/leave churn.
-
-## 2026-11-01 — Phase 4.8 adversarial replication and resync (active)
-
-### Bounded approach
-
-Add one reliable, empty-state client resync request containing only a nonzero
-caller sequence. Validate exact framing, monotonic sequence and a per-connection
-minimum interval. Temporarily remove that peer from the live-ready set, queue a
-fresh authoritative snapshot through the existing epoch/fingerprint/object/
-field/transform path, then restore readiness only on complete queue success.
-The client clears/recreates replicas at begin exactly as for initial join; no
-parallel patch format or client-authored state is introduced.
-
-Consolidate real-loopback adversarial coverage for malformed/unknown RPC,
-direction and ownership tampering, replay, transform reordering, resync of
-corrupted/missing local mirrors, and repeated join/leave with owner cleanup.
-Bound all waits and require post-failure healthy peers to remain coherent. Do
-not claim automatic baseline detection, reconnect identity persistence or Phase
-5 delta ACK recovery.
-
-### Implemented and verified
-
-- Added reliable type-8 `request_resync()` with nonzero monotonic client
-  sequence, exact fixed payload, replay rejection and 250 ms authority rate
-  guard. The requester leaves live readiness, receives the ordinary complete
-  snapshot, and returns only after snapshot-end queue success.
-- Client snapshot begin destroys/recreates mirrors and restores current values
-  plus relevant transform baseline. Exact same-version/same-value updates that
-  legitimately cross the resync boundary are idempotent; older/conflicting
-  versions remain errors.
-- Real two-client integration corrupts/removes one local mirror baseline,
-  resynchronizes it to authority, verifies wrapper replacement, then flushes a
-  boundary duplicate while the healthy peer stays connected and coherent.
-- Added 12 sequential join/leave cycles proving owner cleanup, authoritative
-  despawn and monotonic non-reused IDs. Added live unknown/truncated RPC
-  disconnect tests alongside existing direction, ownership, replay, rate and
-  out-of-order transform coverage.
-
-```text
-build\venv311\Scripts\python.exe -m pytest -q tests/python/test_replication_resync.py tests/python/test_network_rpc.py tests/python/test_network_transform.py tests/python/test_network_vars.py tests/python/test_coop_sandbox.py
-..................                                                       [100%]
-18 passed in 1.33s
-
-# Resync plus 12-cycle churn suite invoked 20 consecutive times.
-20/20 resync and churn iterations passed
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 41%]
-........................................................................ [ 83%]
-............................                                             [100%]
-172 passed in 19.52s
-
-cmake --build build\windows-headless --config Release
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16; 0.92 sec
-
-cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 17; 0.93 sec
-
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 17; 0.79 sec
-
-# Under the supported x64 VsDevCmd environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3930455
-sha256=32d6e904cb524d58d37b80c85edf9b79db9e2d4dd367b44fdf127b5b59a5fe6e
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(hasattr(easy3d.ClientReplication, 'request_resync'))"
-0.1.0
-True
-```
-
-Phase 4.8: **DONE**. Phase 4 exit gate is complete for tested local Windows
-loopback: lifecycle, authoritative fields/transforms/match state, ownership and
-RPC validation remain coherent; unauthorized client state is rejected. Exact
-next task: Phase 5.1 — input-sequenced native predicted character motor on
-client and server.
-
-## 2026-11-01 — Phase 5.1 sequenced predicted character input (active)
-
-### Bounded approach
-
-Extend the existing Jolt `CharacterVirtual` motor with a separate nonzero uint64
-sequenced-input path while preserving unsequenced offline input. Reject stale or
-duplicate sequences natively before changing motor input; expose the last
-accepted sequence in a separate prediction state so existing tuple/API shapes
-do not break.
-
-Add a typed Python `CharacterInputCommand` and bounded
-`PredictedCharacterController` facade. Client mode allocates monotonic commands,
-applies them immediately to the native motor and retains a fixed replay queue;
-server mode accepts externally sequenced commands through the same native
-validation. Acknowledge/remove commands without replay yet—authoritative state
-correction and bounded replay belong to Phase 5.2. Test native validation,
-client/server parity, queue bounds, jump/heading/movement input and sequence
-exhaustion. Do not claim arbitrary Python prediction or network transport is
-automatically attached.
-
-### Result
-
-Implemented a separate native sequenced-input entry point on
-`PhysicsWorld`/`Scene` and the binding. Nonzero uint64 commands must be strictly
-newer; ordinary motor validation completes before the accepted sequence is
-advanced, and reused character slots reset it to zero. Existing offline
-`set_input` remains unsequenced.
-
-Added immutable `CharacterInputCommand`, explicit client/server
-`PredictionRole`, and `PredictedCharacterController`. Client submission applies
-immediately and retains at most the declared number of unacknowledged commands;
-acknowledgements remove a monotonic prefix. Authority acceptance uses the same
-native motor and rejection. Queue saturation, role misuse, invalid values and
-sequence exhaustion fail explicitly. No transport attachment, correction or
-replay is claimed.
-
-### Exact verification evidence
-
-```text
-# Under the supported x64 VsDevCmd environment:
-cmake --build --preset windows-debug
-Build completed: 30 targets/actions, exit 0
-
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.75 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3931439
-sha256=37e3164fd899f6d44b70b476c3a36d15ed8680fe97bb3fd087e6111568fe3e51
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_prediction.py -q
-......                                                                   [100%]
-6 passed in 0.16s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 40%]
-........................................................................ [ 80%]
-..................................                                       [100%]
-178 passed in 19.70s
-
-cmake --build --preset windows-release
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 2.55 sec
-
-cmake --build build\windows-headless --config Release --parallel 4
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.67 sec
-```
-
-Phase 5.1: **DONE**. Exact next task: Phase 5.2 — authoritative character
-correction, bounded pending-input replay, remote interpolation and correction
-telemetry.
-
-## 2026-11-01 — Phase 5.2 reconciliation and interpolation telemetry (active)
-
-### Bounded approach
-
-Add a native character correction primitive that atomically restores finite
-position, normalized rotation and bounded velocity, plus a character-only replay
-step that reuses the exact ordinary Jolt motor update without advancing the
-whole world. Refactor the motor step once so live simulation and replay cannot
-drift into separate algorithms.
-
-Extend `PredictedCharacterController` so the authority snapshots state after a
-processed input and the client validates a monotonic acknowledgement, snaps to
-that state, removes the acknowledged queue prefix and replays the bounded
-remainder at an explicit fixed delta. Preserve the already-accepted native
-input sequence during replay. Record correction count/error and replay count.
-Wrap the existing bounded remote transform history with an explicit interpolation
-delay and call/applied-object telemetry rather than adding a second transform
-stream. Do not claim rollback of arbitrary bodies or automatic wire transport.
-
-### Result
-
-Refactored the Jolt character update into one native routine used by both the
-ordinary scene step and character-only replay. Native correction restores
-finite position, normalized rotation and velocity capped at 500 m/s, refreshes
-contacts and preserves the latest accepted input sequence. Replay applies one
-validated command/fixed delta without advancing the whole `PhysicsSystem` and
-synchronizes the owning scene entity.
-
-Authority `make_correction(server_tick)` captures post-step state with a
-strictly newer simulation tick. Client `reconcile` rejects stale ticks,
-future/backward acknowledgements and invalid state; it restores authority,
-removes the acknowledged prefix and replays the bounded suffix. Corrections may
-advance server tick without advancing the acknowledged input sequence. Public
-telemetry reports corrections, last/total replay work and last/max/average
-position error.
-
-`RemoteTransformInterpolator` applies the existing bounded transform history at
-an explicit delayed render tick and reports calls, applied-object totals and
-last authority/render ticks. It rejects backward time and performs no
-extrapolation. Tests prove native live/replay motor parity, acknowledgement and
-tick rules, bounded queue replay, correction telemetry and delayed remote
-interpolation.
-
-### Exact verification evidence
-
-```text
-# Under the supported x64 VsDevCmd environment:
-cmake --build --preset windows-debug
-Build completed: 30 targets/actions, exit 0
-
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.73 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3932918
-sha256=fa4dc50e4a08a096f468a0f3eb7c7f3fff3a32726bcb048f1a295a4861edeb15
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_prediction.py tests/python/test_network_transform.py -q
-...........                                                              [100%]
-11 passed in 0.26s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 40%]
-........................................................................ [ 80%]
-....................................                                     [100%]
-180 passed in 19.68s
-
-cmake --build --preset windows-release
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 2.25 sec
-
-cmake --build build\windows-headless --config Release --parallel 4
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.57 sec
-```
-
-Phase 5.2: **DONE**. Exact next task: Phase 5.3 — deterministic lag, jitter and
-loss scenarios at declared representative conditions with documented failure
-behavior.
-
-## 2026-11-01 — Phase 5.3 representative network impairment (active)
-
-### Bounded approach
-
-Keep the existing seeded `SimulatedLink` for deterministic packet-level unit
-tests. Add validated named condition profiles plus a process-global, scoped
-GameNetworkingSockets impairment context using the backend's official fake send
-lag/jitter/loss controls, reset unconditionally on exit. Reject concurrent or
-nested scopes because the upstream settings are global.
-
-Exercise every declared profile in the exact seeded simulator, then exercise
-reliable delivery/retransmission on real loopback GNS under the adverse profile
-with a tolerant deadline, never presenting it as an Internet guarantee or
-benchmark. Explicitly document total loss, timeout, prediction-queue saturation,
-correction gaps and unreliable latest-state recovery behavior.
-
-### Result
-
-Added immutable `NetworkCondition` plus declared LAN (5 ms one-way, 2 ms
-jitter, 0% loss), regional (40/10 ms, 1%) and adverse (100/30 ms, 5%) profiles.
-Every profile creates the existing manually clocked seeded native simulator for
-exact packet traces. All three profiles were tested with 500 unreliable
-messages, exact delivered+lost accounting, empty final in-flight state and
-same-seed trace equality. A 100% loss profile delivered none of 64 messages and
-reported all 64 lost.
-
-Added a guarded `BackendImpairment` context using GNS 1.6.1's official global
-fake-send lag, jitter and loss settings. It requires an initialized backend,
-rejects concurrent/nested use and clears settings on successful or exceptional
-exit. The adverse real-loopback test connected through impairment and delivered
-32 reliable messages in exact order; it passed 10 consecutive independent
-runs. This exercises GNS retransmission rather than assigning reliability to the
-packet simulator.
-
-The first native compile failed because `ISteamNetworkingUtils` is declared in
-the separate upstream `<steam/isteamnetworkingutils.h>` header rather than
-`steamnetworkingsockets.h`. The explicit public header include fixed the error;
-no dependency patch or bypass was used.
-
-Failure behavior is now explicit: deterministic total loss delivers no
-application messages; backend establishment/liveness eventually times out;
-unacknowledged prediction can fill its fixed queue and raises `NetworkError`;
-unreliable state needs later superseding data/application redundancy; a later
-correction or reconnect is the authority recovery path. Profiles are regression
-inputs, not measured Internet distributions or capacity claims.
-
-### Exact verification evidence
-
-```text
-# Initial supported-MSVC compile after adding GNS utilities calls:
-cmake --build --preset windows-debug
-backend_gns.cpp(41): error C2065: 'ISteamNetworkingUtils': undeclared identifier
-ninja: build stopped: subcommand failed.
-
-# After including <steam/isteamnetworkingutils.h>:
-cmake --build --preset windows-debug
-Build completed: 23 targets/actions, exit 0
-
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.67 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: filename=easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=3933818
-sha256=5a98a87f2a3a044b376d2497d937cf260c6f309fe8bd48ea91e7a213691fc1fa
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_conditions.py -q -s
-.......
-7 passed in 1.26s
-
-# Adverse real-GNS reliable-delivery case invoked 10 consecutive times.
-10/10 adverse-profile iterations passed (individual runs 1.09–2.69 sec)
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 38%]
-........................................................................ [ 77%]
-...........................................                              [100%]
-187 passed in 21.57s
-
-cmake --build --preset windows-release
-ctest --preset windows-release
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 2.49 sec
-
-cmake --build build\windows-headless --config Release --parallel 4
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.64 sec
-```
-
-Phase 5.3: **DONE**. Exact next task: Phase 5.4 — measured bandwidth budgets,
-entity prioritization, spatial interest and delta-baseline recovery.
-
-## 2026-11-01 — Phase 5.4 bounded prioritized transform deltas (active)
-
-### Bounded approach
-
-Keep reliable lifecycle, variables, match state and RPC outside a replaceable
-stream budget so overload cannot silently delete authority. Add a per-connection
-token budget for transform bytes, stable priority ordering and optional
-distance-based `SpatialInterest`; lifecycle remains coherent outside the radius.
-
-Advance the replication wire version and send compact int16 transform deltas
-only against a snapshot that the specific client acknowledged. Retain bounded
-sent/history windows. If the client no longer has the named baseline, send a
-monotonic reliable recovery request, clear only that connection/object baseline
-and force the next relevant transform to be full. Store the quantized
-reconstruction as the authority baseline so chained deltas cannot accumulate
-client/server baseline drift. Test budgets, priority, interest, delta size,
-acknowledgement, missing-baseline recovery, resync and malicious bounds.
-
-### Result
-
-Advanced replication wire version to 2. A full type-6 transform remains 76
-bytes total. After a per-connection/object reliable ACK, authority emits a
-64-byte type-10 delta with signed int16 centimeter position, 1/16000 quaternion
-component and 0.001 scale differences. Overflow/invalid reconstruction falls
-back to full. Authority retains the exact quantized reconstruction as the sent
-candidate, so a later ACK selects the same baseline the client holds rather
-than accumulating hidden baseline error.
-
-Client histories decode only a named retained baseline. A missing baseline
-drops the replaceable delta and queues one monotonic reliable type-11 recovery
-request; authority clears only that baseline and the next relevant flush is
-full. Type-9 ACKs cannot name a future sequence. Sent history is capped at 32
-per connection/object and all state is cleared on despawn/disconnect/resync.
-
-Added per-connection transform token budgets (default 256 KiB/s, 64 KiB burst,
-60 ticks/s), stable finite application priority, and `SpatialInterest` observer
-radius/distance priority. One 76-byte burst test with two nearby and one distant
-object sent the preferred nearby object, budget-deferred the ordinary nearby
-object and interest-filtered the distant object. Lifecycle remained present.
-Critical reliable lifecycle/values/RPCs intentionally bypass the replaceable
-transform budget.
-
-The delta/recovery and interest/budget integration tests passed 20 consecutive
-runs. The first attempted focused regression command referenced the nonexistent
-singular filenames `test_replication.py` and `test_network_var.py`; pytest
-correctly returned “file or directory not found.” It was corrected to
-`test_replication_lifecycle.py` and `test_network_vars.py`, and all 21 selected
-replication tests passed.
-
-### Exact verification evidence
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests/python/test_replication_scaling.py -q -s
-..
-2 passed in 0.25s
-
-# Scaling integration suite invoked 20 consecutive times.
-20/20 iterations passed (individual runs 0.22–0.27 sec)
-
-# Initial mistyped focused command:
-build\venv311\Scripts\python.exe -m pytest ... tests/python/test_replication.py ...
-ERROR: file or directory not found: tests/python/test_replication.py
-no tests ran in 0.00s
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_transform.py tests/python/test_network_rpc.py tests/python/test_replication_lifecycle.py tests/python/test_network_vars.py tests/python/test_replication_resync.py tests/python/test_replication_scaling.py -q
-.....................                                                    [100%]
-21 passed in 1.38s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 38%]
-........................................................................ [ 76%]
-.............................................                            [100%]
-189 passed in 21.29s
-```
-
-No native source changed in Phase 5.4; the immediately preceding Phase 5.3
-MSVC matrices remain the native checkpoint (Debug 17/17, Release 17/17,
-headless 16/16). Phase 5.4: **DONE**. Exact next task: Phase 5.5 — cooperative
-and competitive arena samples with authoritative damage, scoring and match
-state.
-
-## 2026-11-01 — Phase 5.5 authoritative network arenas
-
-Added `examples/08_network_arenas` with finite cooperative and competitive
-real-GNS loopback scenarios for 2–8 clients. Both use one frozen prefab schema,
-server-owned player health/team/score variables, owner-gated bounded reliable
-attack RPC, and the canonical replicated `ServerMatchState`/`ClientMatchState`.
-The authority alone transitions countdown → playing → match end.
-
-The attack handler rejects non-playing requests, self/unknown/wrong-kind
-targets, out-of-range targets, same-team competitive damage and dead targets.
-Cooperative mode requires four valid 25-damage hits on the shared objective,
-despawns it and awards every player one score. Competitive mode requires four
-hits from player zero on distinct-team player one, leaves exactly one player at
-zero health and awards only the attacker. Client mirrors observe `MATCH_END`.
-
-```text
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_arenas.py -q -s
-.......
-7 passed in 0.56s
-
-build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode cooperative --clients 8
-arena complete: mode=cooperative clients=8 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=True eliminated_players=0
-
-build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode competitive --clients 8
-arena complete: mode=competitive clients=8 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=False eliminated_players=1
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 36%]
-........................................................................ [ 73%]
-....................................................                     [100%]
-196 passed in 22.46s
-```
-
-No native source changed in Phase 5.5. Phase 5.5: **DONE**. Exact next task:
-Phase 5.6 — 8/16/32 simulated clients, measured tick/CPU/RAM/bandwidth/latency
-and correctness with optimization only from observed bottlenecks.
-
-## 2026-11-01 — Phase 5.6 measured 8/16/32-client capacity gate
-
-Added `benchmarks/network_capacity.py`, a finite real-GNS loopback workload
-with 8, 16 and 32 independent clients, one authority-owned moving transform
-and integer field per client, dense all-to-all transform fan-out, periodic
-reliable field updates, complete baseline establishment and final all-replica
-validation. It records aggregate loop median/p95/p99/max, process CPU and
-working set, authority/client application bytes, sentinel observation latency,
-queued/deferred transforms and correctness. `--enforce-budget` applies limits
-set only after the first correct baseline; `docs/benchmarks.md` records the
-machine, workload, exact limits, results and non-claims.
-
-The first 32-client baseline was correct with no deferrals but measured
-47.014/59.397/68.719 ms median/p95/p99, 133.5% process CPU, 100.4 MiB peak RSS
-and 35.851 ms observation p95. Profiling identified repeated delta
-reconstruction, repeated quaternion-length calculation and per-object reliable
-ACK sends. Delta work is now reused only for the exact same immutable baseline
-object, quaternion normalization computes length once, and clients coalesce the
-newest ACK for up to 256 objects into bounded unreliable type-12 batches. Loss
-of replaceable ACK state leaves an older safe baseline; later ACKs restore
-efficiency, while baseline recovery remains reliable. Benchmark latency
-instrumentation now samples one stable object per client but final correctness
-still checks every object/field on every client.
-
-Failures found and corrected:
-
-- The first focused run failed in `_rss_bytes()` with
-  `OSError: GetProcessMemoryInfo failed` because ctypes used a default 32-bit
-  return type for a 64-bit Windows process handle. Explicit Win32 argument and
-  return signatures fixed it; the focused suite passed.
-- The first focused regression command named nonexistent files
-  `test_math.py`, `test_replication_transforms.py` and
-  `test_replication_budget.py`; pytest returned `ERROR: file or directory not
-  found: tests/python/test_math.py`. The command was corrected to the actual
-  filenames and passed 14/14, then 15/15 after budget tests were added.
-- A cProfile run intentionally instrumenting the dense 32-client workload made
-  the final drain exceed its 10-second operational timeout. The profile was
-  still readable and identified the hot paths; this was not recorded as a
-  capacity pass.
-
-Recorded machine: Windows 11 Home 10.0.26200 x64, AMD Ryzen 5 5600G (6 cores,
-12 logical processors, reported 3901 MHz maximum), 34,227,388,416 bytes RAM,
-CPython 3.11 x64. Final exact capacity gate output:
-
-```text
-build\venv311\Scripts\python.exe benchmarks\network_capacity.py --ticks 120 --warmup-ticks 20 --enforce-budget
-clients=8 correct=True tick_ms median/p95/p99/max=4.271/6.044/6.845/7.398 cpu=78.7% rss_peak=32.3MiB server=840.9KiB/s per_client=105.1KiB/s latency_p95=8.570ms deferred=0
-clients=16 correct=True tick_ms median/p95/p99/max=13.875/17.090/17.685/20.074 cpu=103.6% rss_peak=40.2MiB server=1153.8KiB/s per_client=72.1KiB/s latency_p95=9.528ms deferred=0
-clients=32 correct=True tick_ms median/p95/p99/max=49.270/64.640/66.447/77.815 cpu=112.9% rss_peak=55.1MiB server=1288.2KiB/s per_client=40.3KiB/s latency_p95=29.067ms deferred=0
-# exit code 0
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_capacity.py tests/python/test_replication_scaling.py tests/python/test_network_transform.py tests/python/test_math_transform.py -q
-...............                                                          [100%]
-15 passed in 0.52s
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_replication_scaling.py tests/python/test_network_capacity.py -q
-......                                                                   [100%]
-6 passed in 0.45s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 36%]
-........................................................................ [ 72%]
-........................................................                 [100%]
-200 passed in 21.59s
-```
-
-Application byte counters exclude UDP/IP/encryption overhead. The aggregate
-tick includes authority plus every in-process client poll; the 32×32 workload
-meets its declared p99 100 ms, latency p95 50 ms, 200% CPU, 128 MiB RSS,
-80 KiB/tick and zero-deferral gates, but does not claim 60 Hz, external-network
-quality or dedicated-server-only cost. Phase 5.6: **DONE**. Exact next task:
-Phase 5.7 — reconnect/disconnect, input-spam, packet-loss and shutdown soak.
-
-## 2026-11-01 — Phase 5.7 adverse lifecycle soak
-
-Added `benchmarks/network_soak.py`, a finite real-GNS lifecycle soak. Under the
-declared adverse 100 ms one-way lag / 30 ms jitter / 5% fake-send loss profile,
-it sends reliable owner-gated input RPC bursts above a 16/second server rate
-limit, requires every RPC to reach server protocol handling, rotates client
-disconnects, validates reliable despawn on remaining mirrors, reconnects and
-requires a complete new snapshot/assignment. After all impaired cycles are
-coherent, it resets the process-global impairment, stops the populated server,
-and requires every client mirror to observe disconnect and clear. The CLI exits
-nonzero unless sent/received counts, rate limiting, reconnects, shutdowns and
-final ownership/object cleanup all agree.
-
-The first small soak found a real whole-server shutdown bug. GNS made all native
-connections inactive before Python received queued disconnect callbacks. The
-first user disconnect callback despawned its player; replication still treated
-the other stopped peers as ready, attempted to broadcast, then raised
-`NetworkError: cannot disconnect an inactive server connection`. Replication
-now intersects its ready set with the native active connection set before user
-teardown. Normal single-peer disconnects retain broadcasts; whole-server stop
-has no inactive recipients. The next run no longer crashed.
-
-That next run timed out waiting specifically for `SERVER_STOPPED` while the
-fake-loss scope was still active: an impaired close may instead become a
-liveness disconnect. The soak now finishes all loss/retransmission work inside
-the scope, resets impairment, then verifies deterministic explicit shutdown.
-The test preserves both requirements without asserting an unstable impaired
-disconnect code. The initial CLI also referenced nonexistent
-`network.NETWORK_CONDITIONS`; it was corrected to the public
-`REPRESENTATIVE_NETWORK_CONDITIONS` tuple.
-
-Exact focused and recorded evidence:
-
-```text
-# Initial small soak before shutdown ready-set fix:
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_soak.py -q -s
-E easy3d._easy3d.NetworkError: cannot disconnect an inactive server connection
-1 failed, 1 passed in 5.52s
-
-# After ready-set fix, before separating impaired and clean shutdown:
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_soak.py tests/python/test_replication_lifecycle.py tests/python/test_server.py -q -s
-E RuntimeError: network soak timed out waiting for server shutdown propagation
-1 failed, 10 passed in 28.63s
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_soak.py -q -s
-..
-2 passed in 8.13s
-
-build\venv311\Scripts\python.exe benchmarks/network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse --json
-{
-  "clients": 4,
-  "cycles": 10,
-  "profile": "adverse",
-  "inputs_sent": 2560,
-  "inputs_received": 2560,
-  "inputs_executed": 640,
-  "inputs_rate_limited": 1920,
-  "disconnects_observed": 14,
-  "reconnects_completed": 10,
-  "shutdown_disconnects_observed": 4,
-  "elapsed_seconds": 35.15232510003261,
-  "correct": true
-}
-# exit code 0
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 35%]
-........................................................................ [ 71%]
-..........................................................               [100%]
-202 passed in 28.38s
-```
-
-No native source changed; this extends the real native transport through its
-public Python lifecycle. Phase 5.7: **DONE**. Phase 5 exit gate is met for the
-documented workload and limits in `docs/benchmarks.md`, without claiming a 60
-Hz 32-player game or arbitrary-game capacity. Exact next task: Phase 6.1 —
-optional graphics upgrades with capability fallbacks and presets.
-
-## 2026-11-01 — Phase 6.1 graphics presets and optional passes
-
-Added immutable `low`, `medium`, `high`, and `ultra` quality presets to the
-native engine and typed `Game` API. Low preserves the baseline direct-light
-path. Medium enables camera-aware metallic/roughness lighting and an RGBA16F
-scene target followed by tone mapping, gamma correction and FXAA. High and
-Ultra additionally request a 2048 or 4096 pixel directional R32F shadow map
-with 3x3 PCF. HDR and shadow render targets check bgfx format/size support and
-fall back without failing engine startup. Latest-frame stats distinguish the
-requested preset from enhanced lighting, postprocessing, FXAA and shadows that
-actually became active.
-
-Extended native materials and typed `MeshRenderer` wrappers with validated
-metallic, roughness, emission, cast-shadow and receive-shadow controls. Shadow
-casters are instanced by mesh where possible; the main pass keeps the existing
-material/texture batching and culling rules. Resize recreates the window-sized
-HDR target, and all new framebuffers, textures, uniforms and programs follow
-the existing renderer lifetime. Added adjacent shader sources plus reviewed
-D3D11 headers generated by the pinned bgfx shader compiler. Documented the
-deliberately limited direct-light approximation and single directional shadow
-volume in ADR-0045, API, architecture and known-issues docs.
-
-Failures found and corrected:
-
-- The first shader compilation attempted to read interpolated varyings from a
-  helper function. `shaderc` rejected the fragment sources; passing the world
-  normal and position into that helper explicitly fixed all 11 D3D11 shader
-  compilations.
-- Generated shader header comments contained trailing whitespace. A mechanical
-  cleanup restored a clean `git diff --check` without changing shader bytes.
-
-Exact verification evidence:
-
-```text
-cmake --build --preset windows-debug
-# exit code 0
+# initial exit 0; after test-isolation fix, final exit 0;
+# 100% tests passed, 0 failed out of 14; 0.42 s
 
 ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 2.05 sec
+# initial exit 1: the air-strafe regression left 3 m/s velocity active long
+# enough to leave the finite test floor; the test now resets its character
+# before later checks. Final exit 0; 100% passed, 0 failed out of 14; 0.76 s
 
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Successfully built easy3d
-Successfully installed easy3d-0.1.0
-# wheel sha256 67e2b3f678dc266bfd64cf7d9f1cd64c3aa984ca4eb384e44d6608f463e1b884
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && .venv\Scripts\python.exe -m pip install --no-deps -e .'
+# exit 0; editable rix-0.1.0 cp311 win_amd64 wheel built and installed
 
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 35%]
-........................................................................ [ 71%]
-...........................................................              [100%]
-203 passed in 30.19s
+.venv\Scripts\python.exe -m pytest tests\python -q
+# exit 0; 200 passed in 19.84 s
 
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 2.23 sec
+.venv\Scripts\python.exe -m pytest tests\python\test_character_controller.py -q
+# exit 0; 9 passed in 0.21 s
 
-cmake --build build\windows-headless --config Release --parallel 4
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 2.20 sec
+.venv\Scripts\python.exe -m mypy
+# exit 0; Success: no issues found in 2 source files
 
-build\venv311\Scripts\python.exe tests\manual\renderer_optimization.py --seconds 2
-Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
-renderer_optimization: PASS frames=1377 stats=RendererStats(draw_calls=2, visible_instances=2, culled_instances=3, instanced_draw_calls=1, enhanced_lighting=True, shadows=False, postprocessing=True, fxaa=True, shadow_resolution=0)
+.venv\Scripts\python.exe -m pip check
+# exit 0; No broken requirements found.
 
-build\venv311\Scripts\python.exe tests\manual\lighting_debug.py --seconds 2 --preset high
-Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=on
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=high
-lighting_debug: PASS frames=1851 debug_lines=4 stats=RendererStats(draw_calls=10, visible_instances=4, culled_instances=0, instanced_draw_calls=0, enhanced_lighting=True, shadows=True, postprocessing=True, fxaa=True, shadow_resolution=2048)
-
-build\venv311\Scripts\python.exe tests\manual\lighting_debug.py --seconds 2 --preset low
-Easy3D graphics: enhanced-lighting=off, postprocessing=fallback-off, fxaa=off, shadows=fallback-off
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=low
-lighting_debug: PASS frames=1686 debug_lines=4 stats=RendererStats(draw_calls=6, visible_instances=4, culled_instances=0, instanced_draw_calls=0, enhanced_lighting=False, shadows=False, postprocessing=False, fxaa=False, shadow_resolution=0)
-
-git diff --check
-# exit code 0; only Git LF-to-CRLF working-copy warnings
+.venv\Scripts\python.exe -c "import rix; print(rix.engine_version()); s=rix.Scene(); p=rix.Player(scene=s, controls=False); print(p.controller.air_acceleration, p.controller.ground_friction, p.controller.air_speed_cap); s.clear()"
+# exit 0; 0.1.0; 8.0 6.0 1.5
 ```
 
-The high-preset diagnostic was also inspected live in a GUI-capable Windows
-session. It visibly showed the floor, red cube, metallic blue sphere highlight,
-green unlit cube, cast floor shadows and debug axes, then exited cleanly. This
-is D3D11 evidence on the recorded NVIDIA adapter only; other backends remain
-unverified. Phase 6.1: **DONE**. Exact next task: Phase 6.2 — basic 2D sprites,
-text, HUD anchoring/layout and clickable overlay buttons.
+The first import smoke attempted `Player(controls=False)` without an active or
+explicit scene and correctly raised the documented `RuntimeError`; rerunning
+with `scene=Scene()` passed. No interactive keyboard/feel validation was run for
+this change, so TF2/HL2-like tuning quality remains **UNVERIFIED** pending a
+desktop playtest.
 
-## 2026-11-01 — Phase 6.2 native HUD and 2D overlays
+## 2026-11-03 — Universal entity motion and facing
 
-Added scene-owned retained UI elements with monotonic IDs, validation, explicit
-lifetime and native traversal. The fourth ordered bgfx view renders alpha-
-blended solid panels, cached PNG/JPEG sprites and text after the 3D and optional
-postprocess passes. A private RGBA8 atlas is baked once from the pinned bgfx
-Roboto Regular data through its bundled stb_truetype implementation. Printable
-ASCII is supported; unsupported Unicode becomes `?` intentionally.
+Implemented zero-initialized native motion state for every entity: world-space
+linear velocity/acceleration and degree-based angular velocity/acceleration.
+Ordinary entities use semi-implicit Euler on the fixed clock with normalized
+world-axis quaternion deltas and parent-local reconstruction. Dynamic and
+kinematic bodies delegate actual velocity to Jolt; character controllers accept
+external linear motion/acceleration and upright yaw. Physics attachment,
+removal, teleport, disable/enable, and entity-slot reuse preserve or clear state
+according to the documented policy.
 
-Added typed `scene.hud` factories for `Panel`, `Sprite`, `Text`, and `Button`,
-nine resize-aware anchor/pivot choices, explicit z-order, mutable retained
-properties, removal/clear invalidation, and horizontal/vertical `Stack` layout.
-Text remeasures when its content or font size changes. Buttons maintain normal,
-hover and pressed colors; the topmost enabled visible hit receives one callback
-on each left-button press edge. Dispatch occurs inside the existing gameplay-
-thread mutation boundary before scheduler phases. SDL logical pointer position
-and delta now scale to framebuffer pixels, matching both native UI rendering
-and the engine's atomic resized viewport extent on high-DPI windows.
+The typed Python surface adds live motion vectors, `speed`, facing axes,
+movement direction, direction conversion, `face_direction()`, `launch()`, and
+`teleport(..., reset_motion=...)`. `Player` adds view axes and now separates
+character tuning as `move_speed`/`move_acceleration`; legacy scalar keywords
+raise migration guidance. All concrete entity constructors accept motion.
 
-Added the public `examples/09_hud` scene with a 3D background, translucent
-panel, text, PNG sprite, button stack, status mutation and clean close callback.
-Renderer stats now include submitted UI element and UI draw counts. ADR-0046,
-API/architecture/known-limit docs and third-party notices record the retained-
-native/Python-callback split and the Roboto/stb licenses.
+Exact validation commands from `C:\Users\Ryan\Desktop\code\Easy3D`:
 
-Failures and corrections:
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && cmake --build --preset windows-debug && ctest --preset windows-debug --output-on-failure'
+# exit 0; final rerun: 100% tests passed, 0 failed out of 14; 1.19 s
 
-- No native or Python regression failed during implementation. The first UI
-  automation screenshot captured the previously active Chrome window because
-  the Easy3D window had not been raised. Selecting the exact window ID and
-  invoking its exposed `Raise` action produced the correct live capture; no
-  application code changed for that tooling issue.
-- The first generated-header hygiene check could not cover the two new headers
-  while they were untracked. The same mechanical trailing-whitespace cleanup
-  used for the other shader headers was applied before the final staged
-  `git diff --check`.
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && cmake --preset windows-release && cmake --build --preset windows-release && ctest --preset windows-release --output-on-failure'
+# exit 0; final rerun: 100% tests passed, 0 failed out of 14; 0.83 s
 
-Exact verification evidence:
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && .venv\Scripts\python.exe -m pip install -e ".[dev]" --config-settings=build-dir=build/scikit-build-msvc/{wheel_tag}'
+# exit 0; editable wheel 3,303,658 bytes; SHA-256
+# f603ed1e053add2ae4f116b1a64ae7d3e759f1122986abfc080a255a2b231455
 
-```text
-build\windows-debug\_deps\bgfx_cmake-build\cmake\bgfx\Debug\shaderc.exe ... vs_ui.sc ... --type vertex --platform windows -p s_5_0 --bin2c vs_ui_dxbc
-# exit code 0; DXBC vertex inputs POSITION/COLOR0/TEXCOORD0 reported
+.venv\Scripts\python.exe -m pytest tests/python -q
+# exit 0; final rerun: 199 passed in 15.26 s
 
-build\windows-debug\_deps\bgfx_cmake-build\cmake\bgfx\Debug\shaderc.exe ... fs_ui.sc ... --type fragment --platform windows -p s_5_0 --bin2c fs_ui_dxbc
-# exit code 0; s_texColor sampler reported
+.venv\Scripts\python.exe -m pytest tests/python/test_entity_motion.py -q
+# exit 0; final post-install rerun: 11 passed in 0.22 s
 
-build\venv311\Scripts\python.exe -m pytest tests/python/test_ui.py tests/python/test_game.py tests/python/test_scene.py -q
-.........................                                                [100%]
-25 passed in 0.19s
+.venv\Scripts\python.exe -m mypy
+# exit 0; Success: no issues found in 2 source files
 
-cmake --build --preset windows-debug --parallel 4
+.venv\Scripts\python.exe -m pip check
+# exit 0; No broken requirements found.
+
+.venv\Scripts\python.exe -c "import rix; print(rix.engine_version()); assert rix.engine_version() == rix.__version__; print('motion import smoke passed')"
+# exit 0; 0.1.0; motion import smoke passed
+
+.venv\Scripts\python.exe -c "import runpy; from rix import Game; original=Game.run; Game.run=lambda self: (self.after(2.0, self.stop), original(self))[1]; runpy.run_path(r'examples\beginner\13_projectile_motion.py', run_name='__main__'); print('projectile timed shutdown passed')"
+# exit 0; Direct3D 11, NVIDIA 0x10de/0x2482, medium preset;
+# projectile timed shutdown passed
+
+git diff --check
+# exit 0; only Git line-ending conversion warnings
+```
+
+Interactive Windows inspection opened `examples\beginner\13_projectile_motion.py`
+in a native D3D11 window and visibly confirmed the floor/obstacle scene,
+continuous ordinary-entity motion, and multiple yellow physical projectiles
+moving and colliding after camera-aimed input. A timed second run exercised
+normal `Game.stop()` and renderer/audio teardown with exit 0. Desktop-control
+resize/Close clicks were rejected as concurrent user input while the player
+owned pointer capture, so this checkpoint does not claim a new resize result;
+resizing remains covered by earlier interactive engine validation. The first
+inspection process was stopped after the helper conflict, while the timed
+validation process exited cleanly on its own.
+
+Two toolchain attempts failed before the supported path passed: building the
+preset outside a developer prompt could not find C++ standard headers, and the
+Community prompt did not expose `cl`, causing scikit-build to select MinGW and
+fail. The installed Build Tools prompt plus a separate MSVC build directory
+resolved both without changing global configuration. An initial native freeze
+regression exposed and fixed a snapshot-order bug (pause was set before reading
+velocity). The earlier five primitive/collider Python failures were separate
+dirty-tree regressions; restoring non-physics primitive defaults to
+`collider=False` resolved them, and the complete suite now has no failures.
+
+## 2026-11-03 — Linear-light rendering correction
+
+Corrected a renderer color-space error that sent display-authored material,
+light, and procedural-sky colors directly into the linear HDR target. The
+renderer now converts those values from sRGB at the HDR boundary while leaving
+the direct-to-backbuffer fallback unchanged. Solid and textured shaders also
+gate specular response on positive `N dot L`, preventing highlights from a
+light behind a surface. The D3D11 shader headers were regenerated with the
+pinned local bgfx `shaderc`.
+
+Exact validation commands from `C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset windows-debug --parallel'
+# exit 0; native engine, bindings, and tests linked
+
 ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.70 sec
+# 100% tests passed, 0 failed out of 14; 0.40 s
 
-cmake --build --preset windows-release --parallel 4
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset windows-release --parallel'
+# exit 0; native engine, bindings, and tests linked
+
 ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 1.75 sec
+# 100% tests passed, 0 failed out of 14; 0.92 s
 
-cmake --build build\windows-headless --config Release --parallel 4
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 16
-Total Test time (real) = 1.72 sec
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && .venv\Scripts\python.exe -m pip install --no-deps -e .'
+# exit 0; editable rix-0.1.0 wheel built and installed
 
-build\venv311\Scripts\python.exe -m pip install -e '.[dev]'
-Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4058088 sha256=3c630161b535b65f04c432794190238a83ca0258505d8428811882790b90bc6e
-Successfully installed easy3d-0.1.0
+.venv\Scripts\python.exe -m pytest -q
+# 183 passed, 5 failed in 15.38 s. The failures are pre-existing dirty-tree
+# primitive/physics regressions: automatic colliders on parented/visual cubes
+# and a duplicate obstacle-course finish collider; none exercise rendering.
 
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 34%]
-........................................................................ [ 69%]
-...............................................................          [100%]
-207 passed in 31.03s
+.venv\Scripts\python.exe -m pytest tests\python\test_lighting_debug.py -q
+# 3 passed in 0.10 s
 
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
+.venv\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
 
-build\venv311\Scripts\python.exe examples\09_hud\main.py --seconds 2
-Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
-hud_example: PASS frames=258 ui_elements=6 ui_draw_calls=8
-```
+.venv\Scripts\python.exe examples\beginner\02_spinning_cube.py
+# Direct3D 11, NVIDIA 0x10de/0x2482, medium preset; interactively inspected
+# the rotating cube and confirmed distinct dark and directly lit side faces;
+# closed cleanly through the native window controls.
 
-The same example was inspected interactively on the GUI-capable Windows host.
-The native capture visibly showed the postprocessed cube/plane behind crisp
-Roboto labels, translucent panel, sprite and two buttons. Maximizing preserved
-top-left, top-right and bottom-center anchors. The status button updated its
-label, and a real click on the maximized Close button stopped the loop cleanly
-at 8020 frames with six UI elements/eight UI draws. This is D3D11 evidence on
-the recorded NVIDIA adapter only. Phase 6.2: **DONE**. Exact next task: Phase
-6.3 — lightweight playback and positional audio backend selected through an
-ADR.
+.venv\Scripts\python.exe examples\15_lighting_sky\main.py --sky procedural --seconds 3
+# exit 0; PASS frames=430 lights=1/3/1 culled=0 shadow_passes=8
 
-## 2026-11-01 — Phase 6.3 native WAV playback and positional audio
-
-Added a platform-neutral, thread-safe native audio system with bounded decoded
-sounds/voices, PCM16-to-float conversion, linear sample-rate conversion,
-concurrent stereo mixing, hard clipping, reusable one-shot voice retirement,
-looping and live gain/position controls. Optional spatial voices use linear
-minimum/maximum-distance attenuation and equal-power panning against the active
-scene camera's normalized right vector. The graphics-disabled build retains and
-tests this mixer without SDL or a playback device.
-
-The Windows adapter now initializes SDL3 audio as optional, opens the default
-playback stream at 48 kHz stereo float, services it only from the native SDL
-callback and shuts it down before SDL. Device failure logs and leaves
-`game.audio.available` false without preventing window creation. No exception
-may cross the C callback boundary. Python exposes typed `Audio`, immutable
-`Sound`, and controllable `AudioSource` values. The bounded importer accepts
-cached, whole-file, uncompressed PCM16 mono/stereo WAV only. Added the moving
-two-tone `examples/10_audio` D3D11 scene and ADR-0047; SDL3 was already pinned,
-so no new third-party component was introduced.
-
-Failures and corrections:
-
-- The first Debug build failed because `window_win32.cpp` dereferenced the
-  forward-declared `Scene` while copying its camera into the listener. Adding
-  the concrete `easy3d/scene.hpp` include fixed the compile error; the rebuilt
-  target and suite passed.
-- Review found that retaining completed voice records would eventually consume
-  the 1,024-entry table despite zero active playback. Completed/stopped voices
-  are now erased, `stop()` is idempotent, and a native test successfully plays
-  and retires 1,100 sequential instances.
-- Review also wrapped all audio callback work so allocation or other C++
-  exceptions cannot unwind through SDL's C ABI.
-
-Exact verification evidence:
-
-```text
-cmake --preset windows-debug
-cmake --build --preset windows-debug
-# first attempt: FAILED at window_win32.cpp:313/314 and :452/453,
-# "use of undefined type 'easy3d::Scene'"; corrected as described above
-
-cmake --build --preset windows-debug
-# exit code 0; easy3d_core and easy3d_audio_tests linked
-ctest --preset windows-debug
-100% tests passed, 0 tests failed out of 18
-Total Test time (real) = 1.78 sec
-
-cmake --build --preset windows-release --parallel 4
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 18
-Total Test time (real) = 2.19 sec
-
-cmake --build build\windows-headless --config Release --parallel 4
-ctest --test-dir build\windows-headless -C Release --output-on-failure
-100% tests passed, 0 tests failed out of 17
-Total Test time (real) = 3.71 sec
-
-# Final callback-boundary and 1,100-replay test after the full runs:
-cmake --build --preset windows-debug --target easy3d_audio_tests
-ctest --preset windows-debug -R easy3d.audio --output-on-failure
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 0.23 sec
-
-cmake --build --preset windows-release --target easy3d_audio_tests
-ctest --preset windows-release -R easy3d.audio --output-on-failure
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 0.20 sec
-
-cmake --build build\windows-headless --config Release --target easy3d_audio_tests
-ctest --test-dir build\windows-headless -C Release -R easy3d.audio --output-on-failure
-100% tests passed, 0 tests failed out of 1
-Total Test time (real) = 0.17 sec
-
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4069098 sha256=0eb6dd959063cca9e2870c10de55e13425ea82654965b51ca0f82df242d06182
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version()); print(easy3d.Audio, easy3d.Sound, easy3d.AudioSource)"
-0.1.0
-<class 'easy3d.audio.Audio'> <class 'easy3d.audio.Sound'> <class 'easy3d.audio.AudioSource'>
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_audio.py -q
-...                                                                      [100%]
-3 passed in 0.36s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 34%]
-........................................................................ [ 68%]
-..................................................................       [100%]
-210 passed in 53.41s
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples benchmarks
-# exit code 0, no output
-
-build\venv311\Scripts\python.exe examples\10_audio\main.py --seconds 2
-Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
-audio_example: PASS frames=179 sounds=2 backend=SDL3
-Easy3D audio: SDL3 default playback, 48000 Hz stereo float
-```
-
-The timed example ran on the GUI-capable Windows/D3D11 host and proves that SDL3
-opened the default playback device while two looping spatial
-voices moved across the camera listener, then destroyed the stream and window
-cleanly. Automated native tests verify the produced sample values. The agent
-cannot hear the endpoint, so perceptual audibility/quality remains explicitly
-**UNVERIFIED** pending a human headphone/speaker run. Phase 6.3: **DONE**. Exact
-next task: Phase 6.4 — define the import contract, then add glTF/GLB geometry,
-skeletons and animation clips without weakening the existing OBJ path.
-
-## 2026-11-01 — Phase 6.4 glTF/GLB import (in progress)
-
-Approach: pin header-only cgltf v1.15, keep it private to the native asset
-layer, and extend the existing immutable `ModelData` rather than adding a
-parallel renderer resource graph. Import triangle primitives from `.gltf` and
-`.glb`, bake default-scene node transforms for static/base-pose rendering,
-preserve bounded skeleton joints/inverse-bind matrices, and import LINEAR/STEP
-translation/rotation/scale channels as clips with deterministic pose sampling.
-The typed Python surface will expose model/skeleton/clip metadata and sampling;
-`Model(path)` will render the imported base pose through the existing native
-mesh/material lifetime. Embedded material images and runtime skinned-mesh
-deformation are explicit first-contract boundaries, not silent claims.
-
-Affected areas: CMake/dependency notices, native assets/model cache, bindings,
-typed Python assets, renderer material mapping, generated glTF/GLB tests, one
-example, ADR/API/limitations docs. Principal risks are hostile accessor bounds,
-node/normal transforms, joint hierarchy mapping, quaternion interpolation,
-GLB alignment, external-resource diagnostics and preserving every OBJ test.
-Planned verification: Debug/Release/headless CTest, focused asset/primitive
-pytest, full pytest, editable wheel/import, timed D3D11 base-pose example and
-malformed/missing-resource tests.
-
-Completed the bounded import contract with private cgltf commit
-`bbeb5b0b070ddacddac6852fb72143eb68454937`. The native loader accepts `.gltf`
-and `.glb`, validates required extensions/accessors/default scene, bounds both
-declared and actual external buffers, bakes node transforms and inverse-
-transpose normals, generates missing normals, maps authored material factors,
-and routes external base-color images through the existing cache. `ModelCache`,
-`Model`, and triangle-mesh colliders now share OBJ/glTF/GLB assets. One bounded
-skin and LINEAR/STEP TRS clips are retained as Easy3D-owned data with native
-sampling; Python exposes typed copied metadata and local-pose sampling. ADR-0048
-and the API/architecture/limitations documents state that rendering is static
-base pose and does not claim GPU skinning, morphs or embedded-image rendering.
-
-Failures and corrections:
-
-- An ordinary PowerShell editable install selected MinGW from global `PATH` and
-  protobuf 29.3 failed at `generated_message_tctable_lite.cc` with `cannot
-  tail-call: callee required more stack slots than the caller`. The failed tree
-  is preserved at
-  `build/scikit-build/cp311-cp311-win_amd64-mingw-failed-20261101211502`.
-  Re-running from the supported Visual Studio x64 developer environment selected
-  MSVC and succeeded; README/known issues now make this prerequisite explicit.
-- The first Release rebuild inherited a cross-compiler-invalidated cache and
-  regenerated with `EASY3D_BUILD_PYTHON` unset, causing `find_package(pybind11)`
-  to fail. Explicitly reapplying `cmake --preset windows-release` restored the
-  declared `EASY3D_BUILD_PYTHON=OFF` configuration; the clean build and tests
-  then passed.
-- The first example run used an empty HUD label, which the validated UI API
-  correctly rejected. Initializing it with `glTF base pose` fixed the example
-  without weakening HUD validation.
-
-Exact final verification evidence:
-
-```text
-cmake --build build/windows-debug --config Debug --parallel 4
-# exit code 0; easy3d_core and easy3d_gltf_tests linked
-ctest --test-dir build/windows-debug -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 19
-Total Test time (real) = 4.17 sec
-
-cmake --preset windows-release
-cmake --build --preset windows-release --parallel 12
-ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 19
-Total Test time (real) = 4.34 sec
-
-cmake --build build/windows-headless --config Debug --parallel 12
-ctest --test-dir build/windows-headless -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 18
-Total Test time (real) = 2.57 sec
-
-# From the Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4123832
-sha256=f15f2f6f92e2634a3a6383b509224052e0609b8965b6073ed080083c52d8dff0
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; print(easy3d.engine_version())"
-0.1.0
-
-build\venv311\Scripts\python.exe -m pytest tests/python/test_gltf.py tests/python/test_models.py tests/python/test_primitives.py -q
-.........                                                                [100%]
-9 passed in 0.47s
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 33%]
-........................................................................ [ 67%]
-....................................................................     [100%]
-212 passed in 31.85s
-
-build\venv311\Scripts\python.exe examples/11_gltf/main.py --seconds 3
-Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
-gltf_example: PASS frames=396 triangles=1 joints=2 clips=1
-Easy3D audio: SDL3 default playback, 48000 Hz stereo float
-
-build\venv311\Scripts\python.exe -m compileall -q python examples/11_gltf tests/python/test_gltf.py
-# exit code 0, no output
 git diff --check
-# exit code 0; only Git LF-to-CRLF working-copy notices
+# exit 0; only Git line-ending conversion warnings
 ```
 
-The timed run proves D3D11 creation, native base-pose submission, clip sampling,
-audio/window lifecycle and clean exit on this GUI-capable Windows/NVIDIA host.
-No screenshot or human visual inspection was completed, so appearance and
-animation deformation remain explicitly **UNVERIFIED**; deformation is not an
-implemented feature. Phase 6.4: **DONE**. Exact next task: Phase 6.5 — improve
-asset diagnostics/debug overlays and enforce documented public typing coverage.
+## 2026-11-03 — Advanced lighting, local shadows, and skyboxes
 
-## 2026-11-01 — Phase 6.5 diagnostics, documentation and executable typing contract
+Implemented scene-owned procedural, exact-2:1 panoramic, and six-face cubemap
+skies with a `Game.skybox` proxy, live rotation/brightness, bounded exclusive
+missing-PNG generation, replacement/disable cleanup, and a fullscreen native
+sky pass that ignores camera translation and shares the post-processing target.
+Generated cubemap faces now evaluate one direction-derived gradient so their
+shared edges match; existing authored files are never rewritten.
 
-Added frozen `AssetDiagnostic` reports and `diagnose_asset()` for the production
-PNG/JPEG, OBJ, glTF and GLB paths. Success reports retain resolved paths,
-dimensions/counts and importer warnings; content/path failures retain the exact
-native exception type and complete message without forcing tools to parse
-console output. Unknown formats produce a structured failure while non-path
-arguments remain programming errors. Validation deliberately uses the real
-synchronous loader rather than a weaker parallel parser.
+Ambient, multiple directional, point, and spot lights now use common bounded
+D3D11 shader arrays across solid, textured, imported-model, instanced,
+normal/PBR-map, emissive, and two-sided paths. Point volumes and rotated spot
+cone bounds are culled natively, then admitted by deterministic
+shadow/relevance/handle priority under preset limits. High/Ultra support one
+selected directional map, one spot map, and one six-face point cubemap per
+frame, with live per-light resolution/bias and active/culled/pass/dropped/memory
+telemetry. Point radial depth uses a white-cleared R32F cubemap with minimum
+blending, avoiding an invalid mixed cubemap/2D framebuffer on D3D11.
 
-Added `DebugOverlay`, a normal scheduler-owned entity backed by one native HUD
-panel and label. At a bounded interval it presents smoothed callback FPS, last
-frame time, entity/fixed-tick/draw/instance/culling/UI counts, maximum script
-callback, scheduler overruns/dropped time and the graphics features actually
-active on the adapter. It adds no thread, renderer handle or hidden mutation
-path and supports explicit show/hide. `examples/12_diagnostics/main.py` is an
-annotated finite demonstration of both successful/failing asset reports and the
-live overlay. README, API contract, architecture, limitations and ADR-0049 now
-document the complete contract and its snapshot/synchronous boundaries.
+Added `examples/15_lighting_sky` with procedural/panorama/cubemap modes, two
+beginner examples, eight tutorial sections, `benchmarks/lighting.py`, expanded
+native/Python tests, a GPU sky-lifetime probe, public `LightKind`, and synced
+feature/API/architecture/decision/known-issue/changelog documentation.
 
-Pinned mypy 1.18.2 in the developer extra, retained the `py.typed` marker, added
-a strict representative public-API consumer fixture and made the default pytest
-suite execute both mypy and stubtest. Stubtest initially found ten real missing
-`_NativeScene` declarations for character-controller/constraint methods plus
-the native enum metadata; all were added precisely. The remaining allowlist is
-limited to pybind11's implementation metaclass and its generic runtime signature
-for two values intentionally non-constructible in typed Python.
+Exact final commands from `C:\Users\Ryan\Desktop\code\Easy3D`:
 
-Failures and corrections:
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset windows-debug --parallel'
+# exit 0; rix_core and all Debug native targets linked
 
-- The first strict implementation check inferred `model` as `ModelInfo` in one
-  branch and rejected later `GltfInfo` assignment/fields. Declaring the intended
-  union and retaining a narrowed `gltf` value fixed all three errors.
-- The first stubtest without `--ignore-missing-stub` reported the ten native
-  methods and five enum members missing from `_easy3d.pyi`. Adding their real
-  signatures made full runtime/stub parity pass; no missing API was allowlisted.
+ctest --preset windows-debug --output-on-failure
+# 100% tests passed, 0 failed out of 14; 1.27 s
 
-Exact verification evidence:
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset windows-release --parallel'
+# exit 0; rix_core and all Release native targets linked
 
-```text
-# Visual Studio x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e ".[dev]"
-Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4124620
-sha256=41586a125a9a00e0b93b967fef189f9cd937409df0c415c238e419a17ac32aa6
-Successfully installed easy3d-0.1.0
+ctest --preset windows-release --output-on-failure
+# 100% tests passed, 0 failed out of 14; 1.14 s
 
-build\venv311\Scripts\python.exe -m pytest tests/python/test_diagnostics.py tests/python/test_typing.py -q
-....                                                                     [100%]
-4 passed in 5.56s
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && .venv\Scripts\python.exe -m pip install -e .[dev]'
+# exit 0; editable wheel 3,291,768 bytes
+# SHA-256 d51abc2b594810ae71c7feb703aa01ba659bf3d07f25e095e454a6c2530ebd74
+
+.venv\Scripts\python.exe -m pytest -q
+# 188 passed in 11.84s
+
+.venv\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m compileall -q python examples benchmarks
+# exit 0, no output
+
+.venv\Scripts\python.exe -m pip check
+# No broken requirements found.
+
+.venv\Scripts\python.exe -c "import rix; print(rix.engine_version()); print(rix.LightKind)"
+# 0.1.0
+# typing.Literal['ambient', 'directional', 'point', 'spot']
+
+.venv\Scripts\python.exe examples\15_lighting_sky\main.py --sky procedural --seconds 3
+# Direct3D 11, NVIDIA 0x10de/0x2482, high preset
+# PASS frames=388 lights=1/3/1 culled=0 shadow_passes=8 shadow_bytes=48234496
+
+.venv\Scripts\python.exe examples\15_lighting_sky\main.py --sky panorama --seconds 2
+# exit 0; PASS frames=8 lights=1/3/1 culled=0 shadow_passes=8
+
+.venv\Scripts\python.exe examples\15_lighting_sky\main.py --sky cubemap --seconds 2
+# exit 0; PASS frames=54 lights=1/3/1 culled=0 shadow_passes=8
+
+.venv\Scripts\python.exe tests\manual\skybox_gpu_lifetime.py
+# PASS baseline=3/1398108 panorama=4/12582920 cubemap=4/7689564 released=3/1398108
+
+.venv\Scripts\python.exe benchmarks\lighting.py --directional-lights 4 --point-lights 64 --spot-lights 32 --seconds 5 --preset ultra
+# 2,938 frames/5.089 s = 577.28 FPS; active=4/64/32; 6 draws;
+# 2 instanced draws; CPU=0.0368 ms; GPU=0.50176 ms
+
+.venv\Scripts\python.exe benchmarks\lighting.py --directional-lights 6 --point-lights 70 --spot-lights 36 --seconds 2 --preset ultra
+# 974 frames/2.098 s = 464.28 FPS; active=4/64/32; culled=12
+
+.venv\Scripts\python.exe benchmarks\render_cubes.py --count 2000 --seconds 5
+# 4,142 frames/5.114 s = 809.89 FPS; median/p95/p99=0.7698/2.057/3.0745 ms;
+# 3 draws, 1 instanced scene draw, active lights=1/0/0
+
+git diff --check
+# exit 0; only line-ending conversion warnings, no whitespace errors
+```
+
+Interactive capture used the actual resizable SDL3/bgfx D3D11 window on the
+NVIDIA device above. Procedural, generated panorama, and generated cubemap
+modes were each visibly inspected. Captures showed the sky behind geometry,
+red/green/blue point contributions on the same cube field, sun and spotlight
+illumination, and cast shadows. Maximizing the procedural demo redrew the scene
+at the new viewport size. The panorama and cubemap starter gradients rendered
+with correct vertical orientation; the cubemap showed no visible generated-face
+color discontinuity. Closing each window exited cleanly. This validates the
+recorded machine only; other D3D11 hardware remains independently UNVERIFIED.
+
+Failures found and corrected during completion:
+
+- A plain `cmake --build --preset windows-debug` outside the MSVC developer
+  environment failed with `fatal error C1083: Cannot open include file:
+  'cstddef'`; invoking the pinned build through `VsDevCmd.bat` fixed the
+  environment without a source workaround.
+- The first point-shadow target paired each cubemap face with an independent
+  2D depth texture; D3D11 rejected face 0 and the demo reported only two shadow
+  passes. The final R32F minimum-blend design ran with all eight expected passes
+  and 48,234,496 shadow bytes.
+- The first GPU lifetime probe failed with `RuntimeError: Game has no active
+  scene`; the probe now explicitly loads its test scene and passes.
+- The first new malformed-cubemap assertion expected different wording
+  (`same square dimensions` versus `cubemap skybox faces must use one size`).
+  Matching the stable native message produced `4 passed` in the focused file.
+- An exploratory full-package `python -m mypy.stubtest rix` remains blocked
+  by broad pre-existing source-check errors outside the configured strict mypy
+  surface (for example legacy variable-length tuple annotations and older
+  physics stub signatures). The configured public-consumer mypy gate passes;
+  the stubtest debt was not hidden with a blanket allowlist.
+
+No Forward+/clustered path was added: measured fixed-budget forward evaluation
+meets the current 100-light design target while retaining ordinary 2,000-cube
+throughput near the approximately 800 FPS immediate baseline. Additional
+D3D11 GPUs, non-D3D11 renderers, reflection/irradiance lighting, cascaded sun
+shadows, soft point-shadow filtering, and the minimum Visual Studio 2022
+toolchain remain outside this validation.
+
+## 2026-11-03 — Double-sided rendering and face culling
+
+Implemented one retained culling policy across primitives, imported models,
+runtime entity/component properties, ordinary and instanced scene submission,
+and shadow submission. The public `CullMode` literal accepts `"back"`,
+`"front"`, or `"none"`; `double_sided=True` is the beginner shorthand for no
+culling. Conflicting explicit values fail at construction. glTF material
+`doubleSided` metadata is retained with explicit override, imported metadata,
+then back-cull precedence. OBJ falls back to back culling.
+
+The renderer verified RIX's CCW front winding and maps it to bgfx D3D11
+state, swaps front/back for negative-determinant transforms, and includes cull
+mode in material and shadow batch compatibility. Both lit fragment paths use
+front-facing fragment state to reverse the complete back-face shading normal;
+the textured path does this after tangent-space normal reconstruction. No
+shader permutation or duplicate geometry was added, and physics/colliders/
+raycasts remain unchanged.
+
+Added `examples/beginner/10_inside_a_cube.py`, the multi-view
+`examples/14_face_culling`, `tests/manual/face_culling_gpu.py`, Python contract
+tests, native render/import tests, strict consumer typing, and synchronized
+feature/API/architecture/decision/known-issue documentation.
+
+Exact final commands from `C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset windows-release'
+# exit 0; Release native targets linked successfully
+
+ctest --preset windows-debug --output-on-failure
+# 100% tests passed, 0 failed out of 14; 0.53 s
+
+ctest --preset windows-release --output-on-failure
+# 100% tests passed, 0 failed out of 14; 1.13 s
+
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && .venv\Scripts\python.exe -m pip install -e .[dev]'
+# exit 0; editable wheel 3,265,988 bytes
+# SHA-256 fa4cc0afbabd1ba8695593fadd7756639c220291293b3727fd3e9d75d612ed80
+
+.venv\Scripts\python.exe -c "import rix; print(rix.engine_version()); print(rix.CullMode)"
+# 0.1.0
+# typing.Literal['back', 'front', 'none']
+
+.venv\Scripts\python.exe -m pytest -q
+# 183 passed in 9.44 s
+
+.venv\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m pip check
+# No broken requirements found.
+
+.venv\Scripts\python.exe -m compileall -q python examples benchmarks
+# exit 0, no output
+
+.venv\Scripts\python.exe tests\manual\face_culling_gpu.py
+# Direct3D 11, vendor=0x10de, device=0x2482, preset=low
+# face_culling_gpu: PASS separated=2/1 merged=1/1
+```
+
+The first full Python run exposed nine existing convenience regressions after
+the current branch had made primitive/model colliders implicit. The failures
+included parented visuals gaining unsupported physics bodies, a duplicate
+finish trigger, and the default `Model(..., collider=True)` being invalid.
+Restoring the documented opt-in collider defaults reduced the run to one new
+test error; that test was corrected to request the collider whose invariance it
+checks. The final unfiltered run then passed all 183 tests. An initial Release
+command also failed before execution because PowerShell parsed `(x86)` from an
+incorrectly quoted command; using the established single-quoted `cmd.exe`
+payload fixed the invocation without changing the build.
+
+Interactive Windows validation used the actual D3D11 renderer on the NVIDIA
+device above. `examples/14_face_culling` was inspected in all three views:
+the outside view showed the normal back-culled cube, a cut-open front-culled
+orange shell, a two-sided room, floor, and shadows; `inside-double` showed the
+lit normal-mapped interior; and `inside-front` showed the inward-only interior.
+The final outside capture also exercised explicit roughness/metallic factors on
+the normal-mapped room and an unlit two-sided plane.
+Bounded runs exited cleanly with 10–13 draw calls and approximately 5.55 ms
+reported GPU frame time. The manual batching probe separately proved unlike
+states split into two draws/one instanced draw and a runtime change to matching
+state merged them into one draw/one instanced draw. Additional D3D11 hardware
+validation remains unverified.
+
+## 2026-11-03 — AutoTexture and advanced materials
+
+Implemented filename-only missing PNG generation, deterministic tile/sphere/
+cube-cross mappings, 16 px/unit global and per-object density, authored OBJ/glTF
+UV preservation/templates, tangent generation with mirrored handedness, native
+normal/roughness/metallic/emissive/AO sampling, sRGB/data separation, mipmaps,
+shared hot reload, runtime primitive material mutation, renderer telemetry, and
+`examples/13_autotexture`.
+
+The completion audit added stable atlas reference dimensions: cube-cross regions
+now retain the world proportions used to generate/attach the PNG while tile and
+sphere modes continue following live composed scale. Parent/nonuniform runtime
+scaling and normalized atlas-conflict regressions cover that distinction. The
+same audit made discovered roughness/metallic/emissive maps use neutral scalar
+factors, released expired shared GPU handles plus scene CPU caches, strengthened
+all-six-face and sphere-seam numeric assertions, and removed a callback-adapter
+ownership cycle that could defer default-scene cleanup until cyclic GC. It also
+validates retained sidecars before regenerating a deleted base/normal PNG pair,
+refreshes only RIX-owned metadata, and corrects tangent handedness under
+mirrored model transforms in both textured vertex shaders.
+
+The first native link failed with unresolved `bimg::imageGenerateMips`; adding
+the already-fetched private `bimg_encode` target fixed the real dependency. A
+first mirrored-UV assertion assumed a fixed negative sign; it was corrected to
+test the invariant that mirroring flips handedness. A first filesystem cache
+optimization delayed newly created companion discovery; the new test caught it,
+and directory/metadata change stamps replaced the time-only cache.
+
+Exact final commands from `C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset windows-debug && cmake --build --preset windows-release'
+# exit 0; final mirrored-transform shader rebuild linked both configurations
+
+ctest --preset windows-debug --output-on-failure
+# 100% tests passed, 0 failed out of 14; 1.05 s
+
+ctest --preset windows-release --output-on-failure
+# 100% tests passed, 0 failed out of 14; 0.83 s
+
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && .venv\Scripts\python.exe -m pip install --no-deps -e .'
+# exit 0; editable wheel 3,263,362 bytes; SHA-256 ce84ba09b86a51bc3f23a92b46330dbe59ad4723d36d760bd83671d4d091b7ae
+
+.venv\Scripts\python.exe -m pytest -q
+# 176 passed in 5.18 s
+
+.venv\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m mypy python/rix/autotexture.py
+# Success: no issues found in 1 source file
+
+.venv\Scripts\python.exe -m pip check
+# No broken requirements found.
+
+.venv\Scripts\python.exe -m compileall -q python examples benchmarks
+# exit 0, no output
+
+.venv\Scripts\python.exe benchmarks\autotexture.py --objects 2000 --cache-loads 10000
+# generation 6.537 ms; construction 900.284 ms (450.142 us/object)
+# 99.99% cache hit rate; 131.352 us/load; reload 0.892 ms
+
+.venv\Scripts\python.exe tests\manual\autotexture_gpu_lifetime.py
+# PASS baseline=3/1398108 loaded=17/2113524 released=3/1398108
+```
+
+Interactive Windows validation ran
+`.venv\Scripts\python.exe examples\13_autotexture\main.py --seconds 30` on
+D3D11/NVIDIA (`vendor=0x10de`, `device=0x2482`, high preset). Captures visibly
+showed density-scaled cubes, tiled plane, separated six-color atlas, sphere,
+OBJ/glTF geometry, and normal/PBR examples. Replacing one shared PNG while the
+window ran changed all three sharing cubes together without a restart or crash.
+The final-source bounded run exited 0 and reported `frames=786 draw_calls=18
+instanced=1 cpu_ms=0.095 gpu_ms=5.556 textures=20
+texture_bytes=2946376`.
+
+Additional D3D11 devices, minimum Visual Studio 2022, GLB template extraction,
+and per-part runtime material replacement remain unverified/not implemented as
+documented in `docs/known-issues.md`.
+
+Clean wheel builds and isolated wheel tests covered every declared Python ABI:
+
+| Runtime | Isolated result | Wheel SHA-256 |
+| --- | --- | --- |
+| CPython 3.11 | `176 passed in 6.90s` | `addb2ecb4d37149615bf5b3c04a498a9407598528dd8ce5433a539bac5526e5e` |
+| CPython 3.12 | `176 passed in 7.78s` | `3d0c3ec2d0ff6086d3ed6017e394ec43420b285159e5d7882c1268efb64b46ce` |
+| CPython 3.13 | `176 passed in 6.93s` | `776a1257ffeadb04555f1bc249faf533cb6ac37c8bc3b82aee182d4a7f222081` |
+
+The first new CPython 3.11 isolation attempt resolved the editable redirect and
+was rejected as wheel evidence. The first CPython 3.13 attempt used
+`PYTHONNOUSERSITE=1` without an isolated pytest target and failed with `No
+module named pytest`. After adding test tools under `build/wheel-smoke`, a 3.13
+run exposed a real callback-adapter ownership cycle through an intermittently
+retained default scene (`1 failed, 174 passed`). The adapter now owns `Game`
+weakly, and the final runs printed each wheel-local package and `.pyd` path
+before passing. Test isolation explicitly collects intentionally abandoned
+user-created callback cycles instead of depending on interpreter GC timing.
+
+## 2026-11-02 — Interaction and momentum-preserving jump follow-up
+
+Both beginner interaction examples were corrected. `07_simple_interaction.py`
+now performs one raycast, uses a reliably camera-aligned target, destroys only
+that target, and displays success/miss feedback. `07_interactions_and_triggers.py`
+places the purple switch inside its documented interaction radius, binds E,
+shows the control in the HUD, reports out-of-range attempts, and counts uses.
+Direct desktop inspection showed the initial prompt and then
+`Switch used 1 time(s)!` after activation. The user subsequently stopped the
+desktop-control helper with physical Escape, so no further automated window
+input was attempted in that session.
+
+A follow-up found the remaining intermittent failure: `Game.on_input`
+callbacks were sampled only by fixed updates, allowing a press on a 120 Hz
+render frame with no 60 Hz physics tick to disappear. Input callbacks now run
+during variable-rate update. A regression exercises a `1 / 120`-second frame,
+asserts that zero fixed ticks ran, and still observes the interaction exactly
+once. A fresh Windows D3D11 desktop run of
+`examples\beginner\07_interactions_and_triggers.py` displayed
+`Switch used 1 time(s)!` immediately after an injected E press.
+
+This checkpoint originally added assisted held-jump buffering. It was
+subsequently replaced by the edge-triggered, projection-based controller in the
+2026-11-04 entry above; the old behavior is no longer present.
+
+Verification from `C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+# 167 passed in 5.90s
+
+.venv\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m pip check
+# No broken requirements found.
+
+ctest --preset windows-debug --output-on-failure
+# 100% tests passed, 0 failed out of 14; total time 0.39s
+
+ctest --preset windows-release --output-on-failure
+# 100% tests passed, 0 failed out of 14; total time 0.97s
+```
+
+The final clean-wheel matrix also passed:
+
+| Runtime | Test result | Wheel SHA-256 |
+| --- | --- | --- |
+| CPython 3.11.9 | `146 passed in 10.51s` | `6372885ad83c099d1ab9bbbddeec3361ddca4745f046c66e6ad4aa0fe1681f52` |
+| CPython 3.12.10 | `146 passed in 12.10s` | `b844524fce86cd618cefc3425034e2eb3c6dc6b971942e366154f1c7fd01a1ee` |
+| CPython 3.13.2 | `146 passed in 7.82s` | `3a59af0075b6992b22ba5dde468c8580601b54bd643d5f7ae71b3c37953f2727` |
+
+## 2026-11-02 — VS Code editable-install and continuous rotation fix
+
+The user's `.venv` was loading current editable Python files alongside a stale
+9.3 MB native `_rix.pyd` that did not expose `Engine.tick()` or
+`Engine.close()`. The supported MSVC developer-shell reinstall completed with:
+
+```powershell
+.venv\Scripts\python.exe -m pip install --force-reinstall -e '.[dev]'
+# Successfully installed rix-0.1.0 and pinned development dependencies
+```
+
+Post-install introspection reports `Engine.tick True`, `Engine.close True`,
+native version `0.1.0`, and the manual-loop example now launches and closes
+with exit 0.
+
+The spinning example exposed a separate transform defect: repeatedly reading
+Euler angles back from the native quaternion made `cube.ry += 90 * dt` fold at
+the +/-90-degree decomposition singularity. Entity rotations now keep a
+scene-shared authored-Euler hint paired with the native quaternion, invalidate
+it on external native changes, and clean it up with the entity. A regression
+crosses 90 degrees, 360 degrees, and a second wrapper for the same entity.
+
+Verification from the repaired `.venv`:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+# 144 passed in 4.32s
+
+.venv\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
+
+.venv\Scripts\python.exe -m pip check
+# No broken requirements found.
+```
+
+A two-second managed callback probe executed 345 updates and ended at
+`ry=180.237879`, rather than plateauing near 90 degrees. Direct desktop checks
+showed both `02_spinning_cube.py` and `03_manual_loop.py` visibly changing
+orientation between captures and closing cleanly.
+
+## 2026-11-02 — API simplification implementation and verification
+
+Phase 10 now has one persistent native frame step shared by managed `run()` and
+manual `tick()`, beginner movement/query/input/event conveniences, managed
+gameplay and timing helpers, cached one-call audio, validated entity animation,
+curated modules, seven required examples, and a 14-lesson learning path. The
+public contract, type declarations, feature reference, decisions, and known
+limits were updated with the implementation.
+
+Latest automated verification from
+`C:\Users\Ryan\Desktop\code\Easy3D`:
+
+```powershell
+build\venv311\Scripts\python.exe -m pytest -q
+# 143 passed in 5.31s
 
 build\venv311\Scripts\python.exe -m mypy
-Success: no issues found in 2 source files
+# Success: no issues found in 2 source files
 
-build\venv311\Scripts\python.exe -m mypy.stubtest easy3d._easy3d --allowlist tests/typecheck/stubtest_allowlist.txt
-Success: no issues found in 1 module
+build\venv311\Scripts\python.exe -m pip check
+# No broken requirements found.
 
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 33%]
-........................................................................ [ 66%]
-........................................................................ [100%]
-216 passed in 41.42s
+ctest --preset windows-debug
+# 100% tests passed, 0 tests failed out of 14; total time 1.13s
 
-ctest --test-dir build/windows-debug -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 19
-Total Test time (real) = 1.28 sec
-
-build\venv311\Scripts\python.exe examples/12_diagnostics/main.py --seconds 3
-Easy3D graphics: enhanced-lighting=on, postprocessing=on, fxaa=on, shadows=fallback-off
-Easy3D renderer: Direct3D 11, vendor=0x10de, device=0x2482, preset=medium
-asset: ok=True kind=obj 1 triangles in 1 parts
-asset: ok=False type=MissingAssetError message=...missing.glb
-diagnostics_example: PASS frames=373 entities=5
-Easy3D audio: SDL3 default playback, 48000 Hz stereo float
-
-build\venv311\Scripts\python.exe -m compileall -q python tests examples
-# exit code 0, no output
-git diff --check
-# exit code 0; only Git LF-to-CRLF working-copy notices
-```
-
-The timed D3D11 run proves native overlay submission and clean lifecycle on the
-recorded Windows/NVIDIA host, but no screenshot/human appearance inspection was
-performed; visual layout remains **UNVERIFIED**. Phase 6.5: **DONE**. Exact next
-task: Phase 6.6 — build and clean-install wheels only for locally available,
-independently tested CPython 3.11+ interpreters.
-
-## 2026-11-01 — Phase 6.6 verified Windows wheel matrix
-
-Inventoried three installed, 64-bit CPython interpreters and built a distinct
-MSVC `win_amd64` wheel for each: 3.11.9, 3.12.10 and 3.13.2. No classifier or
-artifact is published for an untested ABI. Each original artifact was installed
-with `--no-index` into its own newly cleared virtual environment, loaded from
-`site-packages`, passed `pip check` and the native version/add smoke, then ran
-the complete Python, mypy and stubtest suite. All three runs passed 216 tests.
-
-Added `scripts/build_wheel_matrix.ps1` as the repeatable release-builder path.
-It requires an x64 MSVC developer shell, validates CPython/Windows/64-bit,
-limits entries to the verified matrix, builds one wheel per ABI, clean-installs
-it, checks dependencies and native import/version behavior, runs the full suite
-by default and prints SHA-256 with an environment-independent .NET implementation.
-The first scripted run exposed that the Visual Studio-launched Windows
-PowerShell did not autoload `Get-FileHash`; replacing it with the .NET SHA-256
-API fixed the script, and the second complete scripted run passed all three
-legs. Earlier generated wheels were moved to the ignored, recoverable
-`build/wheelhouse/pre-license/` directory before final regeneration.
-
-The artifact audit initially found `LICENSE` but not the nested third-party
-notice. Explicit `wheel.license-files` configuration now includes both
-`LICENSE` and `LICENSES/THIRD_PARTY.md`; the final CPython 3.11 wheel inspection
-also confirmed `_easy3d.pyi`, `py.typed`, Python 3.11/3.12/3.13 classifiers and
-`Requires-Python: >=3.11`.
-
-Exact build and clean-wheel test evidence:
-
-```text
-# All builds ran after calling the VS 2026 x64 VsDevCmd environment.
-py -3.11 -m pip wheel . --no-deps --wheel-dir build\wheelhouse
-Created wheel: easy3d-0.1.0-cp311-cp311-win_amd64.whl
-
-py -3.12 -m pip wheel . --no-deps --wheel-dir build\wheelhouse
-Created wheel: easy3d-0.1.0-cp312-cp312-win_amd64.whl
-
-py -3.13 -m pip wheel . --no-deps --wheel-dir build\wheelhouse
-Created wheel: easy3d-0.1.0-cp313-cp313-win_amd64.whl
-
-# For each ABI: py -3.X -m venv --clear build\wheel-smoke\cp3XX;
-# install the exact wheel with --no-index; install pytest==9.2.0 and
-# mypy==1.18.2; run pip check, native import smoke and pytest -q.
-CPython 3.11.9: No broken requirements found.
-0.1.0 5 ...\build\wheel-smoke\cp311\Lib\site-packages\easy3d\__init__.py
-216 passed in 76.91s (0:01:16)
-
-CPython 3.12.10: No broken requirements found.
-0.1.0 5 ...\build\wheel-smoke\cp312\Lib\site-packages\easy3d\__init__.py
-216 passed in 69.35s (0:01:09)
-
-CPython 3.13.2: No broken requirements found.
-0.1.0 5 ...\build\wheel-smoke\cp313\Lib\site-packages\easy3d\__init__.py
-216 passed in 44.19s
-
-# Final metadata-corrected artifact run:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\build_wheel_matrix.ps1 -SkipTests
-easy3d-0.1.0-cp311-cp311-win_amd64.whl
-SHA256=f6e7c5e3b0439acb03f9264529b9ea241dcce6813c995eecbb0e9b91732d5cd8
-easy3d-0.1.0-cp312-cp312-win_amd64.whl
-SHA256=61dd431fd300bfbb28079fedd4ad6ca5a96fa87dfa8e151583e36adbdc927382
-easy3d-0.1.0-cp313-cp313-win_amd64.whl
-SHA256=bf8a086ccc62d3791dfa82c9606f5fd2aeeca81f366dbedece30f5166f91cc44
-# exit code 0; all three final wheels clean-installed, pip-checked and imported
-
-py -3.11 -m zipfile -l build\wheelhouse\easy3d-0.1.0-cp311-cp311-win_amd64.whl
-easy3d-0.1.0.dist-info/licenses/LICENSE
-easy3d-0.1.0.dist-info/licenses/LICENSES/THIRD_PARTY.md
-easy3d/_easy3d.pyi
-easy3d/py.typed
-```
-
-Wheel install/import and the full test matrix are **VERIFIED** on this Windows
-x64 host. The wheels remain private local artifacts and were not uploaded or
-published. Phase 6.6: **DONE**. Exact next task: Phase 6.7 — establish explicit
-versioning/compatibility/migration policy and private artifact distribution
-instructions.
-
-## 2026-11-01 — Phase 6.7 versioning, compatibility and private distribution
-
-Made root `VERSION` the single editable `MAJOR.MINOR.PATCH` release value.
-scikit-build-core's pinned regex metadata provider now derives wheel metadata
-from it, CMake validates and derives `PROJECT_VERSION`/the generated native
-header from it, and installed Python obtains `easy3d.__version__` from standard
-distribution metadata. The native regression test requires package metadata,
-the public Python value and `engine_version()` to agree; this eliminates three
-manually synchronized release literals.
-
-Added `CHANGELOG.md` with the initial `0.1.0` release and explicit no-predecessor
-migration note. Added `docs/release.md` with pre-1.0 Semantic Versioning rules,
-Python/OS/API/native-ABI compatibility, the distinct engine/protocol/schema/
-registry/wire-format domains, release gates, asset/persistence limits, private
-SMB or authenticated-index staging, immutable SHA-256 manifests, consumer
-installation and whole-wheel rollback. ADR-0050 records the single-source and
-separate-domain decision. The wheel script now creates `SHA256SUMS.txt` itself
-using the same .NET implementation that works inside the VS developer shell;
-it still performs no upload, tag, push or global modification.
-
-Failure and correction during native verification:
-
-- The first direct `cmake --preset windows-debug` detected that an old cache
-  stored the compiler through a different path spelling and automatically
-  regenerated the cache. During that one CMake process the preset's
-  `EASY3D_BUILD_PYTHON=OFF` value was lost, so configuration tried to find a
-  standalone pybind11 package and failed. Rerunning the unchanged, correct
-  preset after regeneration reapplied `EASY3D_BUILD_PYTHON:BOOL=OFF`; the clean
-  native build and all tests then passed. No fallback or hidden dependency was
-  added.
-
-Exact verification evidence:
-
-```text
-# VS 2026 x64 developer environment:
-build\venv311\Scripts\python.exe -m pip install -e .
-Preparing editable metadata (pyproject.toml): finished with status 'done'
-Created wheel for easy3d: easy3d-0.1.0-cp311-cp311-win_amd64.whl
-size=4126757
-sha256=ad2e5b38004f27e2601ac345d0c7d1da51bec018aeffa300953fa5b1a829b59e
-Successfully installed easy3d-0.1.0
-
-build\venv311\Scripts\python.exe -c "import easy3d; from importlib.metadata import version; print(easy3d.__version__, easy3d.engine_version(), version('easy3d'))"
-0.1.0 0.1.0 0.1.0
-
-build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 33%]
-........................................................................ [ 66%]
-........................................................................ [100%]
-216 passed in 75.47s (0:01:15)
-
-cmake --preset windows-debug
-EASY3D_BUILD_PYTHON:BOOL=OFF
-cmake --build --preset windows-debug
-[1121/1122] Linking CXX executable Debug\easy3d_network_server_tests.exe
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 19
-Total Test time (real) = 3.79 sec
-```
-
-The policy describes only implemented exact-match rejection and tested wheel
-boundaries; it does not promise C++ ABI stability, cross-platform binaries,
-save compatibility or public package availability. Phase 6.7: **DONE**. Exact
-next task: Phase 6.8 — final regression, soak, source/wheel packaging audit and
-performance comparison against the recorded baselines.
-
-## 2026-11-01 — Phase 6.8 final regression, packaging, soak and performance gate
-
-Completed the final tracked-workload gate on the recorded Windows 11 x64,
-Ryzen 5 5600G, NVIDIA D3D11 and MSVC 19.51 host. Debug, Release and explicitly
-graphics-disabled native trees passed. The editable Python suite passed, then
-the finalized wheels clean-installed and passed the complete suite on CPython
-3.11, 3.12 and 3.13. The PEP 517 sdist and all three wheels passed direct
-contents, ZIP integrity, metadata validation and SHA-256 manifest checks.
-
-The first enforced network capacity run correctly failed at 32 clients:
-median/p95/p99/max 92.980/123.318/132.676/202.321 ms and observation latency
-p95 62.088 ms exceeded the unchanged 100 ms p99 and 50 ms latency budgets.
-Two repeated isolated runs still failed. cProfile measured 30,285 repeated
-delta reconstructions and redundant public math validation on 66,592 client
-applications. Replacing the per-flush object-identity cache key with complete
-immutable baseline values, then using private wire-only finite/bounded math
-construction, reduced the final 32-client median/p99 to 49.899/88.847 ms and
-latency p95 to 34.021 ms. Correctness, zero deferrals and all original budgets
-were retained. Focused lifecycle/recovery/typing tests passed before the full
-regression. ADR-0051 and `docs/benchmarks.md` record the safety boundary and
-full before/after table.
-
-Exact regression and performance evidence:
-
-```text
-cmake --build --preset windows-debug
-ctest --preset windows-debug --output-on-failure
-100% tests passed, 0 tests failed out of 19
-Total Test time (real) = 3.79 sec
-
+cmake --preset windows-release
 cmake --build --preset windows-release
 ctest --preset windows-release --output-on-failure
-100% tests passed, 0 tests failed out of 19
-Total Test time (real) = 4.02 sec
+# 100% tests passed, 0 tests failed out of 14; total time 1.29s
+```
 
-cmake -S . -B build\windows-headless -G Ninja -DCMAKE_BUILD_TYPE=Debug -DEASY3D_ENABLE_GRAPHICS=OFF -DEASY3D_ENABLE_NETWORKING=ON -DEASY3D_BUILD_PYTHON=OFF -DEASY3D_BUILD_BENCHMARKS=ON -DBUILD_TESTING=ON
-cmake --build build\windows-headless --parallel 12
-ctest --test-dir build\windows-headless --output-on-failure
-100% tests passed, 0 tests failed out of 18
-Total Test time (real) = 3.19 sec
+The first incremental Release invocation failed before compilation because a
+previously interrupted configure had left `build-Release.ninja` referring to a
+missing `CMakeFiles/impl-Release.ninja`. Regenerating with
+`cmake --preset windows-release` repaired the build graph; the ensuing
+582-step build and all 14 tests completed without a source workaround.
 
+The final editable extension was rebuilt successfully with the installed MSVC
+environment. The resulting wheel was
+`rix-0.1.0-cp311-cp311-win_amd64.whl` (5,668,115 bytes), and pip reported
+`Successfully installed rix-0.1.0`.
+
+The real D3D11 scheduler/lifecycle smoke used:
+
+```powershell
+build\venv311\Scripts\python.exe tests\manual\manual_loop.py
+```
+
+Result: exit 0 on NVIDIA vendor `0x10de`, device `0x2482`:
+
+```text
+manual loop smoke: PASS (120 frames)
+managed loop smoke: PASS (159 frames)
+repeated lifecycle smoke: PASS (3 games)
+```
+
+The six managed examples from the required seven-example learning set were
+executed through a validation wrapper that schedules `Game.stop()` after 0.05
+seconds, then invokes their unmodified source via `runpy.run_path`. All six
+initialized D3D11 and SDL audio and exited 0:
+
+```text
+examples\beginner\01_first_scene.py
+examples\beginner\02_spinning_cube.py
+examples\beginner\04_physics_playground.py
+examples\beginner\05_first_person_game.py
+examples\beginner\06_enemy_game.py
+examples\beginner\07_simple_interaction.py
+```
+
+`examples\beginner\03_manual_loop.py` was also launched directly and remained
+in its live manual loop until the validation process sent Ctrl+C. Its bounded
+equivalent is covered by `tests\manual\manual_loop.py` above.
+
+A broader D3D11 compatibility sweep executed every repository example except
+the unbounded manual-loop source through the same scheduled-stop wrapper. The
+native examples (`00`, `02`, `03`, `09`–`12`) and all managed beginner
+examples exited 0. `01_entity_lifecycle` is a non-window lifecycle program and
+also exited 0. The audio lesson was supplied a generated temporary PCM16 WAV.
+The sweep found and fixed one genuine lesson bug: `06_state_machine.py` passed
+an invalid empty string to `Text`; it now begins with `"State: idle"`. The
+manual-loop source is covered by the direct launch and bounded native smoke
+already recorded above.
+
+### Performance evidence
+
+The quiet post-change construction run was:
+
+```powershell
+build\venv311\Scripts\python.exe benchmarks\high_level_api.py --objects 2000
+# construction objects=2000 high=0.087055s explicit=0.085317s ratio=1.020
+```
+
+The pre-change ratio was 1.049, so this sample shows no wrapper-construction
+regression. A first isolated native-boundary rerun measured 163.4 ns/call at
+1,000,000 iterations and 164.8 ns/call at 5,000,000 iterations versus the
+single 118.0 ns/call baseline. That apparent regression did not reproduce in a
+controlled artifact comparison: five warmed 5,000,000-call samples loaded the
+retained pre-change and current `.pyd` files under the same Python and current
+machine conditions. Their medians were 216.6 and 205.0 ns/call respectively.
+The current binding was 5.4% faster in that controlled comparison.
+
+The representative renderer workload was:
+
+```powershell
+build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 2000 --seconds 3
+```
+
+Current result: exit 0; 2,000 instances created in 0.057327 seconds, 3,611 frames in
+3.083904 seconds, median sampled frame 0.6271 ms, p95 0.8375 ms, p99 1.0266 ms,
+2 draw calls, 1 instanced draw call, 1,913 visible and 87 culled instances.
+Working set was 27,160,576 bytes before creation, 28,274,688 after creation,
+and 104,198,144 after the D3D11 run. The retained pre-change CPython 3.11 wheel
+ran the identical command immediately beforehand: 0.065626-second creation,
+0.6524/0.8870/1.0847 ms median/p95/p99 frames, the same 2 draw calls and 1
+instanced call, and 30,781,440/32,583,680/108,605,440-byte working sets. The
+current sample improved creation, frame percentiles, and final working set.
+
+Scheduler traversal and native physics were compared with:
+
+```powershell
+build\wheel-smoke\cp311\Scripts\python.exe benchmarks\api_runtime.py
+build\venv311\Scripts\python.exe benchmarks\api_runtime.py
+```
+
+The retained pre-change/current medians were 78.8/75.7 ns per registered
+callback, 8,713.2/7,979.0 ns per scripted entity traversal, and
+1,116.2/1,028.2 ns per body for the native physics step. Each current sample
+was faster; no material Phase 10 regression was observed in the required
+construction, callback, traversal, physics, memory, draw-call, or frame-time
+workloads.
+
+An initial invocation with unsupported `--output` failed with argparse exit 2;
+the documented arguments were then used and the benchmark passed.
+
+### Interactive Windows validation
+
+After resetting the desktop-control session, direct inspection succeeded on
+the D3D11/NVIDIA desktop:
+
+- `examples\beginner\03_manual_loop.py` visibly rendered a lit, rotating blue
+  cube. Maximizing the native window resized and reframed the render correctly;
+  clicking Close terminated the Python process with exit 0.
+- `examples\03_obstacle_course\main.py` visibly rendered the first-person
+  course, steps, ramp, beams, finish trigger, and settled dynamic spheres.
+  A synthetic same-frame Escape press stopped the rebuilt engine and the
+  example exited 0. That validation found and drove fixes for same-frame action
+  edges and fixed-tick jump latching.
+- `examples\beginner\08_hud_menu.py` visibly rendered retained text, panel,
+  Row, and buttons. Clicking Play changed `Choose an action` to `Playing!`;
+  clicking Quit stopped the game and exited 0.
+- Managed and manual modes, native Close/Alt+F4, resize, keyboard input,
+  physics rendering, retained UI interaction, and repeated lifecycle are now
+  directly verified on this machine.
+
+SDL3 opened the default 48 kHz stereo float device, audio examples created
+playback voices, and audio/cache tests pass. Whether sound was physically
+audible through the user's speakers remains **UNVERIFIED** because this agent
+cannot hear the device. This is recorded as a sensory limitation rather than
+an inferred audibility claim; it does not negate the directly verified native
+audio-device and voice lifecycle.
+
+The input follow-up added a native regression for a down+up received in one
+polled frame and a Python regression proving that automatic `Player` jump
+requests survive a render frame with no fixed step. This raised the final
+Python total at that checkpoint from 142 to 143 passing tests. The continuous
+Euler regression added later raised the current total to 144.
+
+### Python 3.11–3.13 wheel matrix
+
+The complete supported matrix was last rebuilt after the networking removal,
+API simplification, input fixes, editable-install repair, and continuous Euler
+fix:
+
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\build_wheel_matrix.ps1'
+```
+
+Result: exit 0. Each wheel was installed into a freshly cleared venv with
+`--no-index`, passed `pip check`, imported its native extension with matching
+Python/native version `0.1.0`, and ran the complete suite:
+
+| Runtime | Test result | Wheel SHA-256 |
+| --- | --- | --- |
+| CPython 3.11.9 | `146 passed in 10.51s` | `6372885ad83c099d1ab9bbbddeec3361ddca4745f046c66e6ad4aa0fe1681f52` |
+| CPython 3.12.10 | `146 passed in 12.10s` | `b844524fce86cd618cefc3425034e2eb3c6dc6b971942e366154f1c7fd01a1ee` |
+| CPython 3.13.2 | `146 passed in 7.82s` | `3a59af0075b6992b22ba5dde468c8580601b54bd643d5f7ae71b3c37953f2727` |
+
+An additional ZIP-content audit found 31 files in each wheel, including the
+matching `.pyd`, `_rix.pyi`, `py.typed`, project license, and third-party
+notices. No headers, object files, static/import libraries, PDBs, or `_deps`
+build-tree content were present. `build\wheelhouse\SHA256SUMS.txt` contains the
+recorded hashes.
+
+## 2026-11-02 — API simplification baseline
+
+The Pygame-level API simplification phase began with a repository/API audit in
+`docs/api-simplification-audit.md` and a Phase 10 checklist in `MASTERPLAN.md`.
+No implementation claims are made at this checkpoint.
+
+Current baseline commands and exact results:
+
+```powershell
 build\venv311\Scripts\python.exe -m pytest -q
-........................................................................ [ 33%]
-........................................................................ [ 66%]
-........................................................................ [100%]
-216 passed in 63.17s (0:01:03)
+# 132 passed in 6.11s
 
-build\venv311\Scripts\python.exe -m pytest tests/python/test_network_transform.py tests/python/test_replication_scaling.py tests/python/test_replication_lifecycle.py tests/python/test_replication_resync.py tests/python/test_typing.py -q
-................                                                         [100%]
-16 passed in 13.66s
+build\venv311\Scripts\python.exe -m mypy
+# Success: no issues found in 2 source files
 
-build\venv311\Scripts\python.exe benchmarks\network_capacity.py --ticks 120 --warmup-ticks 20 --enforce-budget
-clients=8 correct=True tick_ms median/p95/p99/max=4.078/6.135/8.263/8.744 cpu=67.8% rss_peak=33.4MiB server=835.1KiB/s per_client=104.4KiB/s latency_p95=8.607ms deferred=0
-clients=16 correct=True tick_ms median/p95/p99/max=13.438/20.315/26.944/44.841 cpu=98.9% rss_peak=38.0MiB server=1173.1KiB/s per_client=73.3KiB/s latency_p95=16.972ms deferred=0
-clients=32 correct=True tick_ms median/p95/p99/max=49.899/70.131/88.847/111.698 cpu=107.5% rss_peak=49.6MiB server=1238.1KiB/s per_client=38.7KiB/s latency_p95=34.021ms deferred=0
+build\venv311\Scripts\python.exe benchmarks\high_level_api.py --objects 2000
+# construction objects=2000 high=0.095629s explicit=0.091164s ratio=1.049
 
-build\venv311\Scripts\python.exe benchmarks\network_soak.py --clients 4 --cycles 10 --inputs-per-client 64 --profile adverse
-clients=4 cycles=10 profile=adverse sent/received/executed/limited=2560/2560/654/1906 disconnects=14 reconnects=10 shutdown_clients=4 elapsed=33.493s correct=True
-
-build\windows-release\Release\easy3d_core_benchmark.exe
-iterations=10000000 elapsed_seconds=0.0254537 final_value=5000000
 build\venv311\Scripts\python.exe benchmarks\native_add.py --iterations 1000000
-iterations=1000000 elapsed_seconds=0.363130 ns_per_call=363.1 final_value=500000
+# iterations=1000000 elapsed_seconds=0.117990 ns_per_call=118.0 final_value=500000
 ```
 
-Packaging and final wheel-matrix evidence:
+The visible renderer benchmark, manual loop, and new convenience APIs are not
+yet implemented or validated. Interactive Windows results remain UNVERIFIED.
 
-```text
-build\venv311\Scripts\python.exe -m build --sdist --outdir build\dist
-Successfully built easy3d-0.1.0.tar.gz
-bytes=722814
-sha256=5fac47d53ad50627b568b8dae637d1f9e347d25bde408186e6537d407b9744f3
-# 246 entries; VERSION, pyproject.toml, CMakeLists.txt, LICENSE,
-# LICENSES/THIRD_PARTY.md, native bindings and Python sources present.
+## Completed foundation and engine work
 
-scripts\build_wheel_matrix.ps1
-CPython 3.11.9: 216 passed in 64.39s (0:01:04)
-easy3d-0.1.0-cp311-cp311-win_amd64.whl
-bytes=4203660 sha256=779d278b578918fb9e5cc5dca81ff51784b5e93c23f9731db9b9117930181a61
-CPython 3.12.10: 216 passed in 41.82s
-easy3d-0.1.0-cp312-cp312-win_amd64.whl
-bytes=4207110 sha256=b1815aafb63958495213e54f92e00d9f2209e4e48dddc96f915c0b3b5b29f523
-CPython 3.13.2: 216 passed in 39.67s
-easy3d-0.1.0-cp313-cp313-win_amd64.whl
-bytes=4207128 sha256=d4caf92547e3fe06c16722a0f1480b310910028cce8ce1d5be5c88f35641f1bb
-Wrote build\wheelhouse\SHA256SUMS.txt
-# Recomputed manifest hashes matched; zip test passed; packaging metadata
-# validated; native module, stubs, py.typed, LICENSE and THIRD_PARTY present.
+The repository contains a C++20 core, typed pybind11 package, SDL3/bgfx D3D11
+window and renderer, scenes/entities/transforms, assets, cameras, lights,
+culling/instancing, HUD/UI, input, scheduling, Jolt physics, first-/third-person
+characters, audio, diagnostics, gameplay helpers, examples, tests, and Windows
+wheel tooling.
+
+Prior interactive Windows validation established that the native window opens,
+resizes, renders, and closes on the tested D3D11 machine. That evidence is
+hardware-specific; the networking-removal change still requires a new
+interactive regression run before making a fresh visual claim.
+
+## 2026-11-02 — Networking removal complete
+
+### Scope removed
+
+- GameNetworkingSockets, Protobuf, Abseil, and their CMake configuration.
+- Native transport/protocol/client/server implementations and bindings.
+- Python transport, discovery, replication, match-state, multiplayer-session,
+  and prediction modules.
+- Remote-input sequence/correction/replay hooks from the local character motor.
+- Online examples, benchmarks, tests, public type exports, and third-party
+  notices.
+- Host/join/session methods from `Game` and obsolete online documentation.
+
+### Scope retained
+
+Rendering, local input, scenes/entities, physics, ordinary character movement,
+jumping, sprinting, crouching, gameplay utilities, UI, audio, and assets remain
+in scope.
+
+### Automated verification
+
+Commands ran from `C:\Users\Ryan\Desktop\code\Easy3D` on Windows x64 with
+Python 3.11.9, CMake 4.0.1, Ninja 1.12.1, and Visual Studio 2026 Build Tools
+18.11.3 / MSVC 19.51.36260.
+
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && build\venv311\Scripts\python.exe -m pip install -e .[dev]'
 ```
 
-GUI-capable Windows lifecycle/example evidence:
+Result: exit 0. Editable wheel built and installed as
+`rix-0.1.0-cp311-cp311-win_amd64.whl`, 5,661,810 bytes. The configure/build
+did not fetch or configure GameNetworkingSockets, Protobuf, or Abseil.
 
-```text
-build\venv311\Scripts\python.exe benchmarks\render_cubes.py --count 10000 --seconds 10
-renderer=Direct3D 11 vendor=0x10de device=0x2482
-frames=2222 overall_fps=220.423 frame_ms median/p95/p99=3.939/5.676/10.304
-draw_calls=2 visible_instances=9318 culled_instances=682 instanced_draw_calls=1
-peak_working_set=139235328
-
-build\venv311\Scripts\python.exe tests\manual\window_lifecycle.py
-iteration=1 frames=13 running=False
-iteration=2 frames=29 running=False
-
-build\venv311\Scripts\python.exe examples\02_first_world\main.py --seconds 3
-first_world: PASS frames=423 draw_calls=6 visible=4 culled=0 fixed_ticks=139 update_calls=423 scene_closed=True
-
-build\venv311\Scripts\python.exe examples\07_coop_sandbox\main.py --clients 4
-sandbox complete: clients=4 players=4 interpolated=16 crate_destroyed=True rpc_executed=6
-build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode cooperative --clients 4
-arena complete: mode=cooperative clients=4 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=True eliminated_players=0
-build\venv311\Scripts\python.exe examples\08_network_arenas\main.py --mode competitive --clients 4
-arena complete: mode=competitive clients=4 phase=MATCH_END winning_score=1 damage_events=4 objective_destroyed=False eliminated_players=1
+```powershell
+build\venv311\Scripts\python.exe -m pytest -q
 ```
 
-No sanitizer, `/analyze`, clang-tidy, RenderDoc capture, audio perception or
-human screenshot/appearance review was run; these remain **UNVERIFIED** and are
-listed in known issues. The D3D11 console/frame/lifecycle results are verified
-on this host only. No artifacts were uploaded or published. Phase 6.8:
-**DONE**. All MASTERPLAN implementation items 0.1–6.8 are checked; the private
-`0.1.0` checkpoint is complete.
+Result: exit 0, `132 passed in 7.89s`.
+
+```powershell
+build\venv311\Scripts\python.exe -m mypy
+```
+
+Result: exit 0, `Success: no issues found in 2 source files`.
+
+```powershell
+build\venv311\Scripts\python.exe -m pip check
+build\venv311\Scripts\python.exe -c "import importlib.util, rix; print(rix.engine_version()); removed=('NetworkError','NetworkSession','Server','network','replication','PredictedCharacterController','ScriptRole','server_only'); assert not any(hasattr(rix, name) for name in removed); assert importlib.util.find_spec('rix.network') is None; assert importlib.util.find_spec('rix.replication') is None; print('removed API absent')"
+```
+
+Result: exit 0: `No broken requirements found.`, `0.1.0`, and
+`removed API absent`.
+
+```powershell
+cmd.exe /d /s /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --fresh --preset windows-debug && cmake --build --preset windows-debug && ctest --preset windows-debug'
+```
+
+Result: exit 0. A fresh 582-step Debug build completed; CTest reported
+`100% tests passed, 0 tests failed out of 14` in 1.41 seconds. No native
+network test target was generated.
+
+The repository-wide implementation audit searched CMake, native code, bindings,
+Python, tests, examples, benchmarks, scripts, and third-party notices for the
+removed APIs/dependencies and returned no matches.
+
+### Failures encountered and fixed
+
+The first standalone preset invocation invalidated a stale compiler cache and
+then failed to find `cl`. The Community developer command prompt did not contain
+the installed compiler. Switching to the installed Build Tools prompt exposed
+another stale cache entry pairing MSVC `cl.exe` with MinGW `ld.exe`. Running the
+supported `cmake --fresh --preset windows-debug` re-detected MSVC `link.exe` and
+the full build/test passed. No source bypass or test suppression was added.
+
+### Validation status at that checkpoint
+
+At the networking-removal checkpoint, the fresh interactive smoke and complete
+Python 3.11–3.13 wheel matrix were still pending. Both were subsequently
+completed during Phase 10; see the current evidence at the top of this file.
+# 2026-11-06 — Multiplayer/state goal, recovery checkpoint
+
+- Read the complete 1,620-line approved goal at
+  `C:\Users\Ryan\.codex\attachments\d579bc45-dc28-4662-9e5e-5fc043f28319\pasted-text-1.txt`
+  (SHA-256
+  `717CDEE23DC8D41B4800DEFBA8448C3EC137EF5F3D6D2D56CE1ABE57A1C37292`).
+- Baseline before networking edits:
+  `.venv\Scripts\python.exe -m pytest -q` -> `216 passed in 18.76s`.
+- Git history contained the prior complete native transport and substantial
+  server/discovery/replication/RPC/prediction implementation. It was adapted
+  selectively; current RIX rendering, physics, Pygame, lighting, and package
+  work was not reverted.
+- Restored pinned GameNetworkingSockets/Protobuf native sources and bindings
+  behind `RIX_ENABLE_NETWORKING`; added `rix.net` and a bounded safe named
+  message `Session` façade.
+- MSVC configure:
+  `VsDevCmd.bat -arch=x64 -host_arch=x64 && cmake --preset windows-debug`
+  -> configured successfully with GameNetworkingSockets 1.6.1/BCrypt.
+- MSVC build:
+  `cmake --build --preset windows-debug --parallel 8` -> succeeded, 571 build
+  steps after dependency configuration.
+- Native tests: `ctest --preset windows-debug` -> `19/19 passed`, including
+  network simulation, protocol, backend, client, and server tests.
+- The exact editable command from an ordinary PowerShell initially selected
+  MinGW 15.1 and failed compiling Protobuf
+  `generated_message_tctable_lite.cc` with GCC musttail stack-slot errors.
+  This unsupported path remains documented; it was not reported as passing.
+- The same command in the installed MSVC developer environment,
+  `.venv\Scripts\python.exe -m pip install -e ".[dev]"`, succeeded and
+  produced `rix-0.1.0-cp311-cp311-win_amd64.whl` SHA-256
+  `13523643f8fc36fd40b62271573311a850e68eb70eedba04fd336ad6b1bd2be0`.
+- Native import evidence:
+  `rix.net.backend_info()` ->
+  `NetworkBackendInfo(available=True, name='GameNetworkingSockets',
+  version='1.6.1', crypto_provider='Windows BCrypt')`.
+- Adapted transport/server/listen/discovery plus new Session/codec coverage was
+  added. A focused run reached 39 passed transport/server/listen tests; the
+  complete suite then reached 260 passed with one stale discovery namespace
+  expectation, which was corrected to `rix.net`.
+- Added backward-compatible StateMachine decorators, conditions, priorities,
+  timers, pause/reset, deferred changes and callback consistency; added
+  entity-owned construction plus Pygame-friendly `GameStates` stacks.
+- Focused state/discovery regression:
+  `.venv\Scripts\python.exe -m pytest -q tests/python/test_utilities.py
+  tests/python/test_simple_state_machines.py tests/python/test_discovery.py`
+  -> `26 passed in 0.39s`.
+- Next exact action: rerun the complete Python suite, then adapt and run the
+  historical replication/RPC/prediction and independent-process gates before
+  documenting the public networking and state APIs.
+
+Follow-up evidence:
+
+- Complete suite after state/GameStates and networking additions:
+  `.venv\Scripts\python.exe -m pytest -q` -> `266 passed in 16.02s`.
+- Adapted current-RIX replication lifecycle, typed NetworkVar, bounded RPC, and
+  replicated match-state tests:
+  targeted run -> `20 passed in 1.12s`.
+- Complete suite after those additions:
+  `.venv\Scripts\python.exe -m pytest -q` -> `286 passed in 17.63s`.
+- Restored/adapted the real two-process direct-IP example and process harness:
+  `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_two_process_network.py` -> `4 passed in 17.69s`.
+- Prediction compatibility audit found that the RIX movement overhaul removed
+  the historical native sequence/correction/replay hooks while adding
+  sprint/crouch. Prediction is therefore explicitly UNVERIFIED and its old
+  tests were not bypassed or falsely marked passing; the next implementation
+  task is to merge those hooks into the current motor and then restore its
+  regression suite.
+
+Prediction and replication follow-up:
+
+- Restored native character sequence, correction, and isolated replay hooks
+  and extended their input contract with sprint/crouch. Native slot creation,
+  destruction, clear, and reuse reset sequence/external-motion/pause state.
+- Rebuilt with MSVC and reran `ctest --preset windows-debug
+  --output-on-failure` -> `19/19 passed` in 1.86 seconds.
+- Reinstalled with `.venv\Scripts\python.exe -m pip install -e ".[dev]"`
+  inside the installed x64 MSVC developer environment -> exit 0; editable
+  wheel SHA-256
+  `8d4b2cd1a8adb61b50b2107234386f75c49fbf9980e1c16105312b4c3dbc8f2a`.
+- `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_prediction.py` -> `7 passed in 0.22s`. This covers complete
+  sprint/crouch intent replay, deterministic client/server motor parity,
+  correction, stale sequence rejection, and native slot reuse.
+- Complete Python suite immediately afterward -> `297 passed in 33.64s`.
+- Restored/adapted transform interpolation, acknowledged delta baseline,
+  recovery, interest budget, resynchronization, and ownership churn tests:
+  `test_replication_resync.py test_replication_scaling.py` -> `6 passed in
+  0.80s`; `test_network_conditions.py test_network_transform.py` -> `10 passed
+  in 1.31s`.
+- Added independent high-level `Session` routing/lifecycle coverage -> `2
+  passed in 0.21s`.
+- Fixed deferred initial StateMachine startup so initial enter decorators and
+  `Entity.state_machine(initial)` work after attachment. State/utility focused
+  run -> `17 passed in 0.19s`; entity factory focused run -> `7 passed in
+  0.15s`.
+- Updated the feature catalog, API contract, and known limitations to describe
+  verified networking/prediction behavior and to remove the obsolete claim
+  that RIX contains no networking API.
+
+State/session/release follow-up:
+
+- Added exact optional `Session.register_message()` schemas. Incoming schema
+  violations and malformed frames disconnect the sender and raise
+  `NetworkError`; focused codec/session suite -> `10 passed in 0.45s`.
+- Added an actual independent-process high-level Session ping/pong gate -> `1
+  passed in 0.97s`, plus separate headless server and Pygame client chat entry
+  points under `examples/networking/01_pygame_chat`.
+- Added `AnimationSelection` with no-restart-by-default semantics and wired
+  StateMachine `animation=` metadata to entity selection. Documentation
+  explicitly states that this is selection intent, not GPU-skinned rendering.
+- Added all ten requested beginner state/screen examples under
+  `examples/states`; eight graphics-independent programs were executed and all
+  ten scripts passed compilation.
+- Full Python regression after message, state, animation, prediction, and
+  replication work: `.venv\Scripts\python.exe -m pytest -q` -> `321 passed in
+  39.67s`. Mypy -> `Success: no issues found in 2 source files`; pip check ->
+  `No broken requirements found.`; `git diff --check` reported no whitespace
+  errors.
+- The first fresh optimized native run compiled all Release dependencies and
+  targets but the server test transiently exhausted its 100-port loopback
+  range: `18/19 passed`. `--repeat until-pass:3` reproduced one failure then a
+  pass. A subsequent complete `ctest --preset windows-release
+  --output-on-failure` run passed `19/19` in 0.74 seconds. The transient is
+  retained as evidence rather than hidden.
+- Entity-owned machines now freeze while disabled and cancel on destruction or
+  scene detach. Lifecycle/duplicate focused suite -> `10 passed in 0.15s`.
+- Added a finite StateMachine benchmark. Test gate -> `2 passed in 0.35s`;
+  measured default run: 250,000 updates at 6,493.0 ns/update, 50,000 changes at
+  2,312.2 ns/change, 640-byte traced peak, correct=true. Values are local
+  measurements, not platform guarantees.
+
+GameStates, world-session, and match-state follow-up:
+
+- Added immutable per-screen propagation policy to the existing `GameStates`
+  engine. Events propagate top-to-bottom, variable/fixed updates propagate
+  bottom-to-top, opaque screens can suppress underlay drawing, and screen-local
+  timers advance only when their owner participates in the update pass.
+- Added explicit single-instance ownership (`get`, `registered`, duplicate
+  registration rejection) and deterministic idempotent close cleanup.
+- Added `World.attach_session()`/`detach_session()`: an attached `Session` is
+  polled exactly once by `world.update(dt)`, continues polling while simulation
+  is paused, and closes with the World by default.
+- Documented and strengthened the already implemented authoritative
+  `ServerMatchState`/read-only `ClientMatchState` contract. Tests now directly
+  prove a client match mirror cannot mutate a `NetworkVar`, while phase,
+  revision, round, deadline, and late-join behavior remain covered.
+- Focused state/performance run:
+  `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_simple_state_machines.py
+  tests/python/test_state_machine_performance.py` -> `16 passed in 0.32s`.
+- Focused Pygame/session/match run after the new integration:
+  `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_pygame_events.py
+  tests/python/test_simple_state_machines.py
+  tests/python/test_match_state.py` -> `26 passed in 0.65s`.
+- Complete Python regression:
+  `.venv\Scripts\python.exe -m pytest -q` -> `336 passed in 41.65s`.
+- Configured strict typing:
+  `.venv\Scripts\python.exe -m mypy` ->
+  `Success: no issues found in 16 source files`.
+- Dependency consistency:
+  `.venv\Scripts\python.exe -m pip check` ->
+  `No broken requirements found.`
+- Added the maintained `docs/networking.md`, `docs/dedicated-servers.md`,
+  `docs/network-security.md`, `docs/state-machines.md`, and
+  `docs/game-states.md` references. Completion documentation remains open until
+  the connection, benchmark, example, and final validation gates are finished.
+
+Multiplayer example completion follow-up:
+
+- Published all thirteen required public examples under `examples/networking`,
+  with a single index that distinguishes twelve real-transport examples from
+  the deterministic in-memory impairment simulator. Load/soak harnesses remain
+  under `benchmarks` and tests rather than being presented as gameplay clients.
+- Compiled all 27 Python source files with the active editable interpreter and
+  invoked `--help` for all 22 executable entry points; every command exited 0.
+- `.venv\Scripts\python.exe
+  examples\networking\12_network_conditions\main.py` -> LAN 200/200/0,
+  regional 200/199/1, adverse 200/194/6 delivered/lost with seed 53.
+- `.venv\Scripts\python.exe
+  examples\networking\03_listen_server\main.py --ticks 20` -> isolated local
+  client and authority connected, exchanged both application messages,
+  disconnected cleanly, and reported six lifecycle events.
+- Added an automated example-manifest/syntax gate plus finite repeatability and
+  real listen-exchange tests. Focused networking run:
+  `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_network_examples.py tests/python/test_network_conditions.py
+  tests/python/test_listen_server.py tests/python/test_session_process.py` ->
+  `15 passed in 3.60s`.
+- Interactive independent Pygame windows for the newly published 3D clients
+  remain UNVERIFIED in this non-interactive run and are not claimed as passed.
+
+Security and exception-cleanup follow-up:
+
+- Audited each Phase 16 security category against targeted native/Python
+  coverage. Malformed Session/RPC traffic, duplicate sequences, ownership,
+  per-RPC rate limits, maximum connections, bounded queues/backpressure,
+  handshake/peer timeout, reconnect churn, abrupt process loss, and shutdown
+  cleanup all have direct assertions.
+- Fixed `Session.host()` startup to be transactional when an application
+  connection callback raises. The native listener is stopped, player state is
+  cleared, the role returns to closed, and the original exception propagates.
+  A regression reopens the same Session on the exact same port afterward.
+- Security-focused command:
+  `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_network_messages.py tests/python/test_network_rpc.py
+  tests/python/test_network_transport.py tests/python/test_replication_resync.py
+  tests/python/test_network_soak.py tests/python/test_two_process_network.py
+  tests/python/test_server.py` -> `48 passed in 25.22s`.
+
+Impairment and independent-process follow-up:
+
+- Extended the retained two-process native transport sample with scoped
+  `lan`, `regional`, and `adverse` GameNetworkingSockets impairment profiles.
+  Server and client apply the profile independently inside their own OS
+  processes and clear it before native shutdown.
+- Added an adverse-profile independent-process acceptance test. Despite 100 ms
+  configured one-way lag, 30 ms jitter, and 5% packet loss in both processes,
+  the reliable request/reply completed and both peers exited cleanly.
+- Added an explicit seeded unreliable-message reorder assertion. The native
+  simulator delivered all 20 messages, used a non-send ordering, and reproduced
+  the identical trace for the same seed.
+- `.venv\Scripts\python.exe -m pytest -q
+  tests/python/test_network_conditions.py
+  tests/python/test_two_process_network.py` -> `13 passed in 23.76s`.
+
+Capacity and prediction benchmark follow-up:
+
+- Fixed the aggregate capacity command by running each 2/8/16/32-client count
+  in a clean child process. This removes retained backend-worker/allocator state
+  from the next count and makes RSS baselines comparable; the previous combined
+  in-process command timed out during a final drain and remains recorded as a
+  real failure rather than being hidden.
+- Expanded `CapacityReport` with transport loss, queue rejection, event
+  overflow, pending-byte peak, backpressure, full/delta snapshot counts, total
+  snapshot bytes, and mean transform-frame size. The focused capacity gate ->
+  `3 passed in 0.30s`.
+- Full capacity command:
+  `.venv\Scripts\python.exe benchmarks\network_capacity.py --ticks 120
+  --warmup-ticks 20 --json` -> exit 0. Tick p99 was 0.718/3.627/14.488/
+  38.908 ms for 2/8/16/32 clients; all final states were correct with zero
+  loss, queue rejection, overflow, backpressure, or budget deferral. Mean
+  transform frames were 64.85/64/64/64 bytes.
+- The 32-client dense all-to-all run missed the 16.67 ms 60 Hz tick budget
+  (25.415 ms median, 38.908 ms p99). This is reported as an unmet target, not a
+  guaranteed capacity claim. Counts through 16 remained below budget at p99.
+- Added `benchmarks/network_prediction.py`, using paired real native character
+  motors, 60 Hz inputs, 20 corrections/client/second, and deterministic
+  six-tick correction delay. Its focused gate -> `2 passed in 0.19s`.
+- Full prediction command:
+  `.venv\Scripts\python.exe benchmarks\network_prediction.py --ticks 120
+  --warmup-ticks 20 --json` -> exit 0. All 2/8/16/32 runs converged exactly;
+  each correction replayed 5.775 inputs on average, with p99 workload time
+  0.266/0.903/1.573/3.497 ms respectively.
+
+IPv6 transport follow-up:
+
+- Confirmed the native Windows GameNetworkingSockets client/server already
+  accepts numeric IPv6 and the native client suite exercises `::1`.
+- Added `Session.host(local_address=...)` so an IPv6 listen host can connect
+  its isolated local player over `::1` instead of the former fixed IPv4
+  loopback address.
+- Added a high-level real Session test binding `::1`, joining with the required
+  bracketed `[::1]:port` syntax, completing the handshake, and delivering a
+  named application message.
+- `.venv\Scripts\python.exe -m pytest -q tests/python/test_session.py
+  tests/python/test_network_transport.py` -> `24 passed in 0.40s`.
+- IPv6 direct transport is verified on this host. UDP LAN discovery remains
+  deliberately IPv4-only and no NAT/relay claim is implied.
+
+Self-hosted signaling follow-up:
+
+- Added `SignalingServer` and nonblocking `SignalingClient` over the existing
+  native transport with a distinct protocol schema, 2 KiB bounded safe frames,
+  numeric IPv4/IPv6 endpoints, 4–12-character normalized room codes, bounded
+  directory capacity, connection ownership, explicit conflict/release events,
+  and automatic disconnect cleanup.
+- Added `RoomEndpoint`, `SignalingEvent`, `SignalingEventType`,
+  `generate_room_code()`, and `normalize_room_code()` to `rix.net`.
+- Added the headless `examples/networking/signaling.py` serve/register/resolve
+  utility. It is a reference service outside the thirteen game examples.
+- Real native loopback tests register, resolve, reject ownership/capacity
+  conflicts, release, and prove a dropped host connection removes its room:
+  `.venv\Scripts\python.exe -m pytest -q tests/python/test_signaling.py
+  tests/python/test_session.py` -> `6 passed in 0.51s`.
+- `.venv\Scripts\python.exe -m mypy` ->
+  `Success: no issues found in 17 source files`.
+- This completes the feasible self-hosted signaling backend, not a packet
+  relay. It does not punch NAT, discover public addresses, authenticate public
+  users, or make an unreachable direct endpoint reachable; documentation and
+  examples make that boundary explicit.
+
+Rollback-contract follow-up:
+
+- Added `docs/rollback-contract.md` with the fixed-tick simulation boundary,
+  canonical bounded snapshot/restore rules, registered ticked-input contract,
+  stable digest requirement, deterministic random-state policy, irreversible
+  side-effect deferral, resource bounds, and independent-process acceptance
+  gates required before any future implementation can be public.
+- Recorded ADR-0019 and synchronized architecture/API/networking references.
+  No importable generic rollback API was added, and no deterministic claim is
+  made for arbitrary Python, RIX scenes, or Jolt. The existing character motor
+  correction/replay path remains explicitly narrower.
+
+Final Phase 16 release and interactive follow-up:
+
+- Updated the clean-wheel matrix to install the pinned Pygame CE 2.5.8 extra;
+  the first CPython 3.11 attempt had failed collection with four missing-Pygame
+  imports. The corrected matrix passed every supported interpreter.
+- A real two-window authoritative-FPS run found and fixed pre-snapshot
+  interpolation and `Vec3 + tuple` startup errors. A sweep found the same
+  startup ordering issue in synchronized-cubes/cooperative/prediction examples;
+  examples 07, 08, 10, and 11 then remained alive with empty stderr.
+- Closing one FPS client initially disconnected its peer: a transform ACK
+  already in flight referenced the just-despawned object. The authority now
+  ignores ACKs for monotonically issued retired IDs while still rejecting
+  never-issued IDs and future sequences. New transport and exact-example
+  regressions prove the remaining peer stays connected with its local player.
+- Final interactive Windows run: one headless server plus two independent
+  Pygame CE 2.5.8/D3D11 clients visibly rendered `PLAYING`, health 100, and
+  score 0. After one normal window close, the second remained connected,
+  rendering, and at health 100. Both normal client closes had empty stderr.
+- `.venv\Scripts\python.exe -m pytest -q` ->
+  `352 passed in 53.28s`.
+- `.venv\Scripts\python.exe -m mypy` ->
+  `Success: no issues found in 17 source files`.
+- `.venv\Scripts\python.exe -m pip check` ->
+  `No broken requirements found.`
+- Debug build/CTest -> `19/19 passed`, 1.20 seconds; Release build/CTest ->
+  `19/19 passed`, 0.85 seconds.
+- `scripts\build_wheel_matrix.ps1` clean-installed Pygame CE 2.5.8 and each
+  wheel: CPython 3.11 `352 passed in 54.06s`; CPython 3.12 `352 passed in
+  59.59s`; CPython 3.13 `352 passed in 52.83s`.
+- Final wheel SHA-256: cp311
+  `63c08746d6134a3599fa75ea0eb28266ddf63d347b5b4fe8839ee19f551172af`;
+  cp312 `bca4a946fdcc674496ab67e6021779e2fd0a08bf761e701b5eba92d3163e89a2`;
+  cp313 `6a818ea6d4ee0c7c3f0afa83b9f840aa7eaa1fd79cf4e270da4be84d9455edc4`.
+- Published `docs/phase16-report.md` as the consolidated implementation,
+  security, performance, validation, artifact, and limitation report.

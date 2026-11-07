@@ -5,13 +5,13 @@ from __future__ import annotations
 import threading
 import time
 
-from easy3d import Game
+from rix import Game
 
 
 def main() -> None:
     for iteration in range(2):
         game = Game(
-            title=f"Easy3D lifecycle {iteration + 1}",
+            title=f"RIX lifecycle {iteration + 1}",
             resolution=(640, 360),
             vsync=False,
             fps_limit=120,

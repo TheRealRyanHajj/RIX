@@ -8,7 +8,7 @@
 int main() {
     try {
         easy3d::EngineConfig config;
-        config.title = "Easy3D indexed geometry diagnostic";
+        config.title = "RIX indexed geometry diagnostic";
         config.width = 960;
         config.height = 540;
         config.vsync = false;
@@ -25,10 +25,10 @@ int main() {
             std::cerr << "geometry diagnostic rendered zero frames\n";
             return 2;
         }
-        std::cout << "easy3d_geometry_lifecycle: PASS frames=" << engine.frame_count() << '\n';
+        std::cout << "rix_geometry_lifecycle: PASS frames=" << engine.frame_count() << '\n';
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "easy3d_geometry_lifecycle: FAIL: " << error.what() << '\n';
+        std::cerr << "rix_geometry_lifecycle: FAIL: " << error.what() << '\n';
         return 1;
     }
 }

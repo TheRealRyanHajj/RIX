@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from easy3d import ActionState, Binding, Game, PointerState
+from rix import ActionState, Binding, Game, PointerState
 
 
 def test_game_input_binds_and_remaps_actions() -> None:
@@ -43,6 +43,12 @@ def test_input_raw_defaults_and_pointer_lock_request() -> None:
     assert input_state.gamepad_axis("left_x") == 0.0
     assert input_state.pointer == PointerState((0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
     assert not input_state.pointer_locked
+    assert not input_state.key("space")
+    assert not input_state.key_pressed("space")
+    assert not input_state.key_released("space")
+    assert not input_state.mouse("left")
+    assert not input_state.mouse_pressed("left")
+    assert not input_state.mouse_released("left")
 
     input_state.pointer_lock_requested = True
     assert input_state.pointer_lock_requested

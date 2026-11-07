@@ -1,4 +1,4 @@
-"""Easy3D native HUD, sprite, text, layout, and button example."""
+"""RIX native HUD, sprite, text, layout, and button example."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import threading
 import time
 from pathlib import Path
 
-from easy3d import Camera, Cube, Game, Light, Plane, Scene
+from rix import Camera, Cube, Game, Light, Plane, Scene
 
 
 _ICON_PNG = (
@@ -20,7 +20,7 @@ _ICON_PNG = (
 
 
 def run(*, seconds: float | None = None) -> None:
-    with tempfile.TemporaryDirectory(prefix="easy3d-hud-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rix-hud-") as temporary:
         icon_path = Path(temporary) / "icon.png"
         icon_path.write_bytes(base64.b64decode(_ICON_PNG))
 
@@ -37,7 +37,7 @@ def run(*, seconds: float | None = None) -> None:
         scene.hud.panel(
             position=(16, 16), size=(310, 108), color=(0.04, 0.06, 0.1, 0.88)
         )
-        scene.hud.text("Easy3D native HUD", position=(34, 30), font_size=28, z_index=1)
+        scene.hud.text("RIX native HUD", position=(34, 30), font_size=28, z_index=1)
         status = scene.hud.text(
             "Click a button", position=(34, 72), color=(0.55, 0.82, 1), z_index=1
         )
@@ -49,7 +49,7 @@ def run(*, seconds: float | None = None) -> None:
             z_index=2,
         )
 
-        game = Game("Easy3D — HUD", (960, 540), vsync=True, graphics_preset="medium")
+        game = Game("RIX — HUD", (960, 540), vsync=True, graphics_preset="medium")
         first = scene.hud.button(
             "Update status",
             on_click=lambda _: setattr(status, "text", "Button clicked"),

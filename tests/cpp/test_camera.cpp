@@ -100,6 +100,6 @@ int main() {
         // Expected.
     }
 
-    std::cout << "easy3d_camera_tests: PASS\n";
+    std::cout << "rix_camera_tests: PASS\n";
     return 0;
 }

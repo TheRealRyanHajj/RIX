@@ -4,15 +4,14 @@ import time
 
 import pytest
 
-from easy3d import (
+from rix import Entity, Scene
+from rix import net as network
+from rix.net import (
     ClientMatchState,
-    Entity,
     MatchPhase,
     NetworkError,
-    Scene,
     Server,
     ServerMatchState,
-    network,
     register_match_state,
     replication,
 )
@@ -69,6 +68,8 @@ def test_match_state_timer_transitions_and_late_join() -> None:
             None,
             0,
         )
+        with pytest.raises(PermissionError, match="read-only"):
+            first_replication.variable(spawned.id, 1).value = int(MatchPhase.PLAYING)
 
         assert match.start_match(100) == 4
         _pump(server, (first_replication,), lambda: first.revision == 1)
@@ -134,8 +135,6 @@ def test_match_state_timer_transitions_and_late_join() -> None:
         owner.close(destroy=True)
         server.stop()
         server.unload_scene(clear=True)
-
-
 def test_match_schema_and_authority_guards() -> None:
     registry = _registry()
     fields = registry.variables(1)

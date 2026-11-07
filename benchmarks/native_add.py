@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import time
 
-from easy3d import native_add
+from rix import native_add
 
 
 def main() -> None:

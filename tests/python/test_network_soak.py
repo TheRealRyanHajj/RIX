@@ -6,12 +6,12 @@ import sys
 
 import pytest
 
-from easy3d import network
+from rix import net as network
 
 
 def _soak_module():  # type: ignore[no-untyped-def]
     path = Path(__file__).parents[2] / "benchmarks" / "network_soak.py"
-    spec = importlib.util.spec_from_file_location("easy3d_network_soak", path)
+    spec = importlib.util.spec_from_file_location("rix_network_soak", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

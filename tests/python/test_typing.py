@@ -26,7 +26,7 @@ def test_documented_public_api_typechecks_strictly() -> None:
 def test_native_runtime_matches_extension_stub() -> None:
     _run(
         "mypy.stubtest",
-        "easy3d._easy3d",
+        "rix._rix",
         "--allowlist",
         "tests/typecheck/stubtest_allowlist.txt",
     )

@@ -4,18 +4,14 @@ import threading
 
 import pytest
 
-from easy3d import (
+from rix import (
     Cube,
     Entity,
     Game,
     Scene,
     ScriptCallbackError,
-    ScriptRole,
-    client_only,
-    current_script_role,
-    server_only,
 )
-from easy3d.scheduler import SimulationScheduler
+from rix.scheduler import SimulationScheduler
 
 
 def _advance(game: Game, seconds: float) -> None:
@@ -227,30 +223,3 @@ def test_fixed_scheduler_tick_steps_scene_physics_once() -> None:
 
     assert game.scheduler_stats.fixed_ticks == 1
     assert scene.physics_step_count == 1
-
-
-def test_script_role_guards_and_active_context() -> None:
-    observed: list[tuple[str, ScriptRole | None]] = []
-
-    class Actor(Entity):
-        @server_only
-        def update(self, _dt: float) -> None:
-            observed.append(("server", current_script_role()))
-
-        @client_only
-        def late_update(self, _dt: float) -> None:
-            observed.append(("client", current_script_role()))
-
-    for role in (ScriptRole.OFFLINE, ScriptRole.SERVER, ScriptRole.CLIENT):
-        scene = Scene(role.value)
-        Actor(scene=scene)
-        scheduler = SimulationScheduler(role=role)
-        scheduler.begin_run()
-        scheduler.advance(scene, 1.0 / 60.0)
-        scene.clear()
-
-    assert observed == [
-        ("server", ScriptRole.SERVER),
-        ("client", ScriptRole.CLIENT),
-    ]
-    assert current_script_role() is None
