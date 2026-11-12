@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 07 Entity Owned.
+
+Run from the repository root with `python examples/states/07_entity_owned.py`. See
+`examples/states/README.md` for the state-example index."""
+
 from rix import Entity, Game
 
 game = Game("Entity-owned states")

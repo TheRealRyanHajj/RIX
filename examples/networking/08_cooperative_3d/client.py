@@ -1,5 +1,9 @@
 """Independent Pygame+RIX cooperative movement client."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/08_cooperative_3d/client.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

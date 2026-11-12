@@ -1,5 +1,9 @@
 """Headless replicated health/score authority."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/10_health_scoring/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

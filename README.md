@@ -1,6 +1,6 @@
 # RIX — High-performance 3D for Pygame and Python
 
-RIX is the private, Windows-first 3D extension for Pygame Community Edition.
+RIX is a Windows-first 3D engine for Python and Pygame Community Edition.
 Pygame remains the application layer—window, event loop, timing, Surfaces,
 sprites, fonts, menus, and ordinary audio—while RIX supplies native C++20
 D3D11 rendering, Jolt physics, 3D scenes, lights, models, and controllers
@@ -25,6 +25,19 @@ The supported compiler is MSVC. Run native build commands from an x64 Native
 Tools command prompt, or import the Visual Studio developer environment into
 PowerShell.
 
+## Install
+
+Install RIX with its optional Pygame integration using:
+
+```powershell
+py -3.11 -m pip install "rix[pygame]"
+```
+
+For a standalone RIX game without Pygame, install `rix` without the extra. RIX
+currently targets 64-bit Windows and Python 3.11–3.13. A compatible prebuilt
+wheel is required for normal installation; building from source also requires
+the native toolchain listed above.
+
 ## Developer setup
 
 ```powershell
@@ -41,6 +54,10 @@ developer shell and repeat the editable install.
 
 The verified multiplayer/state-system release evidence is recorded in
 [the Phase 16 completion report](docs/phase16-report.md).
+
+FBX and skeletal animation are native and require no Autodesk SDK. See the
+[FBX guide](docs/fbx-importing.md), [animation guide](docs/skeletal-animation.md),
+and [retargeting limits](docs/animation-retargeting.md).
 
 For the standalone native targets:
 
@@ -165,7 +182,8 @@ python examples\pygame\14_hybrid_minigame.py
 - `Scene` and `Entity`: generational native handles, transform hierarchy,
   components, fixed-step linear/angular motion, facing/launch helpers, lookup,
   explicit destruction, and context-local construction.
-- `Cube`, `Sphere`, `Plane`, and `Model`: convenient renderable entities.
+- `Cube`, `Sphere`, `Plane`, and `Model`: convenient renderable entities;
+  `Model` loads OBJ/glTF/GLB/FBX and owns typed skeletal playback controls.
 - `Player` and `CharacterController`: first-/third-person movement, jumping,
   sprinting, crouching, slopes, steps, and camera follow.
 - `Collider`, `Rigidbody`, `Constraint`, and physics queries: Jolt-backed rigid
@@ -304,4 +322,12 @@ tinyobjloader, cgltf, Jolt Physics, GameNetworkingSockets, and Protobuf. Python 
 `pyproject.toml`; license details are in `LICENSES/THIRD_PARTY.md`.
 
 The source version lives in `VERSION` and drives both the native and Python
-versions. This repository and its packages are private/proprietary.
+versions. RIX is licensed under Apache License 2.0; third-party dependencies
+retain their own terms, which are listed in `LICENSES/THIRD_PARTY.md`.
+
+## Contributing and support
+
+Runnable tutorials and examples are indexed in `docs/guides/README.md` and
+`examples/`. Build and validation instructions for contributors are in
+`docs/release.md`. Please include your Windows version, Python version, RIX
+version, and a minimal reproduction when reporting a problem.

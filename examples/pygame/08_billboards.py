@@ -1,5 +1,8 @@
 """Pygame images used as camera-facing world sprites."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/08_billboards.py
+
 import pygame
 import rix
 

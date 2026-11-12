@@ -1,5 +1,8 @@
 """A native-character enemy automatically chases its target."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/06_enemy_game.py
+
 import rix as e3
 
 

@@ -1,5 +1,9 @@
 """Independent headless authoritative echo server using safe message frames."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/04_dedicated_server/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

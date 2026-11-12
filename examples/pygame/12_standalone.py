@@ -1,5 +1,8 @@
 """RIX remains usable without importing Pygame."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/12_standalone.py
+
 import rix
 
 game = rix.Game(title="Standalone RIX")

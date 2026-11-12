@@ -1,5 +1,9 @@
 """Independent Pygame client for the dedicated safe-message server."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/04_dedicated_server/client.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

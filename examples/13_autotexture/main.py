@@ -1,5 +1,8 @@
 """Interactive visual validation scene for AutoTexture and material maps."""
 
+# Usage: from the repository root, run:
+#   python examples/13_autotexture/main.py
+
 from __future__ import annotations
 
 import argparse

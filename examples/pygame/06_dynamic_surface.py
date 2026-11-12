@@ -1,5 +1,8 @@
 """Explicitly update a changing Pygame Surface texture."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/06_dynamic_surface.py
+
 import pygame
 import rix
 

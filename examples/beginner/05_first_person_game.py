@@ -1,5 +1,8 @@
 """One constructor provides first-person movement, view, sprint, and crouch."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/05_first_person_game.py
+
 import rix as e3
 
 

@@ -259,3 +259,35 @@ process digest/replay/resynchronization tests are a release prerequisite.
 
 The full contract is `docs/rollback-contract.md`. The current native character
 prediction path is intentionally narrower and is not described as rollback.
+
+## ADR-0020: Use ufbx and one shared animation runtime
+
+RIX pins ufbx v0.23.1 at commit
+`26a482ae66871d7de36eb722aa060bce95bce274`, compiled privately into the native
+core under its MIT alternative. Wheels do not require the Autodesk SDK or an
+external conversion program. ufbx normalizes FBX axes/units, triangulates
+polygons, exposes skin clusters, and bakes FBX's pivot/layer/Euler curve model
+into the same local TRS `Skeleton`/`AnimationClip` representation already used
+by glTF.
+
+Skinning is limited to the four greatest weights per vertex, followed by
+normalization and a diagnostic when weights were dropped. Skeleton attachment
+uses unique names plus mapped parent hierarchy and rest-pose correction; extra
+unweighted source terminal joints are allowed. Exact file-format equality or
+equal joint counts alone never imply compatibility.
+
+The D3D11 fast path uses 64 joints represented by three uniform rows each;
+larger rigs use bounded native transient-buffer CPU deformation and report that
+choice publicly. Each CPU-skinned part is deformed once per frame into a compact
+layout reused across all passes; the vertex/index pools are capped at 32/8 MiB.
+Animated geometry bypasses bind-only bounds culling until
+per-clip dynamic bounds exist. FBX embedded/layered textures remain explicit
+warning-backed scalar fallbacks rather than being silently called supported.
+
+Animation is scene fixed-step state, not a Python timer. Root motion is in-place
+by default and explicit mode transfers horizontal translation and root yaw to
+the owner once; vertical hip translation and pitch/roll stay in the skeleton so
+loop seam offsets cannot accumulate into floor drift or entity tilt. Physics
+transform ownership can reject root motion. This keeps standalone,
+Pygame-owned, and viewport rendering on one controller without double
+advancement.

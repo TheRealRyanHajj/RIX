@@ -1,5 +1,8 @@
 """Phase 0 interactive native-window smoke test."""
 
+# Usage: from the repository root, run:
+#   python examples/00_window/main.py
+
 from rix import Game
 
 

@@ -88,6 +88,179 @@ constexpr float radians_to_degrees = 57.295779513082320876F;
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
+[[nodiscard]] Quat animation_slerp(Quat left, Quat right, const float amount) {
+    float cosine = left.w * right.w + left.x * right.x +
+                   left.y * right.y + left.z * right.z;
+    if (cosine < 0.0F) {
+        right = {-right.w, -right.x, -right.y, -right.z};
+        cosine = -cosine;
+    }
+    if (cosine > 0.9995F) {
+        return Quat{left.w + (right.w - left.w) * amount,
+                    left.x + (right.x - left.x) * amount,
+                    left.y + (right.y - left.y) * amount,
+                    left.z + (right.z - left.z) * amount}.normalized();
+    }
+    const float angle = std::acos(std::clamp(cosine, -1.0F, 1.0F));
+    const float sine = std::sin(angle);
+    return Quat{
+        left.w * std::sin((1.0F - amount) * angle) / sine +
+            right.w * std::sin(amount * angle) / sine,
+        left.x * std::sin((1.0F - amount) * angle) / sine +
+            right.x * std::sin(amount * angle) / sine,
+        left.y * std::sin((1.0F - amount) * angle) / sine +
+            right.y * std::sin(amount * angle) / sine,
+        left.z * std::sin((1.0F - amount) * angle) / sine +
+            right.z * std::sin(amount * angle) / sine}.normalized();
+}
+
+[[nodiscard]] Quat root_yaw(const Quat rotation,
+                            const Quat reference) noexcept {
+    const Quat relative = rotation * reference.conjugate();
+    const float magnitude = std::sqrt(relative.w * relative.w +
+                                      relative.y * relative.y);
+    if (magnitude <= minimum_scale) return {};
+    return Quat{relative.w / magnitude, 0.0F,
+                relative.y / magnitude, 0.0F};
+}
+
+[[nodiscard]] std::vector<Transform> blend_poses(
+    const std::vector<Transform>& from,
+    const std::vector<Transform>& to,
+    const float amount) {
+    if (from.size() != to.size()) {
+        throw AssetError("animation blend pose sizes do not match");
+    }
+    std::vector<Transform> result(to.size());
+    for (std::size_t index = 0; index < to.size(); ++index) {
+        result[index].position = from[index].position +
+                                 (to[index].position - from[index].position) * amount;
+        result[index].rotation = animation_slerp(
+            from[index].rotation, to[index].rotation, amount);
+        result[index].scale = from[index].scale +
+                              (to[index].scale - from[index].scale) * amount;
+    }
+    return result;
+}
+
+[[nodiscard]] AnimationClip retarget_clip(const AnimationClip& source_clip,
+                                          const Skeleton& source,
+                                          const Skeleton& target,
+                                          const std::string& name) {
+    std::unordered_map<std::string, std::size_t> source_by_name;
+    source_by_name.reserve(source.joints.size());
+    for (std::size_t index = 0; index < source.joints.size(); ++index) {
+        if (!source_by_name.emplace(source.joints[index].name, index).second) {
+            throw AssetError("source animation skeleton has duplicate joint name '" +
+                             source.joints[index].name + "'");
+        }
+    }
+    std::unordered_map<std::string, std::size_t> target_by_name;
+    target_by_name.reserve(target.joints.size());
+    for (std::size_t index = 0; index < target.joints.size(); ++index) {
+        if (!target_by_name.emplace(target.joints[index].name, index).second) {
+            throw AssetError("target model skeleton has duplicate joint name '" +
+                             target.joints[index].name + "'");
+        }
+    }
+    std::vector<std::size_t> source_for_target(target.joints.size());
+    for (std::size_t target_index = 0; target_index < target.joints.size(); ++target_index) {
+        const SkeletonJoint& target_joint = target.joints[target_index];
+        const auto source_found = source_by_name.find(target_joint.name);
+        if (source_found == source_by_name.end()) {
+            throw AssetError("animation skeleton is missing target joint '" +
+                             target_joint.name + "'");
+        }
+        const std::size_t source_index = source_found->second;
+        source_for_target[target_index] = source_index;
+        const SkeletonJoint& source_joint = source.joints[source_index];
+        const std::string target_parent = target_joint.parent < 0
+            ? std::string{}
+            : target.joints[static_cast<std::size_t>(target_joint.parent)].name;
+        const std::string source_parent = source_joint.parent < 0
+            ? std::string{}
+            : source.joints[static_cast<std::size_t>(source_joint.parent)].name;
+        if (target_parent != source_parent) {
+            throw AssetError("animation joint '" + target_joint.name +
+                             "' has incompatible parent (target '" + target_parent +
+                             "', source '" + source_parent + "')");
+        }
+        const auto bounded_ratio = [](const float first, const float second) {
+            const float absolute_first = std::abs(first);
+            const float absolute_second = std::abs(second);
+            if (absolute_first <= 1.0e-6F || absolute_second <= 1.0e-6F) {
+                return absolute_first <= 1.0e-6F && absolute_second <= 1.0e-6F;
+            }
+            const float ratio = absolute_first / absolute_second;
+            return ratio >= 0.25F && ratio <= 4.0F;
+        };
+        if (!bounded_ratio(target_joint.local_bind.scale.x,
+                           source_joint.local_bind.scale.x) ||
+            !bounded_ratio(target_joint.local_bind.scale.y,
+                           source_joint.local_bind.scale.y) ||
+            !bounded_ratio(target_joint.local_bind.scale.z,
+                           source_joint.local_bind.scale.z)) {
+            throw AssetError("animation joint '" + target_joint.name +
+                             "' has incompatible rest scale");
+        }
+        if (target_joint.parent >= 0) {
+            const float target_length = target_joint.local_bind.position.length();
+            const float source_length = source_joint.local_bind.position.length();
+            if (!bounded_ratio(target_length, source_length)) {
+                throw AssetError("animation joint '" + target_joint.name +
+                                 "' has incompatible rest length");
+            }
+        }
+        const Quat& target_rotation = target_joint.local_bind.rotation;
+        const Quat& source_rotation = source_joint.local_bind.rotation;
+        const float rotation_dot = std::abs(
+            target_rotation.w * source_rotation.w +
+            target_rotation.x * source_rotation.x +
+            target_rotation.y * source_rotation.y +
+            target_rotation.z * source_rotation.z);
+        if (rotation_dot < 0.5F) {
+            throw AssetError("animation joint '" + target_joint.name +
+                             "' differs by more than 120 degrees in rest pose");
+        }
+    }
+
+    std::vector<std::size_t> target_for_source(source.joints.size(),
+                                               std::numeric_limits<std::size_t>::max());
+    for (std::size_t target_index = 0; target_index < source_for_target.size(); ++target_index) {
+        target_for_source[source_for_target[target_index]] = target_index;
+    }
+    AnimationClip result;
+    result.name = name;
+    result.duration = source_clip.duration;
+    for (const AnimationChannel& source_channel : source_clip.channels) {
+        const std::size_t target_index = target_for_source[source_channel.joint_index];
+        if (target_index == std::numeric_limits<std::size_t>::max()) continue;
+        AnimationChannel channel = source_channel;
+        channel.joint_index = target_index;
+        const Transform& source_bind = source.joints[source_channel.joint_index].local_bind;
+        const Transform& target_bind = target.joints[target_index].local_bind;
+        for (auto& value : channel.values) {
+            if (channel.target == AnimationTarget::Translation) {
+                value[0] = target_bind.position.x + value[0] - source_bind.position.x;
+                value[1] = target_bind.position.y + value[1] - source_bind.position.y;
+                value[2] = target_bind.position.z + value[2] - source_bind.position.z;
+            } else if (channel.target == AnimationTarget::Rotation) {
+                const Quat corrected = (target_bind.rotation *
+                    source_bind.rotation.conjugate() *
+                    Quat{value[0], value[1], value[2], value[3]}).normalized();
+                value = {corrected.w, corrected.x, corrected.y, corrected.z};
+            } else {
+                value[0] = target_bind.scale.x * value[0] / source_bind.scale.x;
+                value[1] = target_bind.scale.y * value[1] / source_bind.scale.y;
+                value[2] = target_bind.scale.z * value[2] / source_bind.scale.z;
+            }
+        }
+        result.channels.push_back(std::move(channel));
+    }
+    result.validate(target.joints.size());
+    return result;
+}
+
 [[nodiscard]] bool finite(const Quat value) noexcept {
     return std::isfinite(value.w) && std::isfinite(value.x) && std::isfinite(value.y) &&
            std::isfinite(value.z);
@@ -624,8 +797,23 @@ void World::add_model_renderer(const EntityHandle handle,
     RenderComponent component;
     component.kind = RenderKind::Model;
     component.model = model_cache_.load(path);
+    if (component.model->parts.empty()) {
+        throw AssetError("animation-only asset cannot be used as a visible Model: " +
+                         path.string());
+    }
     component.material = material;
     component.cull_mode_override = cull_mode_override;
+    if (component.model->skeleton.has_value()) {
+        ModelAnimationState animation;
+        for (const AnimationClip& clip : component.model->animations) {
+            animation.clips.emplace(clip.name, clip);
+        }
+        animation.pose.reserve(component.model->skeleton->joints.size());
+        for (const SkeletonJoint& joint : component.model->skeleton->joints) {
+            animation.pose.push_back(joint.local_bind);
+        }
+        component.animation = std::move(animation);
+    }
     slot.render_component = std::move(component);
 }
 
@@ -639,6 +827,229 @@ const RenderComponent& World::render_component(const EntityHandle handle) const 
         throw EngineError("entity does not have a render component");
     }
     return *slot.render_component;
+}
+
+RenderComponent& World::mutable_render_component(const EntityHandle handle) {
+    Slot& slot = require_slot(handle);
+    if (!slot.render_component.has_value()) {
+        throw EngineError("entity does not have a render component");
+    }
+    return *slot.render_component;
+}
+
+void World::add_model_animation(const EntityHandle handle,
+                                std::string name,
+                                const std::filesystem::path& path) {
+    if (name.empty()) throw std::invalid_argument("animation name must not be empty");
+    RenderComponent& component = mutable_render_component(handle);
+    if (!component.model || !component.model->skeleton || !component.animation) {
+        throw AssetError("external animations require a model with a skeleton");
+    }
+    const auto source = model_cache_.load(path);
+    if (!source->skeleton || source->animations.empty()) {
+        throw AssetError("animation asset contains no skeleton animation clips: " +
+                         path.string());
+    }
+    const AnimationClip* selected = nullptr;
+    const auto exact = std::find_if(source->animations.begin(), source->animations.end(),
+                                    [&](const AnimationClip& clip) {
+                                        return clip.name == name;
+                                    });
+    selected = exact != source->animations.end() ? &*exact : &source->animations.front();
+    AnimationClip clip = retarget_clip(*selected, *source->skeleton,
+                                       *component.model->skeleton, name);
+    component.animation->clips.insert_or_assign(name, std::move(clip));
+}
+
+void World::play_model_animation(const EntityHandle handle,
+                                 const std::string& name,
+                                 const bool loop,
+                                 const float speed,
+                                 const float blend_seconds,
+                                 const bool root_motion) {
+    if (!std::isfinite(speed) || speed == 0.0F) {
+        throw std::invalid_argument("animation speed must be finite and nonzero");
+    }
+    if (!std::isfinite(blend_seconds) || blend_seconds < 0.0F) {
+        throw std::invalid_argument("animation blend must be finite and non-negative");
+    }
+    RenderComponent& component = mutable_render_component(handle);
+    if (!component.animation || !component.model || !component.model->skeleton) {
+        throw AssetError("model has no animation-capable skeleton");
+    }
+    ModelAnimationState& state = *component.animation;
+    const auto clip = state.clips.find(name);
+    if (clip == state.clips.end()) {
+        throw AssetError("model has no animation clip named '" + name + "'");
+    }
+    state.blend_from = blend_seconds > 0.0F ? state.pose : std::vector<Transform>{};
+    state.blend_duration = blend_seconds;
+    state.blend_elapsed = 0.0F;
+    state.current_clip = name;
+    state.time_seconds = speed < 0.0F ? clip->second.duration : 0.0F;
+    state.speed = speed;
+    state.loop = loop;
+    state.root_motion = root_motion;
+    state.playing = true;
+    state.paused = false;
+    state.pose = clip->second.sample(*component.model->skeleton,
+                                     state.time_seconds, loop);
+}
+
+void World::pause_model_animation(const EntityHandle handle) {
+    RenderComponent& component = mutable_render_component(handle);
+    if (!component.animation || !component.animation->playing) {
+        throw EngineError("model animation is not playing");
+    }
+    component.animation->paused = true;
+}
+
+void World::resume_model_animation(const EntityHandle handle) {
+    RenderComponent& component = mutable_render_component(handle);
+    if (!component.animation || !component.animation->playing) {
+        throw EngineError("model animation is not playing");
+    }
+    component.animation->paused = false;
+}
+
+void World::stop_model_animation(const EntityHandle handle) {
+    RenderComponent& component = mutable_render_component(handle);
+    if (!component.animation || !component.model || !component.model->skeleton) return;
+    ModelAnimationState& state = *component.animation;
+    state.playing = false;
+    state.paused = false;
+    state.current_clip.clear();
+    state.time_seconds = 0.0F;
+    state.blend_from.clear();
+    state.pose.clear();
+    for (const SkeletonJoint& joint : component.model->skeleton->joints) {
+        state.pose.push_back(joint.local_bind);
+    }
+}
+
+void World::advance_model_animations(const float delta_seconds) {
+    if (!std::isfinite(delta_seconds) || delta_seconds < 0.0F) {
+        throw std::invalid_argument("animation delta must be finite and non-negative");
+    }
+    for (const EntityHandle handle : entity_handles()) {
+        Slot& slot = require_slot(handle);
+        if (!slot.enabled || !slot.render_component ||
+            !slot.render_component->animation || !slot.render_component->model ||
+            !slot.render_component->model->skeleton) continue;
+        ModelAnimationState& state = *slot.render_component->animation;
+        if (!state.playing || state.paused) continue;
+        const auto found = state.clips.find(state.current_clip);
+        if (found == state.clips.end()) continue;
+        const AnimationClip& clip = found->second;
+        const float previous_time = state.time_seconds;
+        state.time_seconds += delta_seconds * state.speed;
+        bool completed = false;
+        std::int64_t loop_crossings = 0;
+        if (state.loop && clip.duration > 0.0F) {
+            while (state.time_seconds >= clip.duration) {
+                state.time_seconds -= clip.duration;
+                ++state.completion_count;
+                ++loop_crossings;
+            }
+            while (state.time_seconds < 0.0F) {
+                state.time_seconds += clip.duration;
+                ++state.completion_count;
+                --loop_crossings;
+            }
+        } else if (state.speed > 0.0F && state.time_seconds >= clip.duration) {
+            state.time_seconds = clip.duration;
+            completed = previous_time < clip.duration;
+        } else if (state.speed < 0.0F && state.time_seconds <= 0.0F) {
+            state.time_seconds = 0.0F;
+            completed = previous_time > 0.0F;
+        }
+        std::vector<Transform> pose = clip.sample(
+            *slot.render_component->model->skeleton, state.time_seconds, false);
+        if (!pose.empty() && clip.duration > 0.0F) {
+            const auto first = clip.sample(*slot.render_component->model->skeleton,
+                                           0.0F, false);
+            const auto last = clip.sample(*slot.render_component->model->skeleton,
+                                          clip.duration, false);
+            if (state.root_motion) {
+                const auto previous = clip.sample(
+                    *slot.render_component->model->skeleton, previous_time, false);
+                Vec3 root_delta = pose[0].position - previous[0].position +
+                    (last[0].position - first[0].position) *
+                        static_cast<float>(loop_crossings);
+
+                // Locomotion root motion owns the ground plane only. Vertical
+                // hip translation is part of the authored pose (crouches,
+                // jumps, dance movement) and must not accumulate on the entity
+                // at loop boundaries, where tiny FBX seam offsets otherwise
+                // make the model slowly sink through the floor.
+                root_delta.y = 0.0F;
+
+                const Quat previous_root_yaw = root_yaw(
+                    previous[0].rotation, first[0].rotation);
+                const Quat current_root_yaw = root_yaw(
+                    pose[0].rotation, first[0].rotation);
+                const Quat last_root_yaw = root_yaw(
+                    last[0].rotation, first[0].rotation);
+                Quat root_rotation_delta{};
+                if (loop_crossings == 0) {
+                    root_rotation_delta =
+                        (previous_root_yaw.conjugate() * current_root_yaw).normalized();
+                } else if (loop_crossings > 0) {
+                    root_rotation_delta =
+                        (previous_root_yaw.conjugate() * last_root_yaw).normalized();
+                    for (std::int64_t crossing = 1;
+                         crossing < loop_crossings; ++crossing) {
+                        root_rotation_delta =
+                            (root_rotation_delta * last_root_yaw).normalized();
+                    }
+                    root_rotation_delta =
+                        (root_rotation_delta * current_root_yaw).normalized();
+                } else {
+                    root_rotation_delta =
+                        previous_root_yaw.conjugate().normalized();
+                    for (std::int64_t crossing = -1;
+                         crossing > loop_crossings; --crossing) {
+                        root_rotation_delta =
+                            (root_rotation_delta * last_root_yaw.conjugate()).normalized();
+                    }
+                    root_rotation_delta =
+                        (root_rotation_delta * last_root_yaw.conjugate() *
+                         current_root_yaw).normalized();
+                }
+
+                Transform owner = world_transform(handle);
+                root_delta = {root_delta.x * owner.scale.x,
+                              root_delta.y * owner.scale.y,
+                              root_delta.z * owner.scale.z};
+                Vec3 world_root_delta = owner.rotation.rotate(root_delta);
+                world_root_delta.y = 0.0F;
+                owner.position = owner.position + world_root_delta;
+                owner.rotation = (owner.rotation * root_rotation_delta).normalized();
+                set_world_transform(handle, owner);
+                pose[0].position.x = first[0].position.x;
+                pose[0].position.z = first[0].position.z;
+                pose[0].rotation =
+                    (current_root_yaw.conjugate() * pose[0].rotation).normalized();
+                pose[0].scale = first[0].scale;
+            } else {
+                const float progress = state.time_seconds / clip.duration;
+                pose[0].position = pose[0].position -
+                                   (last[0].position - first[0].position) * progress;
+            }
+        }
+        if (!state.blend_from.empty() && state.blend_duration > 0.0F) {
+            state.blend_elapsed = std::min(
+                state.blend_duration, state.blend_elapsed + delta_seconds);
+            pose = blend_poses(state.blend_from, pose,
+                               state.blend_elapsed / state.blend_duration);
+            if (state.blend_elapsed >= state.blend_duration) state.blend_from.clear();
+        }
+        state.pose = std::move(pose);
+        if (completed) {
+            ++state.completion_count;
+            state.playing = false;
+        }
+    }
 }
 
 std::size_t World::poll_texture_changes() const noexcept {
@@ -1318,6 +1729,53 @@ bool Scene::has_render_component(const EntityHandle handle) const {
 
 const RenderComponent& Scene::render_component(const EntityHandle handle) const {
     return world_.render_component(handle);
+}
+
+void Scene::add_model_animation(const EntityHandle handle,
+                                std::string name,
+                                const std::filesystem::path& path) {
+    world_.add_model_animation(handle, std::move(name), path);
+}
+
+void Scene::play_model_animation(const EntityHandle handle,
+                                 const std::string& name,
+                                 const bool loop,
+                                 const float speed,
+                                 const float blend_seconds,
+                                 const bool root_motion) {
+    if (root_motion && character_entities_.contains(handle.id())) {
+        throw PhysicsError(
+            "root-motion animation cannot drive a character controller; use the "
+            "controller's movement API");
+    }
+    if (root_motion) {
+        const auto physics_entity = physics_entities_.find(handle.id());
+        if (physics_entity != physics_entities_.end()) {
+            if (!physics_entity->second.rigid_body.has_value()) {
+                throw PhysicsError(
+                    "root-motion animation on a collider requires a kinematic Rigidbody");
+            }
+            if (physics_entity->second.rigid_body->motion_type !=
+                PhysicsMotionType::Kinematic) {
+                throw PhysicsError(
+                    "root-motion animation cannot drive a dynamic Rigidbody; use a "
+                    "kinematic Rigidbody or disable root motion");
+            }
+        }
+    }
+    world_.play_model_animation(handle, name, loop, speed, blend_seconds, root_motion);
+}
+
+void Scene::pause_model_animation(const EntityHandle handle) {
+    world_.pause_model_animation(handle);
+}
+
+void Scene::resume_model_animation(const EntityHandle handle) {
+    world_.resume_model_animation(handle);
+}
+
+void Scene::stop_model_animation(const EntityHandle handle) {
+    world_.stop_model_animation(handle);
 }
 
 std::size_t Scene::poll_texture_changes() const noexcept {
@@ -2158,6 +2616,27 @@ void Scene::set_physics_gravity(const Vec3 gravity) {
 void Scene::step_physics(const float delta_seconds) {
     if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0F) {
         throw std::invalid_argument("motion delta must be finite and positive");
+    }
+    world_.advance_model_animations(delta_seconds);
+    // Root motion is authored through World because animation data belongs to
+    // render components. Mirror its transform into kinematic physics bodies
+    // before the physics step so render and collision ownership stay aligned.
+    for (const auto& [entity_id, component] : physics_entities_) {
+        if (!component.rigid_body.has_value() ||
+            component.rigid_body->motion_type != PhysicsMotionType::Kinematic) {
+            continue;
+        }
+        const EntityHandle handle{world_.id(),
+                                  static_cast<std::uint32_t>(entity_id & 0xffff'ffffULL),
+                                  static_cast<std::uint32_t>(entity_id >> 32U)};
+        if (!world_.is_alive(handle) || !world_.has_render_component(handle)) continue;
+        const RenderComponent& render = world_.render_component(handle);
+        if (!render.animation || !render.animation->playing ||
+            !render.animation->root_motion) continue;
+        const Transform transform = world_.world_transform(handle);
+        physics_->set_body_transform(component.body,
+                                     transform.position,
+                                     transform.rotation);
     }
     for (const EntityHandle handle : world_.entity_handles()) {
         EntityMotion& motion = world_.motion(handle);

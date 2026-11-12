@@ -1,5 +1,9 @@
 """Measure Pygame HWND presentation, Surface readback, and Surface uploads."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/pygame_integration.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

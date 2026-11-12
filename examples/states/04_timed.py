@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 04 Timed.
+
+Run from the repository root with `python examples/states/04_timed.py`. See
+`examples/states/README.md` for the state-example index."""
+
 from rix import StateMachine
 
 states = StateMachine("countdown")

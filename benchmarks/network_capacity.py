@@ -1,5 +1,9 @@
 """Finite real-loopback RIX multiplayer capacity benchmark."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/network_capacity.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

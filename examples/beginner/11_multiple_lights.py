@@ -1,5 +1,8 @@
 """Multiple colored lights in a few lines."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/11_multiple_lights.py
+
 from rix import Cube, Game, Light, Plane
 
 game = Game(graphics_preset="high")

@@ -8,14 +8,14 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "rix"
 dynamic = ["version"]
-description = "Private high-performance 3D extension for Pygame and Python"
+description = "Add another dimension to Pygame"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
 authors = [{ name = "RIX contributors" }]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: Microsoft :: Windows :: Windows 10",
     "Operating System :: Microsoft :: Windows :: Windows 11",
     "Programming Language :: C++",

@@ -1,5 +1,8 @@
 """Composable health and a native-motor chase enemy."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/05_enemy_ai.py
+
 from rix import Enemy, Game, Plane, Player, Text
 
 

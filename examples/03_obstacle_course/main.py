@@ -1,5 +1,8 @@
 """Playable Phase 2 obstacle course using only RIX's public Python API."""
 
+# Usage: from the repository root, run:
+#   python examples/03_obstacle_course/main.py
+
 from __future__ import annotations
 
 import argparse

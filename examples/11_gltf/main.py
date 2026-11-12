@@ -1,5 +1,8 @@
 """RIX glTF 2.0 base-pose rendering and skeletal clip sampling example."""
 
+# Usage: from the repository root, run:
+#   python examples/11_gltf/main.py
+
 from __future__ import annotations
 
 import argparse

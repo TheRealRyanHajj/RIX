@@ -1,5 +1,8 @@
 """Third-person movement and camera follow use the same native motor."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/03_third_person.py
+
 from rix import Cube, Game, Plane, Player, Text
 
 

@@ -1,5 +1,9 @@
 """Pygame scoreboard client; Space requests damage against another player."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/10_health_scoring/client.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

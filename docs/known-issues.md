@@ -69,12 +69,29 @@ quality features rather than a physically based rendering suite.
 Graphics-disabled builds retain asset metadata tests but do not decode texture
 pixels or exercise GPU resources.
 
-## Assets
+## Assets and skeletal animation
 
-The glTF importer supports a deliberate subset. Static meshes and animation
-sampling are available, but runtime rendering currently uses the imported base
-pose rather than GPU skinning. Asset diagnostics are snapshots, not a full
-editor/import pipeline.
+glTF/GLB and FBX skeletal models now visibly skin through D3D11, but only that
+backend is verified. GPU palettes are limited to 64 joints; larger rigs use a
+bounded native CPU fallback with 32 MiB vertex and 8 MiB index transient pools.
+Model parts are deformed once and reused across passes, but enough simultaneous
+large CPU-skinned instances can still exhaust that explicit frame bound. Four
+greatest influences are retained and dropped weights are diagnosed. Animated
+models conservatively bypass bind-pose frustum culling, so large crowds can cost
+more than static instances.
+
+FBX embedded/layered textures are not extracted and unsupported transparency
+modes fall back to opaque with warnings. Blend shapes, facial/morph animation,
+IK/constraints, semantic humanoid retargeting, and arbitrary deformers are not
+supported. Compatible-rig retargeting requires joint names and parents plus
+bounded rest transforms; it is not a general cross-rig solver.
+
+The real 52-joint YBot uses GPU skinning. CPU fallback is benchmarked only with
+a generated 65-joint, three-vertex technical fixture; no representative
+redistributable >64-joint character is present, so that result is path overhead,
+not large-rig throughput. The 100-YBot Ultra/shadow run on the recorded RTX
+3070 Ti averaged 138.4 ms/frame and is not a 60 Hz capacity claim. Historical
+benchmark evidence now lives with the external animation-test project.
 
 AutoTexture can draw UV-island outlines for OBJ files it can inspect directly.
 For JSON glTF it currently generates a deterministic 256x256 authored-UV grid,

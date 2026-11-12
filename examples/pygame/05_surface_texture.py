@@ -1,5 +1,8 @@
 """Use a Pygame Surface as a native GPU texture."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/05_surface_texture.py
+
 import pygame
 import rix
 

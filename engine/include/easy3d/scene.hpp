@@ -57,6 +57,22 @@ struct TextureMaterialSettings final {
     void validate() const;
 };
 
+struct ModelAnimationState final {
+    std::unordered_map<std::string, AnimationClip> clips;
+    std::string current_clip;
+    float time_seconds{0.0F};
+    float speed{1.0F};
+    float blend_duration{0.0F};
+    float blend_elapsed{0.0F};
+    bool playing{false};
+    bool paused{false};
+    bool loop{true};
+    bool root_motion{false};
+    std::uint64_t completion_count{0};
+    std::vector<Transform> pose;
+    std::vector<Transform> blend_from;
+};
+
 struct RenderComponent final {
     RenderKind kind{RenderKind::Cube};
     std::shared_ptr<const MeshData> mesh;
@@ -73,6 +89,7 @@ struct RenderComponent final {
     // Imported models leave this empty so each material can honor glTF's
     // doubleSided flag. An explicit user mutation overrides every part.
     std::optional<CullMode> cull_mode_override;
+    std::optional<ModelAnimationState> animation;
 };
 
 enum class LightKind {
@@ -283,6 +300,20 @@ public:
                             std::optional<CullMode> cull_mode_override = std::nullopt);
     [[nodiscard]] bool has_render_component(EntityHandle handle) const;
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
+    [[nodiscard]] RenderComponent& mutable_render_component(EntityHandle handle);
+    void add_model_animation(EntityHandle handle,
+                             std::string name,
+                             const std::filesystem::path& path);
+    void play_model_animation(EntityHandle handle,
+                              const std::string& name,
+                              bool loop = true,
+                              float speed = 1.0F,
+                              float blend_seconds = 0.0F,
+                              bool root_motion = false);
+    void pause_model_animation(EntityHandle handle);
+    void resume_model_animation(EntityHandle handle);
+    void stop_model_animation(EntityHandle handle);
+    void advance_model_animations(float delta_seconds);
     [[nodiscard]] std::size_t poll_texture_changes() const noexcept;
     void set_render_color(EntityHandle handle, Color color);
     void set_render_lit(EntityHandle handle, bool lit);
@@ -432,6 +463,18 @@ public:
                             std::optional<CullMode> cull_mode_override = std::nullopt);
     [[nodiscard]] bool has_render_component(EntityHandle handle) const;
     [[nodiscard]] const RenderComponent& render_component(EntityHandle handle) const;
+    void add_model_animation(EntityHandle handle,
+                             std::string name,
+                             const std::filesystem::path& path);
+    void play_model_animation(EntityHandle handle,
+                              const std::string& name,
+                              bool loop = true,
+                              float speed = 1.0F,
+                              float blend_seconds = 0.0F,
+                              bool root_motion = false);
+    void pause_model_animation(EntityHandle handle);
+    void resume_model_animation(EntityHandle handle);
+    void stop_model_animation(EntityHandle handle);
     [[nodiscard]] std::size_t poll_texture_changes() const noexcept;
     [[nodiscard]] const std::optional<SkyboxConfig>& skybox() const noexcept;
     void set_procedural_skybox(Color top,

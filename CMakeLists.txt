@@ -90,6 +90,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cgltf)
 
+# ufbx 0.23.1. FBX parsing, triangulation, skinning metadata, and animation
+# baking remain private implementation details behind RIX assets.
+FetchContent_Declare(
+    ufbx
+    GIT_REPOSITORY https://github.com/ufbx/ufbx.git
+    GIT_TAG 26a482ae66871d7de36eb722aa060bce95bce274
+    GIT_SHALLOW FALSE
+)
+FetchContent_MakeAvailable(ufbx)
+add_library(rix_ufbx STATIC "${ufbx_SOURCE_DIR}/ufbx.c")
+set_target_properties(rix_ufbx PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+)
+target_include_directories(rix_ufbx PUBLIC "${ufbx_SOURCE_DIR}")
+if(MSVC)
+    target_compile_options(rix_ufbx PRIVATE /W3)
+endif()
+
 # Jolt Physics 5.6.0. The native integration remains private behind RIX's
 # world/body handles and is built as a static, CPU-only library.
 set(JPH_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -226,6 +246,7 @@ endif()
 set(easy3d_core_sources
     engine/src/audio/audio.cpp
     engine/src/assets/image.cpp
+    engine/src/assets/fbx.cpp
     engine/src/assets/gltf.cpp
     engine/src/assets/model.cpp
     engine/src/core/engine.cpp
@@ -307,11 +328,15 @@ if(RIX_ENABLE_GRAPHICS)
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_solid_color_instanced.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_textured.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_textured_instanced.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_textured_skinned.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_solid_color_skinned.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_postprocess.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_shadow.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_shadow_instanced.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_shadow_skinned.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_point_shadow.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_point_shadow_instanced.sc"
+                "${EASY3D_SHADER_SOURCE_DIR}/vs_point_shadow_skinned.sc"
                 "${EASY3D_SHADER_SOURCE_DIR}/vs_ui.sc"
             VARYING_DEF "${EASY3D_SHADER_SOURCE_DIR}/varying.def.sc"
             OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders"
@@ -347,14 +372,18 @@ if(RIX_ENABLE_GRAPHICS)
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_solid_color.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_textured.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_textured_instanced.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_textured_skinned.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_solid_color_skinned.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_textured.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_postprocess.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_postprocess.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_sky.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_shadow.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_shadow_instanced.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_shadow_skinned.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_point_shadow.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_point_shadow_instanced.sc.bin.h"
+            "${EASY3D_SHADER_INCLUDE_DIR}/vs_point_shadow_skinned.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_shadow.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/fs_point_shadow.sc.bin.h"
             "${EASY3D_SHADER_INCLUDE_DIR}/vs_ui.sc.bin.h"
@@ -381,7 +410,7 @@ target_include_directories(easy3d_core
         "${CMAKE_CURRENT_SOURCE_DIR}/engine/src"
         "${cgltf_SOURCE_DIR}"
 )
-target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader Jolt)
+target_link_libraries(easy3d_core PRIVATE glm::glm tinyobjloader rix_ufbx Jolt)
 
 if(RIX_ENABLE_NETWORKING)
     target_compile_definitions(easy3d_core PRIVATE EASY3D_HAS_GNS=1)
@@ -467,6 +496,14 @@ if(BUILD_TESTING)
     target_compile_features(easy3d_gltf_tests PRIVATE cxx_std_20)
     target_link_libraries(easy3d_gltf_tests PRIVATE RIX::core)
     add_test(NAME rix.gltf COMMAND easy3d_gltf_tests)
+
+    add_executable(easy3d_fbx_tests tests/cpp/test_fbx.cpp)
+    target_compile_features(easy3d_fbx_tests PRIVATE cxx_std_20)
+    target_compile_definitions(easy3d_fbx_tests PRIVATE
+        RIX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        RIX_UFBX_SOURCE_DIR="${ufbx_SOURCE_DIR}")
+    target_link_libraries(easy3d_fbx_tests PRIVATE RIX::core rix_ufbx)
+    add_test(NAME rix.fbx COMMAND easy3d_fbx_tests)
 
     add_executable(easy3d_render_component_tests tests/cpp/test_render_components.cpp)
     target_compile_features(easy3d_render_component_tests PRIVATE cxx_std_20)

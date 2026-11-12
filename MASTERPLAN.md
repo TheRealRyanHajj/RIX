@@ -504,3 +504,94 @@ An item is checked only after its implementation and relevant validation pass.
   client/server regression gates.
 - [x] 16.7.7 Synchronize every maintained document with only verified behavior
   and produce the final implementation/security/performance/limitations report.
+
+## Phase 17 — FBX importing and skeletal animation
+
+This numbered checklist is the execution ledger for the FBX and skeletal
+animation goal supplied on 2026-11-08. An item is checked only after its
+implementation and relevant native, Python, asset, or interactive validation
+passes. The mandatory acceptance asset pair is the Mixamo YBot model and
+Thriller animation identified by the asset audit.
+
+### 17.1 Repository and asset audit
+
+- [x] 17.1.1 Preserve unrelated worktree changes and establish Python,
+  Debug/Release native, package, typing, and toolchain baselines.
+- [x] 17.1.2 Import the original YBot and Thriller source assets without
+  altering them, fingerprint their bytes, and document format/version/content.
+- [x] 17.1.3 Inspect skeleton names, hierarchy, bind/rest poses, units, axes,
+  embedded media, clips, root motion, and direct/retargeted compatibility.
+- [x] 17.1.4 Publish `ASSET_AUDIT.md` beside the external animation test and
+  preserve the source FBX files outside the engine repository.
+
+### 17.2 Reproducible ufbx and static FBX importing
+
+- [x] 17.2.1 Pin ufbx v0.23.1/commit
+  `26a482ae66871d7de36eb722aa060bce95bce274` in CMake and record its license.
+- [x] 17.2.2 Load binary and ASCII FBX through the shared model cache with
+  actionable parse errors and safe malformed-input handling.
+- [x] 17.2.3 Import triangulated multi-mesh geometry, normals, UVs, colors,
+  node/geometry transforms, bounds, coordinate axes, and units into `ModelData`.
+- [x] 17.2.4 Import supported FBX base-color/PBR/normal/emissive/transparency/
+  double-sided materials and external or embedded textures with documented
+  fallbacks.
+- [x] 17.2.5 Preserve verified OBJ and glTF/GLB behavior and caching.
+
+### 17.3 Shared skeletons, weights, and clips
+
+- [x] 17.3.1 Extend shared meshes with validated four-influence joint indices
+  and normalized weights, reporting dropped or malformed influences.
+- [x] 17.3.2 Import FBX joint hierarchy, rest/local bind transforms, inverse
+  binds, skin clusters, mesh-to-skeleton transforms, and skeleton identity.
+- [x] 17.3.3 Import every FBX animation stack through deterministic baked local
+  TRS clips, preserving nonzero ranges, timing, quaternion continuity, and
+  root metadata.
+- [x] 17.3.4 Add hierarchy/rest/bind-aware compatibility mapping and bounded
+  Mixamo rest-pose/axis/scale correction with actionable incompatibility errors.
+- [x] 17.3.5 Reuse the same skeleton, clip, pose evaluation, blending, and
+  external-animation runtime for FBX and glTF/GLB.
+
+### 17.4 Native playback and visible skinning
+
+- [x] 17.4.1 Add independent per-render-instance playback state, automatic
+  scheduler advancement, loop/clamp/reverse, pause/resume/stop/restart, and
+  exactly-once completion events.
+- [x] 17.4.2 Add interruption-safe local-pose blending and hierarchical global
+  pose/palette evaluation.
+- [x] 17.4.3 Implement D3D11/bgfx GPU skinning for positions, normals, and
+  tangents with bounded palette transport and explicit diagnostics/limits.
+- [x] 17.4.4 Skin directional and point shadow passes and keep lighting,
+  normal/PBR materials, culling, bounds, postprocessing, and cleanup correct.
+- [x] 17.4.5 Support multiple independently animated instances sharing immutable
+  model/texture/clip data, with a bounded native CPU fallback where required.
+- [x] 17.4.6 Implement explicit in-place/default and opt-in root-motion modes
+  without double-applying physics or transforms.
+
+### 17.5 Python, Pygame, and examples
+
+- [x] 17.5.1 Add typed public `Model.play()`, `add_animation()`, pause/resume/
+  stop, speed/loop/blend/root-motion, state/time/duration, and completion APIs.
+- [x] 17.5.2 Support compatible external FBX and glTF/GLB animation-only files
+  using public APIs and clear skeleton errors.
+- [x] 17.5.3 Advance animation exactly once in standalone `Game`, Pygame `World`,
+  and independent viewport rendering.
+- [x] 17.5.4 Create the external `animation test/main.py` acceptance program
+  with public APIs, automatic looping, camera, lighting, floor/shadows, and
+  documented controls; keep its FBX assets outside the engine repository.
+
+### 17.6 Tests, performance, documentation, and acceptance
+
+- [x] 17.6.1 Add native importer/skeleton/weights/sampling/blending/retargeting/
+  skinning/invalid-input/lifetime tests, including the real asset pair.
+- [x] 17.6.2 Add Python playback/external-clip/callback/independent-instance/
+  scene/Pygame tests and synchronized type stubs.
+- [x] 17.6.3 Prove distinct valid deformed YBot poses, looping, restart, repeated
+  load/unload, and compatibility against the real YBot/Thriller assets.
+- [x] 17.6.4 Benchmark truthful 1/10/100-instance CPU/GPU animation, shadows,
+  loading, memory, draw calls, and frame costs on recorded hardware.
+- [x] 17.6.5 Publish FBX, skeletal-animation, retargeting, Mixamo, Pygame, root
+  motion, feature/API/architecture/decision/progress/known-issue documentation.
+- [x] 17.6.6 Pass final editable install, package integrity, Python regression,
+  Debug/Release native, focused typing, and retained OBJ/glTF/Pygame gates.
+- [x] 17.6.7 Interactively validate and capture the actual YBot visibly
+  performing Thriller on Windows/D3D11, including animated shadows and cleanup.

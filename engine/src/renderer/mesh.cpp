@@ -89,7 +89,7 @@ void MeshData::validate() const {
     }
     for (const Vertex& vertex : vertices) {
         if (!finite(vertex.position) || !finite(vertex.normal) || !finite(vertex.uv) ||
-            !finite(vertex.color) || !finite(vertex.tangent)) {
+            !finite(vertex.color) || !finite(vertex.tangent) || !finite(vertex.weights)) {
             throw std::invalid_argument("mesh vertex attributes must be finite");
         }
         if (vertex.normal.length_squared() <= 1.0e-12F) {
@@ -100,6 +100,14 @@ void MeshData::validate() const {
             std::abs(std::abs(vertex.tangent[3]) - 1.0F) > 1.0e-4F) {
             throw std::invalid_argument(
                 "mesh tangents must be nonzero with handedness -1 or 1");
+        }
+        const float weight_sum = vertex.weights[0] + vertex.weights[1] +
+                                 vertex.weights[2] + vertex.weights[3];
+        if (std::any_of(vertex.weights.begin(), vertex.weights.end(),
+                        [](const float weight) { return weight < 0.0F; }) ||
+            (weight_sum > 0.0F && std::abs(weight_sum - 1.0F) > 1.0e-4F)) {
+            throw std::invalid_argument(
+                "mesh skin weights must be non-negative and normalized");
         }
     }
     for (const std::uint32_t index : indices) {

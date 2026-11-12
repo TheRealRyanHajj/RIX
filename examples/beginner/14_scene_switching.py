@@ -1,5 +1,8 @@
 """Load two explicit scenes across successive native window runs."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/14_scene_switching.py
+
 from rix import Camera, Cube, Game, Light, Scene, Text
 
 

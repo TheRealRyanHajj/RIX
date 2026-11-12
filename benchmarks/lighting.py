@@ -1,5 +1,9 @@
 """Repeatable D3D11 benchmark for bounded multi-light selection and shading."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/lighting.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

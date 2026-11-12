@@ -26,6 +26,10 @@ struct Vertex final {
     Color color{};
     // xyz is the tangent direction and w is the bitangent handedness.
     std::array<float, 4> tangent{1.0F, 0.0F, 0.0F, 1.0F};
+    // Up to four linear-blend skin influences. A zero weight sum marks an
+    // ordinary static vertex and leaves the joint indices unused.
+    std::array<std::uint8_t, 4> joints{};
+    std::array<float, 4> weights{};
 };
 
 struct Bounds final {

@@ -1,5 +1,9 @@
 """Compare convenience construction costs with equivalent explicit APIs."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/high_level_api.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

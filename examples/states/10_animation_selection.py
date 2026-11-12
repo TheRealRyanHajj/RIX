@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 10 Animation Selection.
+
+Run from the repository root with `python examples/states/10_animation_selection.py`.
+See `examples/states/README.md` for the state-example index."""
+
 from rix import AnimationSelection, StateMachine
 
 # RIX currently exposes clip-selection intent and glTF sampling metadata; the

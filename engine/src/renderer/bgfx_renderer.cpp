@@ -32,6 +32,10 @@
 #include "vs_postprocess.sc.bin.h"
 #include "vs_shadow.sc.bin.h"
 #include "vs_shadow_instanced.sc.bin.h"
+#include "vs_shadow_skinned.sc.bin.h"
+#include "vs_point_shadow_skinned.sc.bin.h"
+#include "vs_solid_color_skinned.sc.bin.h"
+#include "vs_textured_skinned.sc.bin.h"
 #include "vs_point_shadow.sc.bin.h"
 #include "vs_point_shadow_instanced.sc.bin.h"
 #include "vs_ui.sc.bin.h"
@@ -42,6 +46,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -67,6 +72,11 @@ constexpr std::size_t max_pending_viewport_readbacks = 8;
 constexpr std::size_t max_directional_lights = 4;
 constexpr std::size_t max_point_lights = 64;
 constexpr std::size_t max_spot_lights = 32;
+constexpr std::size_t max_skin_joints = 64;
+constexpr std::size_t skin_rows_per_joint = 3;
+constexpr std::size_t max_skin_rows = max_skin_joints * skin_rows_per_joint;
+constexpr std::uint32_t cpu_skinning_transient_vertex_bytes = 32U * 1024U * 1024U;
+constexpr std::uint32_t cpu_skinning_transient_index_bytes = 8U * 1024U * 1024U;
 
 [[nodiscard]] float srgb_to_linear_channel(const float value) noexcept {
     return value <= 0.04045F
@@ -84,6 +94,16 @@ constexpr std::size_t max_spot_lights = 32;
 }
 
 struct GpuVertex final {
+    float position[3];
+    float normal[3];
+    float uv[2];
+    std::uint32_t color;
+    float tangent[4];
+    std::uint8_t joints[4];
+    float weights[4];
+};
+
+struct CpuSkinnedVertex final {
     float position[3];
     float normal[3];
     float uv[2];
@@ -179,6 +199,8 @@ public:
                 {vertex.uv.x, vertex.uv.y},
                 vertex.color.rgba8(),
                 {vertex.tangent[0], vertex.tangent[1], vertex.tangent[2], vertex.tangent[3]},
+                {vertex.joints[0], vertex.joints[1], vertex.joints[2], vertex.joints[3]},
+                {vertex.weights[0], vertex.weights[1], vertex.weights[2], vertex.weights[3]},
             });
         }
 
@@ -571,6 +593,18 @@ struct ShadowBatch final {
     MeshLifetimeManager::Handle mesh;
     CullMode cull_mode{CullMode::Back};
     std::vector<glm::mat4> transforms;
+    std::vector<float> bone_rows;
+    std::uint16_t bone_row_count{0};
+    const RenderComponent* cpu_component{nullptr};
+    const MeshData* cpu_mesh{nullptr};
+    std::vector<glm::mat4> cpu_palette;
+};
+
+struct CpuSkinnedBuffer final {
+    const RenderComponent* component{nullptr};
+    const MeshData* mesh{nullptr};
+    bgfx::TransientVertexBuffer vertices{};
+    bgfx::TransientIndexBuffer indices{};
 };
 
 struct LightingState final {
@@ -743,6 +777,8 @@ public:
         graphics_preset_ = graphics_preset;
         graphics_features_ = graphics_features(graphics_preset);
         init.reset = reset_flags_;
+        init.limits.maxTransientVbSize = cpu_skinning_transient_vertex_bytes;
+        init.limits.maxTransientIbSize = cpu_skinning_transient_index_bytes;
 
         if (!bgfx::init(init)) {
             throw EngineError("bgfx failed to initialize the Direct3D 11 renderer");
@@ -762,6 +798,15 @@ public:
             update_view_rect();
 
             layout_.begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+                .add(bgfx::Attrib::Tangent, 4, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Indices, 4, bgfx::AttribType::Uint8, false, true)
+                .add(bgfx::Attrib::Weight, 4, bgfx::AttribType::Float)
+                .end();
+            cpu_skinned_layout_.begin()
                 .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
@@ -849,6 +894,14 @@ public:
             bgfx::destroy(textured_instanced_program_);
             textured_instanced_program_ = BGFX_INVALID_HANDLE;
         }
+        for (bgfx::ProgramHandle* handle : {
+                 &solid_skinned_program_, &textured_skinned_program_,
+                 &shadow_skinned_program_, &point_shadow_skinned_program_}) {
+            if (bgfx::isValid(*handle)) {
+                bgfx::destroy(*handle);
+                *handle = BGFX_INVALID_HANDLE;
+            }
+        }
         if (bgfx::isValid(postprocess_program_)) {
             bgfx::destroy(postprocess_program_);
             postprocess_program_ = BGFX_INVALID_HANDLE;
@@ -900,6 +953,10 @@ public:
         if (bgfx::isValid(normal_matrix_)) {
             bgfx::destroy(normal_matrix_);
             normal_matrix_ = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(bone_rows_)) {
+            bgfx::destroy(bone_rows_);
+            bone_rows_ = BGFX_INVALID_HANDLE;
         }
         if (bgfx::isValid(ambient_light_)) {
             bgfx::destroy(ambient_light_);
@@ -1007,6 +1064,7 @@ public:
     }
 
     void render_frame(const bool present_to_window) {
+        cpu_skinned_buffers_.clear();
         render_width_ = width_;
         render_height_ = height_;
         linear_output_ = postprocess_active_;
@@ -1092,6 +1150,7 @@ public:
         }
 
         ViewportTarget& target = viewport_target(width, height);
+        cpu_skinned_buffers_.clear();
         stats_ = {};
         stats_.enhanced_lighting = graphics_features_.enhanced_lighting;
         stats_.shadows = shadow_active_;
@@ -1406,6 +1465,18 @@ private:
                                          fs_textured_dxbc,
                                          static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
                                          "textured");
+        solid_skinned_program_ = make_program(
+            vs_solid_color_skinned_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_solid_color_skinned_dxbc)),
+            fs_solid_color_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_solid_color_dxbc)),
+            "skinned solid-color");
+        textured_skinned_program_ = make_program(
+            vs_textured_skinned_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_textured_skinned_dxbc)),
+            fs_textured_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_textured_dxbc)),
+            "skinned textured");
         solid_instanced_program_ = make_program(
             vs_solid_color_instanced_dxbc,
             static_cast<std::uint32_t>(sizeof(vs_solid_color_instanced_dxbc)),
@@ -1436,6 +1507,12 @@ private:
             fs_shadow_dxbc,
             static_cast<std::uint32_t>(sizeof(fs_shadow_dxbc)),
             "shadow");
+        shadow_skinned_program_ = make_program(
+            vs_shadow_skinned_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_shadow_skinned_dxbc)),
+            fs_shadow_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_shadow_dxbc)),
+            "skinned shadow");
         shadow_instanced_program_ = make_program(
             vs_shadow_instanced_dxbc,
             static_cast<std::uint32_t>(sizeof(vs_shadow_instanced_dxbc)),
@@ -1448,6 +1525,12 @@ private:
             fs_point_shadow_dxbc,
             static_cast<std::uint32_t>(sizeof(fs_point_shadow_dxbc)),
             "point shadow");
+        point_shadow_skinned_program_ = make_program(
+            vs_point_shadow_skinned_dxbc,
+            static_cast<std::uint32_t>(sizeof(vs_point_shadow_skinned_dxbc)),
+            fs_point_shadow_dxbc,
+            static_cast<std::uint32_t>(sizeof(fs_point_shadow_dxbc)),
+            "skinned point shadow");
         point_shadow_instanced_program_ = make_program(
             vs_point_shadow_instanced_dxbc,
             static_cast<std::uint32_t>(sizeof(vs_point_shadow_instanced_dxbc)),
@@ -1462,6 +1545,9 @@ private:
         material_color_ = bgfx::createUniform("u_materialColor", bgfx::UniformType::Vec4);
         material_params_ = bgfx::createUniform("u_materialParams", bgfx::UniformType::Vec4);
         normal_matrix_ = bgfx::createUniform("u_normalMatrix", bgfx::UniformType::Vec4, 3);
+        bone_rows_ = bgfx::createUniform(
+            "u_boneRows", bgfx::UniformType::Vec4,
+            static_cast<std::uint16_t>(max_skin_rows));
         ambient_light_ = bgfx::createUniform("u_ambientLight", bgfx::UniformType::Vec4);
         directional_lights_ = bgfx::createUniform(
             "u_directionalLights", bgfx::UniformType::Vec4,
@@ -1532,7 +1618,12 @@ private:
         ambient_occlusion_sampler_ =
             bgfx::createUniform("s_aoMap", bgfx::UniformType::Sampler);
         if (!bgfx::isValid(material_color_) || !bgfx::isValid(material_params_) ||
-            !bgfx::isValid(normal_matrix_) || !bgfx::isValid(ambient_light_) ||
+            !bgfx::isValid(normal_matrix_) || !bgfx::isValid(bone_rows_) ||
+            !bgfx::isValid(solid_skinned_program_) ||
+            !bgfx::isValid(textured_skinned_program_) ||
+            !bgfx::isValid(shadow_skinned_program_) ||
+            !bgfx::isValid(point_shadow_skinned_program_) ||
+            !bgfx::isValid(ambient_light_) ||
             !bgfx::isValid(directional_lights_) || !bgfx::isValid(directional_colors_) ||
             !bgfx::isValid(point_positions_ranges_) || !bgfx::isValid(point_colors_) ||
             !bgfx::isValid(spot_positions_ranges_) ||
@@ -2340,6 +2431,73 @@ private:
                           {transform.scale.x, transform.scale.y, transform.scale.z});
     }
 
+    [[nodiscard]] static bool mesh_has_skinning(const MeshData& mesh) {
+        return std::any_of(
+            mesh.vertices.begin(), mesh.vertices.end(), [](const Vertex& vertex) {
+                return std::any_of(
+                    vertex.weights.begin(), vertex.weights.end(),
+                    [](const float weight) { return weight > 0.0F; });
+            });
+    }
+
+    [[nodiscard]] static std::vector<glm::mat4> skinning_palette(
+        const RenderComponent& component) {
+        if (!component.model || !component.model->skeleton || !component.animation) {
+            return {};
+        }
+        const Skeleton& skeleton = *component.model->skeleton;
+        const std::vector<Transform>& pose = component.animation->pose;
+        if (pose.size() != skeleton.joints.size()) {
+            throw EngineError("animated model pose does not match its skeleton");
+        }
+
+        std::vector<glm::mat4> global(skeleton.joints.size(), glm::mat4(1.0F));
+        std::vector<std::uint8_t> state(skeleton.joints.size(), 0U);
+        std::function<void(std::size_t)> resolve = [&](const std::size_t index) {
+            if (state[index] == 2U) return;
+            if (state[index] == 1U) {
+                throw EngineError("animated model skeleton contains a cycle");
+            }
+            state[index] = 1U;
+            const SkeletonJoint& joint = skeleton.joints[index];
+            const glm::mat4 local = model_matrix(pose[index]);
+            if (joint.parent >= 0) {
+                const auto parent = static_cast<std::size_t>(joint.parent);
+                resolve(parent);
+                global[index] = global[parent] * local;
+            } else {
+                global[index] = local;
+            }
+            state[index] = 2U;
+        };
+
+        std::vector<glm::mat4> palette(skeleton.joints.size(), glm::mat4(1.0F));
+        for (std::size_t index = 0; index < skeleton.joints.size(); ++index) {
+            resolve(index);
+            palette[index] = global[index] *
+                glm::make_mat4(skeleton.joints[index].inverse_bind.values.data());
+        }
+        return palette;
+    }
+
+    [[nodiscard]] static std::vector<float> skinning_rows(
+        const std::vector<glm::mat4>& palette) {
+        if (palette.empty() || palette.size() > max_skin_joints) return {};
+        std::vector<float> rows;
+        rows.resize(palette.size() * skin_rows_per_joint * 4U);
+        for (std::size_t index = 0; index < palette.size(); ++index) {
+            const std::size_t offset = index * skin_rows_per_joint * 4U;
+            for (std::size_t row = 0; row < skin_rows_per_joint; ++row) {
+                const auto matrix_row = static_cast<glm::length_t>(row);
+                rows[offset + row * 4U + 0U] = palette[index][0][matrix_row];
+                rows[offset + row * 4U + 1U] = palette[index][1][matrix_row];
+                rows[offset + row * 4U + 2U] = palette[index][2][matrix_row];
+                rows[offset + row * 4U + 3U] = palette[index][3][matrix_row];
+            }
+        }
+        return rows;
+    }
+
     void update_scene_lighting(const Camera& active_camera, const Frustum& frustum) {
         lighting_ = {};
         directional_shadow_enabled_ = false;
@@ -2712,6 +2870,131 @@ private:
         ++stats_.draw_calls;
     }
 
+    void submit_skinned_draw(const MeshLifetimeManager::Handle mesh,
+                             const Material& material,
+                             const glm::mat4& transform,
+                             const SceneBatch::Textures& textures,
+                             const SceneBatch::Mapping& mapping,
+                             const std::vector<float>& bone_rows) {
+        if (bone_rows.empty() || bone_rows.size() % 4U != 0U ||
+            bone_rows.size() / 4U > max_skin_rows) {
+            throw EngineError("invalid GPU skinning palette");
+        }
+        apply_draw_uniforms(material, transform, textures, mapping);
+        bgfx::setUniform(bone_rows_, bone_rows.data(),
+                         static_cast<std::uint16_t>(bone_rows.size() / 4U));
+        mesh_resources_->bind(mesh);
+        if (textures.albedo.has_value()) {
+            bind_material_textures(textures);
+        }
+        bgfx::setState(render_state(material));
+        bgfx::submit(main_view,
+                     textures.albedo.has_value() ? textured_skinned_program_
+                                                 : solid_skinned_program_);
+        ++stats_.draw_calls;
+    }
+
+    [[nodiscard]] static std::vector<CpuSkinnedVertex> cpu_skinned_vertices(
+        const MeshData& mesh,
+        const std::vector<glm::mat4>& palette) {
+        std::vector<CpuSkinnedVertex> result;
+        result.reserve(mesh.vertices.size());
+        for (const Vertex& vertex : mesh.vertices) {
+            glm::vec4 position{0.0F};
+            glm::vec4 normal{0.0F};
+            glm::vec4 tangent{0.0F};
+            for (std::size_t influence = 0; influence < 4; ++influence) {
+                const float weight = vertex.weights[influence];
+                if (weight <= 0.0F) continue;
+                const std::size_t joint = vertex.joints[influence];
+                if (joint >= palette.size()) {
+                    throw EngineError("CPU skinning encountered an invalid joint index");
+                }
+                position += palette[joint] *
+                    glm::vec4(vertex.position.x, vertex.position.y,
+                              vertex.position.z, 1.0F) * weight;
+                normal += palette[joint] *
+                    glm::vec4(vertex.normal.x, vertex.normal.y,
+                              vertex.normal.z, 0.0F) * weight;
+                tangent += palette[joint] *
+                    glm::vec4(vertex.tangent[0], vertex.tangent[1],
+                              vertex.tangent[2], 0.0F) * weight;
+            }
+            const glm::vec3 normal3 = glm::normalize(glm::vec3(normal));
+            const glm::vec3 tangent3 = glm::normalize(glm::vec3(tangent));
+            result.push_back({
+                {position.x, position.y, position.z},
+                {normal3.x, normal3.y, normal3.z},
+                {vertex.uv.x, vertex.uv.y},
+                vertex.color.rgba8(),
+                {tangent3.x, tangent3.y, tangent3.z, vertex.tangent[3]},
+            });
+        }
+        return result;
+    }
+
+    void bind_cpu_skinned_mesh(const MeshData& mesh,
+                               const std::vector<glm::mat4>& palette,
+                               const RenderComponent* const component) {
+        if (component == nullptr) {
+            throw EngineError("CPU skinning requires an owning render component");
+        }
+        const auto cached = std::find_if(
+            cpu_skinned_buffers_.begin(), cpu_skinned_buffers_.end(),
+            [&](const CpuSkinnedBuffer& buffer) {
+                return buffer.component == component && buffer.mesh == &mesh;
+            });
+        if (cached != cpu_skinned_buffers_.end()) {
+            bgfx::setVertexBuffer(0, &cached->vertices);
+            bgfx::setIndexBuffer(&cached->indices);
+            return;
+        }
+        if (mesh.vertices.size() > std::numeric_limits<std::uint32_t>::max() ||
+            mesh.indices.size() > std::numeric_limits<std::uint32_t>::max()) {
+            throw EngineError("CPU-skinned mesh exceeds bgfx's 32-bit limits");
+        }
+        const auto vertex_count = static_cast<std::uint32_t>(mesh.vertices.size());
+        const auto index_count = static_cast<std::uint32_t>(mesh.indices.size());
+        if (bgfx::getAvailTransientVertexBuffer(
+                vertex_count, cpu_skinned_layout_) < vertex_count ||
+            bgfx::getAvailTransientIndexBuffer(index_count, true) < index_count) {
+            throw EngineError(
+                "CPU skinning exceeded this frame's bounded transient-buffer budget");
+        }
+        const std::vector<CpuSkinnedVertex> vertices =
+            cpu_skinned_vertices(mesh, palette);
+        bgfx::TransientVertexBuffer vertex_buffer;
+        bgfx::TransientIndexBuffer index_buffer;
+        bgfx::allocTransientVertexBuffer(
+            &vertex_buffer, vertex_count, cpu_skinned_layout_);
+        bgfx::allocTransientIndexBuffer(&index_buffer, index_count, true);
+        std::memcpy(vertex_buffer.data, vertices.data(),
+                    vertices.size() * sizeof(CpuSkinnedVertex));
+        std::memcpy(index_buffer.data, mesh.indices.data(),
+                    mesh.indices.size() * sizeof(std::uint32_t));
+        cpu_skinned_buffers_.push_back(
+            {component, &mesh, vertex_buffer, index_buffer});
+        const CpuSkinnedBuffer& stored = cpu_skinned_buffers_.back();
+        bgfx::setVertexBuffer(0, &stored.vertices);
+        bgfx::setIndexBuffer(&stored.indices);
+    }
+
+    void submit_cpu_skinned_draw(const MeshData& mesh,
+                                 const Material& material,
+                                 const glm::mat4& transform,
+                                 const SceneBatch::Textures& textures,
+                                 const SceneBatch::Mapping& mapping,
+                                 const std::vector<glm::mat4>& palette,
+                                 const RenderComponent* const component) {
+        apply_draw_uniforms(material, transform, textures, mapping);
+        bind_cpu_skinned_mesh(mesh, palette, component);
+        if (textures.albedo.has_value()) bind_material_textures(textures);
+        bgfx::setState(render_state(material));
+        bgfx::submit(main_view,
+                     textures.albedo.has_value() ? textured_program_ : solid_program_);
+        ++stats_.draw_calls;
+    }
+
     void submit_draw(const MeshLifetimeManager::Handle mesh,
                      const Material& material,
                      const glm::mat4& transform,
@@ -2757,13 +3040,49 @@ private:
         const auto found = std::find_if(
             batches.begin(), batches.end(),
             [mesh, cull_mode](const ShadowBatch& batch) {
-                return batch.mesh == mesh && batch.cull_mode == cull_mode;
+                // Only merge ordinary static batches. CPU-skinned batches use
+                // no persistent mesh handle (their placeholder can equal a
+                // valid handle such as 0), and GPU-skinned batches require an
+                // independent palette and transform.
+                return batch.cpu_mesh == nullptr && batch.bone_rows.empty() &&
+                       batch.mesh == mesh && batch.cull_mode == cull_mode;
             });
         if (found != batches.end()) {
             found->transforms.push_back(transform);
             return;
         }
-        batches.push_back({mesh, cull_mode, {transform}});
+        batches.push_back(
+            {mesh, cull_mode, {transform}, {}, 0, nullptr, nullptr, {}});
+    }
+
+    static void add_to_skinned_shadow_batch(
+        std::vector<ShadowBatch>& batches,
+        const MeshLifetimeManager::Handle mesh,
+        const CullMode cull_mode,
+        const glm::mat4& transform,
+        const std::vector<float>& bone_rows) {
+        if (bone_rows.empty() || bone_rows.size() % 4U != 0U ||
+            bone_rows.size() / 4U > max_skin_rows) {
+            throw EngineError("invalid shadow skinning palette");
+        }
+        batches.push_back({mesh, cull_mode, {transform}, bone_rows,
+                           static_cast<std::uint16_t>(bone_rows.size() / 4U),
+                           nullptr, nullptr, {}});
+    }
+
+    static void add_to_cpu_skinned_shadow_batch(
+        std::vector<ShadowBatch>& batches,
+        const MeshData& mesh,
+        const CullMode cull_mode,
+        const glm::mat4& transform,
+        const std::vector<glm::mat4>& palette,
+        const RenderComponent* const component) {
+        if (palette.empty()) throw EngineError("invalid CPU skinning palette");
+        if (component == nullptr) {
+            throw EngineError("CPU skinning requires an owning render component");
+        }
+        batches.push_back(
+            {0, cull_mode, {transform}, {}, 0, component, &mesh, palette});
     }
 
     void submit_shadow_batch(const ShadowBatch& batch,
@@ -2772,6 +3091,39 @@ private:
                              const bgfx::ProgramHandle instanced_program,
                              const bool radial = false) {
         constexpr std::uint16_t instance_stride = sizeof(float) * 16;
+        if (batch.cpu_mesh != nullptr) {
+            if (batch.transforms.size() != 1 || batch.cpu_palette.empty() ||
+                batch.cpu_component == nullptr) {
+                throw EngineError(
+                    "invalid CPU-skinned shadow batch (transforms=" +
+                    std::to_string(batch.transforms.size()) + ", palette=" +
+                    std::to_string(batch.cpu_palette.size()) + ")");
+            }
+            bgfx::setTransform(glm::value_ptr(batch.transforms.front()));
+            bind_cpu_skinned_mesh(
+                *batch.cpu_mesh, batch.cpu_palette, batch.cpu_component);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | cull_state(batch.cull_mode) |
+                           (radial ? BGFX_STATE_BLEND_DARKEN
+                                   : BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS));
+            bgfx::submit(view, radial ? point_shadow_program_ : shadow_program_);
+            ++stats_.draw_calls;
+            return;
+        }
+        if (!batch.bone_rows.empty()) {
+            if (batch.transforms.size() != 1 || batch.bone_row_count == 0) {
+                throw EngineError("invalid skinned shadow batch");
+            }
+            bgfx::setTransform(glm::value_ptr(batch.transforms.front()));
+            bgfx::setUniform(bone_rows_, batch.bone_rows.data(), batch.bone_row_count);
+            mesh_resources_->bind(batch.mesh);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | cull_state(batch.cull_mode) |
+                           (radial ? BGFX_STATE_BLEND_DARKEN
+                                   : BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS));
+            bgfx::submit(view, radial ? point_shadow_skinned_program_
+                                      : shadow_skinned_program_);
+            ++stats_.draw_calls;
+            return;
+        }
         if (batch.transforms.size() == 1) {
             bgfx::setTransform(glm::value_ptr(batch.transforms.front()));
             mesh_resources_->bind(batch.mesh);
@@ -2872,15 +3224,28 @@ private:
                         transformed_cull_mode(component.material.cull_mode, world_transform),
                         transform);
                 } else if (component.model) {
+                    const std::vector<glm::mat4> palette =
+                        skinning_palette(component);
+                    const std::vector<float> bone_rows = skinning_rows(palette);
                     for (const ModelPart& part : component.model->parts) {
                         const ModelMaterial& source =
                             component.model->materials[part.material_index];
-                        add_to_shadow_batch(
-                            batches,
-                            mesh_resources_->upload_cached(part.mesh),
-                            transformed_cull_mode(
-                                model_cull_mode(component, source), world_transform),
-                            transform);
+                        const CullMode cull = transformed_cull_mode(
+                            model_cull_mode(component, source), world_transform);
+                        if (!bone_rows.empty() && mesh_has_skinning(part.mesh)) {
+                            add_to_skinned_shadow_batch(
+                                batches, mesh_resources_->upload_cached(part.mesh),
+                                cull, transform, bone_rows);
+                        } else if (!palette.empty() &&
+                                   mesh_has_skinning(part.mesh)) {
+                            add_to_cpu_skinned_shadow_batch(
+                                batches, part.mesh, cull, transform, palette,
+                                &component);
+                        } else {
+                            add_to_shadow_batch(
+                                batches, mesh_resources_->upload_cached(part.mesh),
+                                cull, transform);
+                        }
                     }
                 }
             }
@@ -2913,14 +3278,27 @@ private:
                     transformed_cull_mode(component.material.cull_mode, world_transform),
                     transform);
             } else if (component.model) {
+                const std::vector<glm::mat4> palette = skinning_palette(component);
+                const std::vector<float> bone_rows = skinning_rows(palette);
                 for (const ModelPart& part : component.model->parts) {
                     const ModelMaterial& source =
                         component.model->materials[part.material_index];
-                    add_to_shadow_batch(
-                        batches, mesh_resources_->upload_cached(part.mesh),
-                        transformed_cull_mode(
-                            model_cull_mode(component, source), world_transform),
-                        transform);
+                    const CullMode cull = transformed_cull_mode(
+                        model_cull_mode(component, source), world_transform);
+                    if (!bone_rows.empty() && mesh_has_skinning(part.mesh)) {
+                        add_to_skinned_shadow_batch(
+                            batches, mesh_resources_->upload_cached(part.mesh),
+                            cull, transform, bone_rows);
+                    } else if (!palette.empty() &&
+                               mesh_has_skinning(part.mesh)) {
+                        add_to_cpu_skinned_shadow_batch(
+                            batches, part.mesh, cull, transform, palette,
+                            &component);
+                    } else {
+                        add_to_shadow_batch(
+                            batches, mesh_resources_->upload_cached(part.mesh),
+                            cull, transform);
+                    }
                 }
             }
         }
@@ -3113,8 +3491,16 @@ private:
                 throw EngineError("render component has no mesh or model resource");
             }
             has_model = true;
+            const std::vector<glm::mat4> palette = skinning_palette(component);
+            const std::vector<float> bone_rows = skinning_rows(palette);
             for (const ModelPart& part : component.model->parts) {
-                if (!frustum.intersects(mesh_resources_->bounds_cached(part.mesh),
+                // The imported bind-pose bounds do not contain all possible
+                // animated poses. Until per-clip bounds are cached, skinned
+                // parts deliberately bypass frustum culling.
+                const bool skinned = !palette.empty() && mesh_has_skinning(part.mesh);
+                const bool cpu_skinned = skinned && bone_rows.empty();
+                if (!skinned &&
+                    !frustum.intersects(mesh_resources_->bounds_cached(part.mesh),
                                         world_transform)) {
                     ++stats_.culled_instances;
                     continue;
@@ -3172,8 +3558,19 @@ private:
                 mapping.scales = {1.0F, 1.0F, 0.0F, 0.0F,
                                   1.0F, 1.0F, 0.0F, 0.0F,
                                   1.0F, 1.0F, 0.0F, 0.0F};
+                if (cpu_skinned) {
+                    submit_cpu_skinned_draw(part.mesh, material, transform, textures,
+                                            mapping, palette, &component);
+                    continue;
+                }
+                const auto mesh = mesh_resources_->upload_cached(part.mesh);
+                if (skinned) {
+                    submit_skinned_draw(mesh, material, transform, textures, mapping,
+                                        bone_rows);
+                    continue;
+                }
                 add_to_batch(batches,
-                             mesh_resources_->upload_cached(part.mesh),
+                             mesh,
                              material,
                              textures,
                              mapping,
@@ -3297,22 +3694,29 @@ private:
     std::uint64_t next_viewport_request_id_{1};
     bgfx::SwapChain swap_chain_{};
     bgfx::VertexLayout layout_{};
+    bgfx::VertexLayout cpu_skinned_layout_{};
     bgfx::VertexLayout postprocess_layout_{};
     bgfx::VertexLayout ui_layout_{};
+    std::vector<CpuSkinnedBuffer> cpu_skinned_buffers_;
     bgfx::ProgramHandle solid_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle solid_skinned_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle textured_skinned_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle solid_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle textured_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle postprocess_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle sky_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle shadow_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle shadow_skinned_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle shadow_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle point_shadow_program_{BGFX_INVALID_HANDLE};
+    bgfx::ProgramHandle point_shadow_skinned_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle point_shadow_instanced_program_{BGFX_INVALID_HANDLE};
     bgfx::ProgramHandle ui_program_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_color_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle material_params_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle normal_matrix_{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle bone_rows_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle ambient_light_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle directional_lights_{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle directional_colors_{BGFX_INVALID_HANDLE};

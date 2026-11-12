@@ -1,9 +1,10 @@
 # Third-party notices and immutable pins
 
-Easy3D is private/proprietary, but the following build and runtime components
-retain their own permissive licenses. Full license texts are present in each
-fetched source tree during configuration; release packaging must reproduce all
-applicable notices.
+RIX is distributed under the Apache License 2.0 in the repository root. The
+following build and runtime components retain their own licenses. These terms
+apply to the listed third-party components, not to RIX itself. Full license
+texts are present in each fetched source tree during configuration; release
+packaging must reproduce all applicable notices.
 
 | Component | Immutable pin | License | Use |
 |---|---|---|---|
@@ -16,11 +17,12 @@ applicable notices.
 | stb_image (bundled by bimg) | bimg pin above | MIT (selected alternative) | JPEG decoding |
 | stb_truetype (bundled by bgfx) | bgfx pin above | MIT (selected alternative) | Built-in font atlas rasterization |
 | Roboto Regular font data (bundled by bgfx) | bgfx pin above | Apache-2.0 | Built-in ASCII HUD text |
-| GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Private native math implementation |
+| GLM | `0af55ccecd98d4e5a8d1fad7de25ba429d60e863` (`1.0.1`) | MIT | Native math implementation |
 | tinyobjloader | `2945a967c5303b2c8c14174117c45f3302591150` (`v2.0.0rc13`) | MIT | OBJ/MTL parsing |
 | cgltf | `bbeb5b0b070ddacddac6852fb72143eb68454937` (`v1.15`) | MIT | glTF 2.0/GLB parsing |
+| ufbx | `26a482ae66871d7de36eb722aa060bce95bce274` (`v0.23.1`) | MIT (selected alternative) | FBX geometry, material, skeleton, and animation parsing/baking |
 | Jolt Physics | `e77f175595e64cb44218cc9d9d56fc365ad0e36a` (`v5.6.0`) | MIT ([text](JoltPhysics.txt)) | Native rigid-body simulation |
-| GameNetworkingSockets | `d534c19aa760df3fb75fd20db13ba1932b8a5463` (`v1.6.1`) | BSD-3-Clause | Optional private reliable/unreliable transport backend |
+| GameNetworkingSockets | `d534c19aa760df3fb75fd20db13ba1932b8a5463` (`v1.6.1`) | BSD-3-Clause | Optional reliable/unreliable transport backend |
 | Protocol Buffers | `b407e8416e3893036aee5af9a12bd9b6a0e2b2e6` (`v29.3`, C++ `5.29.3`) | BSD-3-Clause | GNS message generation/runtime |
 | Abseil | `4a2c63365eff8823a5221db86ef490e828306f9d` | Apache-2.0 | Protobuf support library |
 | utf8_range (bundled by Protobuf) | Protobuf pin above | MIT | Protobuf UTF-8 validation |

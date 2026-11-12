@@ -1,5 +1,9 @@
 """Pygame-only shared cursors using authoritative named messages."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/02_shared_state/main.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

@@ -1,5 +1,8 @@
 """Load and play a PCM16 WAV supplied on the command line."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/09_audio.py
+
 from pathlib import Path
 import sys
 

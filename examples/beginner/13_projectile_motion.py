@@ -1,5 +1,8 @@
 """Launch physical projectiles along the player's live view direction."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/13_projectile_motion.py
+
 from rix import Cube, Game, Plane, Player, Sphere, Vec3
 
 

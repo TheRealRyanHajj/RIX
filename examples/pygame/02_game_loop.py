@@ -1,5 +1,8 @@
 """Use ordinary Pygame state to control a RIX entity."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/02_game_loop.py
+
 import pygame
 import rix
 

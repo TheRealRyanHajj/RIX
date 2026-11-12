@@ -1,5 +1,8 @@
 """Pygame owns the window and loop; RIX owns direct 3D presentation."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/01_cube.py
+
 import pygame
 import rix
 

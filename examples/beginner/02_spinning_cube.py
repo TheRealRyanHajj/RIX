@@ -1,5 +1,8 @@
 """A managed update callback rotates one persistent native object."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/02_spinning_cube.py
+
 import rix as e3, math
 
 game = e3.Game("Spinning Cube")

@@ -1,5 +1,8 @@
 """RIX Phase 1 first-world scene using only the public Python API."""
 
+# Usage: from the repository root, run:
+#   python examples/02_first_world/main.py
+
 from __future__ import annotations
 
 import argparse

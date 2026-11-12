@@ -1,9 +1,12 @@
 """Compare scheduler traversal and native physics costs across RIX builds.
 
-This intentionally uses the same internal frame seam as the test suite so it
-can run without opening a window. It is a development benchmark, not a public
-performance guarantee.
-"""
+This intentionally uses the same internal frame seam as the test suite so it can run
+without opening a window. It is a development benchmark, not a public performance
+guarantee."""
+
+# Usage: from the repository root, run:
+#   python benchmarks/api_runtime.py
+# This prints benchmark measurements.
 
 from __future__ import annotations
 

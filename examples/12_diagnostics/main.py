@@ -1,5 +1,8 @@
 """Structured asset reporting plus the native RIX runtime debug overlay."""
 
+# Usage: from the repository root, run:
+#   python examples/12_diagnostics/main.py
+
 from __future__ import annotations
 
 import argparse

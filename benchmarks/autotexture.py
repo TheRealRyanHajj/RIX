@@ -1,5 +1,9 @@
 """Measure AutoTexture generation, sharing, construction, and reload costs."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/autotexture.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

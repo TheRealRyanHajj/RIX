@@ -1,5 +1,8 @@
 """Distance-validated interactions and native trigger callbacks."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/07_interactions_and_triggers.py
+
 from rix import Cube, Entity, Game, Interaction, Player, Text, Plane
 
 

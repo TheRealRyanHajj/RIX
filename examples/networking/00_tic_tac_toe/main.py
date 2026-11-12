@@ -1,5 +1,9 @@
 """Two independent Pygame processes playing authoritative Tic-Tac-Toe."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/00_tic_tac_toe/main.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

@@ -1,5 +1,8 @@
 """Tiny hybrid game: Pygame score/HUD over moving RIX targets."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/14_hybrid_minigame.py
+
 import random
 
 import pygame

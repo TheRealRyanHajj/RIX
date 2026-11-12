@@ -1,5 +1,8 @@
 """Jolt fixed-step physics under Pygame variable timing."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/10_physics.py
+
 import pygame
 import rix
 

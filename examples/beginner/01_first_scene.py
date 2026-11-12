@@ -1,5 +1,8 @@
 """Your first visible 3D scene."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/01_first_scene.py
+
 from rix import Cube, Game, Plane
 
 

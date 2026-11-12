@@ -1,5 +1,8 @@
 """Pygame fonts and drawing composited over direct RIX 3D."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/04_overlay.py
+
 import pygame
 import rix
 

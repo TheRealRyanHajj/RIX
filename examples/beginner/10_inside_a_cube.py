@@ -1,5 +1,8 @@
 """Render and walk inside a cube with one beginner-friendly flag."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/10_inside_a_cube.py
+
 import rix as e3
 
 

@@ -594,6 +594,58 @@ PYBIND11_MODULE(_rix, module) {
                    return py::make_tuple(model_info(model), skeleton, animations);
                },
                py::arg("path"));
+    module.def("_load_fbx_info",
+               [model_info](const std::string& path) {
+                   const auto model = easy3d::load_fbx(path);
+                   py::object skeleton = py::none();
+                   if (model->skeleton.has_value()) {
+                       py::list joints;
+                       for (const easy3d::SkeletonJoint& joint : model->skeleton->joints) {
+                           py::tuple inverse_bind(16);
+                           for (std::size_t index = 0;
+                                index < joint.inverse_bind.values.size(); ++index) {
+                               inverse_bind[index] = joint.inverse_bind.values[index];
+                           }
+                           joints.append(py::make_tuple(
+                               joint.name,
+                               joint.parent,
+                               py::make_tuple(joint.local_bind.position.x,
+                                              joint.local_bind.position.y,
+                                              joint.local_bind.position.z),
+                               py::make_tuple(joint.local_bind.rotation.w,
+                                              joint.local_bind.rotation.x,
+                                              joint.local_bind.rotation.y,
+                                              joint.local_bind.rotation.z),
+                               py::make_tuple(joint.local_bind.scale.x,
+                                              joint.local_bind.scale.y,
+                                              joint.local_bind.scale.z),
+                               inverse_bind));
+                       }
+                       skeleton = py::make_tuple(model->skeleton->name, joints);
+                   }
+                   py::list animations;
+                   for (const easy3d::AnimationClip& clip : model->animations) {
+                       py::list channels;
+                       for (const easy3d::AnimationChannel& channel : clip.channels) {
+                           const char* target = "translation";
+                           if (channel.target == easy3d::AnimationTarget::Rotation) {
+                               target = "rotation";
+                           } else if (channel.target == easy3d::AnimationTarget::Scale) {
+                               target = "scale";
+                           }
+                           channels.append(py::make_tuple(
+                               channel.joint_index,
+                               target,
+                               channel.interpolation == easy3d::AnimationInterpolation::Linear
+                                   ? "linear" : "step",
+                               channel.times,
+                               channel.values));
+                       }
+                       animations.append(py::make_tuple(clip.name, clip.duration, channels));
+                   }
+                   return py::make_tuple(model_info(model), skeleton, animations);
+               },
+               py::arg("path"));
     py::class_<easy3d::ModelCache>(module, "_ModelCache")
         .def(py::init<>())
         .def("load",
@@ -1522,6 +1574,51 @@ PYBIND11_MODULE(_rix, module) {
              py::arg("path"),
               py::arg("color"),
               py::arg("cull_mode") = std::nullopt)
+        .def("add_model_animation",
+             [](easy3d::Scene& scene,
+                const easy3d::EntityHandle handle,
+                std::string name,
+                const std::string& path) {
+                 scene.add_model_animation(handle, std::move(name), path);
+             },
+             py::arg("handle"), py::arg("name"), py::arg("path"))
+        .def("play_model_animation", &easy3d::Scene::play_model_animation,
+             py::arg("handle"), py::arg("name"), py::arg("loop") = true,
+             py::arg("speed") = 1.0F, py::arg("blend") = 0.0F,
+             py::arg("root_motion") = false)
+        .def("pause_model_animation", &easy3d::Scene::pause_model_animation,
+             py::arg("handle"))
+        .def("resume_model_animation", &easy3d::Scene::resume_model_animation,
+             py::arg("handle"))
+        .def("stop_model_animation", &easy3d::Scene::stop_model_animation,
+             py::arg("handle"))
+        .def("model_animation_info",
+             [](const easy3d::Scene& scene, const easy3d::EntityHandle handle) {
+                 const easy3d::RenderComponent& component =
+                     scene.render_component(handle);
+                 if (!component.animation) {
+                     throw easy3d::AssetError("model has no animation-capable skeleton");
+                 }
+                 const easy3d::ModelAnimationState& state = *component.animation;
+                 py::list clips;
+                 for (const auto& [name, clip] : state.clips) {
+                     clips.append(py::make_tuple(name, clip.duration));
+                 }
+                 float duration = 0.0F;
+                 const auto current = state.clips.find(state.current_clip);
+                 if (current != state.clips.end()) duration = current->second.duration;
+                 const char* skinning =
+                     component.model && component.model->skeleton &&
+                             component.model->skeleton->joints.size() <= 64U
+                         ? "gpu"
+                         : "cpu";
+                 return py::make_tuple(clips, state.current_clip, state.time_seconds,
+                                       duration, state.speed, state.loop, state.playing,
+                                       state.paused, state.root_motion,
+                                       skinning,
+                                       state.completion_count);
+             },
+             py::arg("handle"))
         .def("has_render_component", &easy3d::Scene::has_render_component)
         .def("render_component_info",
              [render_kind_name, texture_mode_name, texture_filter_name, cull_mode_name](const easy3d::Scene& scene,

@@ -181,6 +181,8 @@ struct ModelData final {
     const std::filesystem::path& path);
 [[nodiscard]] std::shared_ptr<const ModelData> load_gltf(
     const std::filesystem::path& path);
+[[nodiscard]] std::shared_ptr<const ModelData> load_fbx(
+    const std::filesystem::path& path);
 
 class ModelCache final {
 public:

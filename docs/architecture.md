@@ -152,6 +152,23 @@ compose the same native systems as explicit construction. Context-local defaults
 avoid one process-wide hidden world. Every convenience has an explicit-scene or
 component-level escape hatch.
 
+## Shared model animation pipeline
+
+OBJ, glTF/GLB, and FBX import into immutable `ModelData` cache entries. ufbx is
+private parser infrastructure: its axes, units, pivots, layered curves, and
+clusters are converted at import time into the same `MeshData`, `Skeleton`,
+`AnimationClip`, and material structures used by glTF. Render components hold
+only per-instance controller/pose state and a shared model pointer.
+
+The fixed scene step samples local TRS channels, applies optional pose blending,
+builds hierarchical globals, and handles in-place or explicit owner root
+motion. The renderer combines globals with inverse binds. Rigs at or below 64
+joints upload 3 matrix rows per joint to D3D11 vertex shaders; larger rigs are
+deformed once per model part per frame into compact, bounded native transient
+buffers reused by visible and shadow passes. The configured pools are 32 MiB
+for vertices and 8 MiB for 32-bit indices. Python never loops over vertices or
+joints for ordinary playback.
+
 ## Bounded lighting and sky rendering
 
 Lights remain entity components in the native scene. Each frame the renderer

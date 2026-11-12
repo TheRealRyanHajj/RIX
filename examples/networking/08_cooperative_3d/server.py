@@ -1,5 +1,9 @@
 """Headless cooperative movement authority."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/08_cooperative_3d/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

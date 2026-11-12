@@ -1,10 +1,31 @@
 # RIX changelog
 
-All notable private releases are recorded here. RIX follows Semantic
+All notable releases are recorded here. RIX follows Semantic
 Versioning while it remains pre-1.0; compatibility and release procedure are in
 [docs/release.md](docs/release.md).
 
 ## Unreleased
+
+- Added pinned ufbx binary/ASCII FBX importing for geometry, materials,
+  skeletons, weights, and baked animation stacks through the shared model cache.
+- Added automatic native skeletal playback, external compatible-rig animation
+  attachment, blending, reverse/loop/one-shot controls, exactly-once callbacks,
+  in-place/root-motion policy, typed Python APIs, and Mixamo retarget correction.
+- Added D3D11 GPU skinning for lit/PBR and directional/spot/point shadow passes,
+  explicit GPU/CPU diagnostics, and bounded native CPU fallback for rigs above
+  the 64-joint GPU palette limit.
+- Added real-asset YBot/Thriller regression coverage, asset audit, benchmark,
+  and importing/animation/retargeting guides. The runnable acceptance project
+  and its source FBX files remain outside the engine repository in the user's
+  dedicated `animation test` directory.
+- Corrected root-motion floor drift by transferring only horizontal translation
+  and yaw to the entity. Vertical hip motion and pitch/roll remain in the
+  skeleton instead of accumulating downward or tilting the entity across loops.
+- Fixed CPU-skinned shadow batches accidentally merging with ordinary geometry
+  when their placeholder mesh handle matched a valid static mesh handle.
+- CPU-skinned model parts are now deformed once per frame and reused by every
+  shadow/main pass using a compact vertex layout. The explicitly bounded bgfx
+  transient pools are 32 MiB for vertices and 8 MiB for indices.
 
 - Made built-in world geometry collidable by default, with `collider=False`
   retained for decoration, parented visuals, and non-physics motion.

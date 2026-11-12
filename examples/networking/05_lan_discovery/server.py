@@ -1,5 +1,9 @@
 """Advertise a real Session host on opt-in IPv4 LAN discovery."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/05_lan_discovery/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

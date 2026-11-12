@@ -1,5 +1,9 @@
 """Repeatable native-renderer cube benchmark for Phase 1.9/1.10 validation."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/render_cubes.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

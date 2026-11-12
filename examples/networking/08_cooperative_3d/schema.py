@@ -1,3 +1,8 @@
+"""Python module for the RIX example in examples/networking/08_cooperative_3d.
+
+This module defines the shared message/state schema imported by the neighboring client
+and server examples. Follow the adjacent README to run the example."""
+
 from __future__ import annotations
 
 import math

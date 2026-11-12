@@ -1449,3 +1449,141 @@ Final Phase 16 release and interactive follow-up:
   cp313 `6a818ea6d4ee0c7c3f0afa83b9f840aa7eaa1fd79cf4e270da4be84d9455edc4`.
 - Published `docs/phase16-report.md` as the consolidated implementation,
   security, performance, validation, artifact, and limitation report.
+
+## Phase 17 FBX and skeletal animation — initial audit/import checkpoint
+
+- Preserved the existing modified/untracked beginner examples and root texture
+  files; none were edited or deleted.
+- Baseline `.venv\Scripts\python.exe -m pytest -q` -> `352 passed in 53.32s`.
+- Baseline `ctest --test-dir build\windows-debug -C Debug
+  --output-on-failure` -> `19/19 passed` in 2.13 s; Release -> `19/19 passed`
+  in 1.97 s. The preceding commands without `-C` correctly reported all tests
+  not run because these are multi-config trees; they were rerun correctly.
+- `.venv\Scripts\python.exe -m pip check` -> `No broken requirements found.`
+- `.venv\Scripts\python.exe -m mypy python` has 204 pre-existing errors in 17
+  files. This broad command differs from the previously recorded focused
+  17-file type gate and is tracked rather than attributed to FBX work.
+- Located the mandatory assets in the adjacent RIX animation workspace and
+  verified their hashes. Temporary repository copies used during development
+  were later removed when the complete test was returned to that workspace.
+- Pinned ufbx v0.23.1, added `.fbx` model-cache dispatch, binary/ASCII-capable
+  loading, meter/Y-up conversion, polygon triangulation, multi-part materials,
+  four normalized influences, shared skeleton construction, animation-only
+  bone rigs, and baked shared TRS clips.
+- MSVC Debug native build succeeded. The real-asset executable
+  `build\windows-debug\Debug\easy3d_fbx_tests.exe` exits 0 and reports YBot
+  55,320 triangles/52 deforming joints and Thriller one 18.8333 s clip/65
+  joints, with all 52 target joints hierarchy-compatible and distinct sampled
+  poses.
+- GPU deformation, public playback/attachment, graphical YBot validation,
+  embedded texture extraction, and performance results remain incomplete and
+  are not claimed by this checkpoint.
+
+## Phase 17 FBX and skeletal animation — completion evidence
+
+- Added ufbx 0.23.1 at immutable commit
+  `26a482ae66871d7de36eb722aa060bce95bce274`; binary and upstream ASCII
+  fixtures pass. Real YBot/Thriller hashes, axes, units, clips, hierarchy,
+  binds, media, and root delta are recorded in the external test project's
+  `ASSET_AUDIT.md`.
+- FBX now imports shared multi-part geometry/materials, coordinate and geometry
+  transforms, skeleton clusters/binds, four normalized influences, and baked
+  local TRS clips. glTF gained the same joint/weight vertex attributes without
+  changing OBJ/static model behavior.
+- Added automatic independent native controllers, loop/clamp/reverse,
+  pause/resume/stop/restart, interruption-safe blending, exactly-once Python
+  callbacks, compatible-rig rest correction, and explicit in-place/root-motion
+  ownership. YBot's bind palette maximum identity error is `4.76837e-07`.
+- Added D3D11 GPU skinning for position/normal/tangent material passes and
+  directional/spot/point shadows. The public diagnostic reports `gpu` for the
+  52-joint YBot. Rigs over 64 joints use bounded native CPU transient skinning;
+  a generated 65-joint fixture reports `cpu` and rendered with an animated
+  shadow pass.
+- Added the typed `load_fbx`, `Model.add_animation`, `Model.play`, control/state,
+  completion, root-motion, and skinning-diagnostic Python APIs plus stubs. The
+  external `animation test/main.py` acceptance program uses only public APIs.
+- Focused final commands:
+  - `ctest --test-dir build\windows-debug -C Debug -R "rix\.(fbx|gltf)"
+    --output-on-failure` -> `2/2 passed`.
+  - `.venv\Scripts\python.exe -m pytest tests\python\test_fbx_animation.py -q`
+    -> `6 passed in 0.61s`.
+- Full gates:
+  - `.venv\Scripts\python.exe -m pytest -q` -> `358 passed in 53.93s`.
+  - `ctest --test-dir build\windows-debug -C Debug --output-on-failure` ->
+    `20/20 passed` in 4.76 seconds.
+  - `ctest --test-dir build\windows-release -C Release --output-on-failure` ->
+    `20/20 passed` in 2.63 seconds after the complete optimized rebuild.
+  - `.venv\Scripts\python.exe -m mypy` ->
+    `Success: no issues found in 17 source files`.
+  - `.venv\Scripts\python.exe -m pip check` ->
+    `No broken requirements found.`
+  - `python -m pip install -e ".[pygame,dev]"` built and installed the editable
+    CPython 3.11 extension successfully.
+- Clean wheel evidence:
+  - `scripts\build_wheel_matrix.ps1 -SkipTests` built, clean-installed,
+    dependency-checked, and native-import-smoked CPython 3.11/3.12/3.13 wheels.
+  - SHA-256: cp311
+    `f8e0dfc0873054701d5e1494482ddf2b3c00ca39a3ca4e10984e8a7f6138d8e9`;
+    cp312 `8a2ec65bbd33ff8a7429349f01fe1ddaaaf868f4710c2b712de2a65c69ff0148`;
+    cp313 `478c94e6bc597818bffce8a08814d5f675ed5cc2cfe3a47a06ce62b28a7db292`.
+  - A separate clean cp311 wheel environment imported RIX and loaded the real
+    YBot as version `0.1.0`, 55,320 triangles, 52 joints.
+- The development benchmark on Ryzen 5 5600G / RTX 3070 Ti, D3D11, 960x540
+  Ultra with shadows measured one/ten/100 real YBots at 0.345/1.211/
+  138.415 ms average frame time and 6/42/402 draws. The 100-character case is
+  not a 60 Hz capacity claim. A separate one-second generated 65-joint CPU-path
+  run produced 1,479 frames and one shadow pass. The temporary repository
+  benchmark harness was removed; historical results live in the external
+  test project's `BENCHMARK.md`.
+- After relocation, running external `animation test/main.py --seconds 2`
+  exited 0 with 258 frames, `clip=Thriller`, time 1.433 seconds, and
+  `skinning=gpu`. A final one-second repeat also exited 0 with 81 frames.
+- Interactive Windows/D3D11 validation used the actual external test assets in
+  standalone and Pygame-owned resizable windows. Multiple clearly distinct
+  full-body Thriller poses retained correct YBot proportions, orientation,
+  floor contact, scale, and alignment; the shadow changed with the limbs; a
+  maximized resize rendered correctly; and both windows closed normally. An
+  initial collapsed-mesh result was rejected and traced to FBX cluster bind
+  spaces; the corrected palette and deformed bounds are covered by regression.
+- Per the user-requested cleanup, repository copies of both FBX files, the
+  duplicate `examples/animation` program, its bytecode, the temporary benchmark
+  harness, and the two test-specific repository reports were removed. The
+  working test, source assets, README, asset audit, and historical benchmark now
+  live at `C:\Users\Ryan\Desktop\code\code\python\rix things\animation test`.
+- Documented limitations are deliberate and visible: embedded/layered FBX
+  texture fallback, unsupported advanced deformers/transparency, same-rig rather
+  than semantic humanoid retargeting, four influences, 64-joint GPU limit,
+  conservative animated culling, D3D11-only shader validation, and the measured
+  100-character cost. Phase 17 is complete with no gameplay/network claims.
+
+### Root-motion floor stability follow-up — 2026-11-08
+
+- Root-motion extraction now transfers horizontal X/Z translation and yaw to
+  the owner while keeping vertical hip translation and pitch/roll in the
+  animated skeleton. Translation is also constrained to the world X/Z plane,
+  preventing FBX loop-seam offsets or a tilted animated root from accumulating
+  downward entity motion.
+- `ctest --test-dir build\windows-debug -C Debug -R rix.fbx
+  --output-on-failure` -> `1/1 passed` in 1.96 seconds.
+- `C:\Users\Ryan\.venv\Scripts\python.exe -m pytest
+  tests\python\test_fbx_animation.py -q` -> `6 passed in 0.83s`.
+- A three-loop installed-extension diagnostic moved the owner 4.477534 units
+  horizontally and reported `vertical_drift=0.000000000`.
+- Rebuilt and reinstalled the editable CPython 3.11 RIX extension in
+  `C:\Users\Ryan\.venv` successfully.
+- A later embedded-animation `bg3.fbx` acceptance asset uses 66 joints and thus
+  exercises the bounded CPU-skinning path. Its first shadow frame exposed a
+  handle-0 collision that merged the plane transform into the CPU-skinned
+  character batch. Static batching now excludes both CPU- and GPU-skinned
+  batches. The exact external program remained running through ten seconds of
+  D3D11 Ultra rendering with directional shadows and no exception; the
+  verification process was then terminated manually.
+- The external program was then changed to a 65-joint, 53,878-triangle
+  `guy.fbx`, whose single expanded mesh exceeded bgfx's default transient pool.
+  CPU skinning now uses a compact vertex layout, deforms each component/part
+  once per frame, and reuses the allocation across all passes. RIX configures
+  explicit 32 MiB vertex and 8 MiB index transient bounds. The exact updated
+  program remained running for 20 seconds on D3D11 Medium without an exception
+  and was then terminated manually. A non-editing Ultra override then remained
+  running for another 20 seconds with directional shadows enabled, confirming
+  that the same compact allocation was reused by shadow and main passes.

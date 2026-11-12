@@ -1,5 +1,8 @@
 """A Pygame-style loop using the same native scheduler as Game.run()."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/03_manual_loop.py
+
 import rix as e3
 
 

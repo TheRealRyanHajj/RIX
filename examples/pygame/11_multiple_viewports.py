@@ -1,5 +1,8 @@
 """Render two independent RIX cameras into one Pygame application."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/11_multiple_viewports.py
+
 import pygame
 import rix
 

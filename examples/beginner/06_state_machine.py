@@ -1,5 +1,8 @@
 """A small explicit state machine driven by ordinary game callbacks."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/06_state_machine.py
+
 from rix import Cube, Game, StateMachine, Text
 
 

@@ -14,6 +14,7 @@ from ._rix import (
     _TextureCache,
     _TextureColorSpace,
     _load_image_info,
+    _load_fbx_info,
     _load_gltf_info,
     _load_obj_info,
 )
@@ -332,10 +333,12 @@ class GltfInfo:
     animations: tuple[AnimationClipInfo, ...]
 
 
-def load_gltf(path: str | PathLike[str]) -> GltfInfo:
-    """Load bounded glTF 2.0/GLB geometry, skeleton, and animation metadata."""
+# FBX and glTF share the same imported model/skeleton/clip representation.
+FbxInfo = GltfInfo
 
-    native_model, native_skeleton, native_animations = _load_gltf_info(str(path))
+
+def _to_animated_model_info(native_value: object) -> GltfInfo:
+    native_model, native_skeleton, native_animations = native_value  # type: ignore[misc]
     model = _to_model_info(native_model)
     skeleton = None
     if native_skeleton is not None:
@@ -371,19 +374,24 @@ def load_gltf(path: str | PathLike[str]) -> GltfInfo:
         )
         for name, duration, native_channels in native_animations
     )
-    return GltfInfo(
-        model.path,
-        model.triangle_count,
-        model.parts,
-        model.materials,
-        model.warnings,
-        skeleton,
-        animations,
-    )
+    return GltfInfo(model.path, model.triangle_count, model.parts, model.materials,
+                    model.warnings, skeleton, animations)
+
+
+def load_gltf(path: str | PathLike[str]) -> GltfInfo:
+    """Load bounded glTF 2.0/GLB geometry, skeleton, and animation metadata."""
+
+    return _to_animated_model_info(_load_gltf_info(str(path)))
+
+
+def load_fbx(path: str | PathLike[str]) -> FbxInfo:
+    """Load FBX geometry, materials, skeleton, skin weights, and clips."""
+
+    return _to_animated_model_info(_load_fbx_info(str(path)))
 
 
 class ModelCache:
-    """Thread-safe immutable OBJ/glTF/GLB model cache keyed by canonical path."""
+    """Thread-safe immutable OBJ/glTF/GLB/FBX cache keyed by canonical path."""
 
     __slots__ = ("_native",)
 

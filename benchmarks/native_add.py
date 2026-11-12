@@ -1,5 +1,9 @@
 """Minimal repeatable Python-to-native call benchmark (not a performance claim)."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/native_add.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

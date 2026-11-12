@@ -62,13 +62,19 @@ void write_bytes(const std::filesystem::path& path,
     }
     append<float>(bytes, {0, 1});
     append<float>(bytes, {0, 1, 0, 1, 2, 0});
+    append<std::uint8_t>(bytes, {0, 0, 0, 0,
+                                 1, 0, 0, 0,
+                                 1, 0, 0, 0});
+    append<float>(bytes, {1, 0, 0, 0,
+                          1, 0, 0, 0,
+                          1, 0, 0, 0});
     return bytes;
 }
 
 [[nodiscard]] std::string asset_json(const bool embedded_buffer) {
     const std::string buffer = embedded_buffer
-        ? R"({"byteLength":264})"
-        : R"({"uri":"asset.bin","byteLength":264})";
+        ? R"({"byteLength":324})"
+        : R"({"uri":"asset.bin","byteLength":324})";
     return std::string(R"({
 "asset":{"version":"2.0","generator":"RIX test"},
 "buffers":[)") + buffer + R"(],
@@ -79,7 +85,9 @@ void write_bytes(const std::filesystem::path& path,
  {"buffer":0,"byteOffset":96,"byteLength":6},
  {"buffer":0,"byteOffset":104,"byteLength":128},
  {"buffer":0,"byteOffset":232,"byteLength":8},
- {"buffer":0,"byteOffset":240,"byteLength":24}
+ {"buffer":0,"byteOffset":240,"byteLength":24},
+ {"buffer":0,"byteOffset":264,"byteLength":12},
+ {"buffer":0,"byteOffset":276,"byteLength":48}
 ],
 "accessors":[
  {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
@@ -88,12 +96,14 @@ void write_bytes(const std::filesystem::path& path,
  {"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"},
  {"bufferView":4,"componentType":5126,"count":2,"type":"MAT4"},
  {"bufferView":5,"componentType":5126,"count":2,"type":"SCALAR","min":[0],"max":[1]},
- {"bufferView":6,"componentType":5126,"count":2,"type":"VEC3"}
+ {"bufferView":6,"componentType":5126,"count":2,"type":"VEC3"},
+ {"bufferView":7,"componentType":5121,"count":3,"type":"VEC4"},
+ {"bufferView":8,"componentType":5126,"count":3,"type":"VEC4"}
 ],
 "images":[{"uri":"packed.png"}],
 "textures":[{"source":0}],
 "materials":[{"name":"Copper","doubleSided":true,"pbrMetallicRoughness":{"baseColorFactor":[0.8,0.2,0.1,1],"metallicFactor":0.3,"roughnessFactor":0.7,"metallicRoughnessTexture":{"index":0}},"emissiveFactor":[0.2,0.1,0]}],
-"meshes":[{"name":"Triangle","primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":0}]}],
+"meshes":[{"name":"Triangle","primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"JOINTS_0":7,"WEIGHTS_0":8},"indices":3,"material":0}]}],
 "nodes":[
  {"name":"MeshNode","mesh":0,"skin":0,"translation":[2,0,0],"children":[1]},
  {"name":"Root","children":[2]},
@@ -179,6 +189,11 @@ int main() {
             gltf->parts[0].mesh.vertices[1].uv != easy3d::Vec2{1.0F, 0.0F} ||
             gltf->parts[0].mesh.vertices[2].uv != easy3d::Vec2{0.0F, 1.0F}) {
             return fail(2, "glTF node or normal transform was not baked");
+        }
+        if (first.joints[0] != 0 || first.weights[0] != 1.0F ||
+            gltf->parts[0].mesh.vertices[1].joints[0] != 1 ||
+            gltf->parts[0].mesh.vertices[1].weights[0] != 1.0F) {
+            return fail(14, "glTF joint indices or weights were not imported");
         }
         const easy3d::ModelMaterial& material = gltf->materials[1];
         if (!easy3d::almost_equal(material.metallic, 0.3F) ||

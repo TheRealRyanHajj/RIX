@@ -1,5 +1,8 @@
 """Contextual retained UI layout with reactive text."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/08_hud_menu.py
+
 from rix import Button, Game, Panel, Row, Text
 
 

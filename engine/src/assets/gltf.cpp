@@ -259,6 +259,7 @@ void generate_normals(MeshData& mesh, const std::filesystem::path& path) {
 
 [[nodiscard]] MeshData import_primitive(const cgltf_primitive& primitive,
                                         const std::array<float, 16>& transform,
+                                        const std::size_t joint_count,
                                         const std::filesystem::path& path) {
     if (primitive.has_draco_mesh_compression) {
         throw AssetError("KHR_draco_mesh_compression is unsupported: " + path.string());
@@ -277,6 +278,8 @@ void generate_normals(MeshData& mesh, const std::filesystem::path& path) {
     const cgltf_accessor* texcoords =
         attribute(primitive, cgltf_attribute_type_texcoord, 0);
     const cgltf_accessor* colors = attribute(primitive, cgltf_attribute_type_color, 0);
+    const cgltf_accessor* joints = attribute(primitive, cgltf_attribute_type_joints, 0);
+    const cgltf_accessor* weights = attribute(primitive, cgltf_attribute_type_weights, 0);
     if (normals != nullptr &&
         (normals->type != cgltf_type_vec3 || normals->count != positions->count)) {
         throw AssetError("glTF NORMAL must be VEC3 and match POSITION count: " +
@@ -292,6 +295,21 @@ void generate_normals(MeshData& mesh, const std::filesystem::path& path) {
          colors->count != positions->count)) {
         throw AssetError("glTF COLOR_0 must be VEC3/VEC4 and match POSITION count: " +
                          path.string());
+    }
+    if ((joints == nullptr) != (weights == nullptr)) {
+        throw AssetError("glTF skinning requires both JOINTS_0 and WEIGHTS_0: " +
+                         path.string());
+    }
+    if (joints != nullptr && joint_count == 0) {
+        throw AssetError("glTF JOINTS_0/WEIGHTS_0 require a skin on the mesh node: " +
+                         path.string());
+    }
+    if (joints != nullptr &&
+        (joints->type != cgltf_type_vec4 || weights->type != cgltf_type_vec4 ||
+         joints->count != positions->count || weights->count != positions->count)) {
+        throw AssetError(
+            "glTF JOINTS_0 and WEIGHTS_0 must be VEC4 and match POSITION count: " +
+            path.string());
     }
 
     MeshData mesh;
@@ -318,6 +336,35 @@ void generate_normals(MeshData& mesh, const std::filesystem::path& path) {
                             std::clamp(color[2], 0.0F, 1.0F),
                             components == 4 ? std::clamp(color[3], 0.0F, 1.0F)
                                             : 1.0F};
+        }
+        if (joints != nullptr) {
+            std::array<cgltf_uint, 4> joint_values{};
+            if (!cgltf_accessor_read_uint(joints, index, joint_values.data(),
+                                          joint_values.size())) {
+                throw AssetError("failed to read glTF JOINTS_0: " + path.string());
+            }
+            const auto weight_values = read_float(*weights, index, 4, "WEIGHTS_0", path);
+            float total = 0.0F;
+            for (std::size_t influence = 0; influence < 4; ++influence) {
+                if (joint_values[influence] >= joint_count ||
+                    joint_values[influence] > std::numeric_limits<std::uint8_t>::max()) {
+                    throw AssetError("glTF JOINTS_0 index is out of range: " +
+                                     path.string());
+                }
+                if (!finite(weight_values[influence]) || weight_values[influence] < 0.0F) {
+                    throw AssetError("glTF WEIGHTS_0 must be finite and non-negative: " +
+                                     path.string());
+                }
+                vertex.joints[influence] =
+                    static_cast<std::uint8_t>(joint_values[influence]);
+                vertex.weights[influence] = weight_values[influence];
+                total += weight_values[influence];
+            }
+            if (!finite(total) || total <= 1.0e-8F) {
+                throw AssetError("glTF skinned vertex has no effective weight: " +
+                                 path.string());
+            }
+            for (float& weight : vertex.weights) weight /= total;
         }
         mesh.vertices.push_back(vertex);
     }
@@ -515,7 +562,10 @@ void import_node_mesh(const cgltf_data& data,
         }
         model.parts.push_back({node_name + ":" + mesh_name + ":" +
                                    std::to_string(primitive_index),
-                               import_primitive(primitive, transform, path),
+                               import_primitive(
+                                   primitive, transform,
+                                   node.skin != nullptr ? node.skin->joints_count : 0U,
+                                   path),
                                material_index});
     }
 }

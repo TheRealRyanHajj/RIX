@@ -925,6 +925,8 @@ class Model(Entity):
             angular_velocity=angular_velocity,
             angular_acceleration=angular_acceleration,
         )
+        self._animation_callback: Callable[[Model], None] | None = None
+        self._animation_completion_seen = 0
         try:
             prepare_model_textures(asset_path)
             self.scene._native.add_model_renderer(
@@ -949,3 +951,113 @@ class Model(Entity):
         except Exception:
             self.scene._rollback_entity_construction(self)
             raise
+
+    def add_animation(
+        self, name: str, path: str | PathLike[str]
+    ) -> Model:
+        """Attach and retarget the first compatible clip from an FBX/glTF file."""
+
+        if not isinstance(name, str) or not name:
+            raise ValueError("animation name must be a non-empty string")
+        self.scene._native.add_model_animation(self._handle, name, str(path))
+        return self
+
+    def play(
+        self,
+        name: str,
+        *,
+        loop: bool = True,
+        speed: float = 1.0,
+        blend: float = 0.0,
+        root_motion: bool = False,
+        on_complete: Callable[[Model], None] | None = None,
+    ) -> Model:
+        """Play a clip automatically on the native fixed-step scheduler."""
+
+        if not isinstance(loop, bool) or not isinstance(root_motion, bool):
+            raise TypeError("loop and root_motion must be bool values")
+        if on_complete is not None and not callable(on_complete):
+            raise TypeError("on_complete must be callable or None")
+        self.scene._native.play_model_animation(
+            self._handle, name, loop, float(speed), float(blend), root_motion
+        )
+        self._animation_callback = on_complete
+        self._animation_completion_seen = self._animation_info()[-1]
+        return self
+
+    def pause_animation(self) -> Model:
+        self.scene._native.pause_model_animation(self._handle)
+        return self
+
+    def resume_animation(self) -> Model:
+        self.scene._native.resume_model_animation(self._handle)
+        return self
+
+    def stop_animation(self) -> Model:
+        self.scene._native.stop_model_animation(self._handle)
+        self._animation_callback = None
+        return self
+
+    def _animation_info(
+        self,
+    ) -> tuple[
+        list[tuple[str, float]],
+        str,
+        float,
+        float,
+        float,
+        bool,
+        bool,
+        bool,
+        bool,
+        Literal["gpu", "cpu"],
+        int,
+    ]:
+        return self.scene._native.model_animation_info(self._handle)
+
+    @property
+    def animation_clips(self) -> tuple[str, ...]:
+        """Names of embedded and externally attached skeletal clips."""
+
+        return tuple(name for name, _duration in self._animation_info()[0])
+
+    @property
+    def current_animation(self) -> str | None:
+        value = self._animation_info()[1]
+        return value or None
+
+    @property
+    def animation_time(self) -> float:
+        return self._animation_info()[2]
+
+    @property
+    def animation_duration(self) -> float:
+        return self._animation_info()[3]
+
+    @property
+    def animation_speed(self) -> float:
+        return self._animation_info()[4]
+
+    @property
+    def animation_state(self) -> Literal["stopped", "playing", "paused"]:
+        info = self._animation_info()
+        if not info[6]:
+            return "stopped"
+        return "paused" if info[7] else "playing"
+
+    @property
+    def animation_skinning(self) -> Literal["gpu", "cpu"]:
+        """Native deformation path selected for this model's joint count."""
+
+        return self._animation_info()[-2]
+
+    def late_update(self, _dt: float) -> None:
+        callback = self._animation_callback
+        if callback is None or not self.is_alive:
+            return
+        completion = self._animation_info()[-1]
+        if completion == self._animation_completion_seen:
+            return
+        self._animation_completion_seen = completion
+        self._animation_callback = None
+        callback(self)

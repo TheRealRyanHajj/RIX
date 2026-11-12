@@ -1,5 +1,8 @@
 """First-person controller driven by forwarded Pygame events."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/03_first_person.py
+
 import pygame
 import rix
 

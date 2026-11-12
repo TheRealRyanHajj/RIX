@@ -1,5 +1,8 @@
 """RIX native HUD, sprite, text, layout, and button example."""
 
+# Usage: from the repository root, run:
+#   python examples/09_hud/main.py
+
 from __future__ import annotations
 
 import argparse

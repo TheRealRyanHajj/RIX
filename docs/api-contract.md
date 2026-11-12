@@ -278,10 +278,27 @@ static entities reject nonzero motion and direct callers to a kinematic body.
 
 ## Assets
 
-`load_image`, `load_obj`, and `load_gltf` validate bounded local filesystem
-assets. `TextureCache` and `ModelCache` reuse immutable native data. OBJ/MTL,
-PNG/JPEG, glTF/GLB mesh/material/skeleton/animation metadata, and animation
-sampling are supported within the documented subset.
+`load_image`, `load_obj`, `load_gltf`, and `load_fbx` validate bounded local
+filesystem assets. `TextureCache` and `ModelCache` reuse immutable native data.
+OBJ/MTL, PNG/JPEG, glTF/GLB, and binary/ASCII FBX use shared immutable model,
+material, skeleton, and animation records.
+
+`Model.add_animation(name, path)` attaches a compatible FBX/glTF/GLB clip.
+`Model.play(name, *, loop=True, speed=1, blend=0, root_motion=False,
+on_complete=None)` restarts it and advances automatically. Pause/resume/stop,
+clip/time/duration/speed/state, and `animation_skinning` are public and typed.
+Completion callbacks run once on Python's normal late-update boundary. Every
+instance owns its controller; cache entries remain shared.
+
+Skeleton compatibility requires same-named target joints, named-parent
+agreement, and bounded rest scale/length/orientation. Four influences are
+retained. D3D11 GPU palettes support 64 joints and larger rigs use bounded
+native CPU transient skinning. A model part is deformed once per frame and its
+compact transient buffers are reused across main and shadow passes. In-place playback is default. Root motion is
+explicit: the owner receives horizontal X/Z translation and root yaw, while
+vertical root translation and pitch/roll remain in the animated pose and do not
+accumulate onto the owner across loops. Root motion cannot take ownership from
+dynamic bodies, character controllers, or collider-only static objects.
 
 ### AutoTexture and material maps
 

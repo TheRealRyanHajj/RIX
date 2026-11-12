@@ -1,5 +1,9 @@
 """Finite real listen server with isolated authority and local client roles."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/03_listen_server/main.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

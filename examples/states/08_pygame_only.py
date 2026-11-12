@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 08 Pygame Only.
+
+Run from the repository root with `python examples/states/08_pygame_only.py`. See
+`examples/states/README.md` for the state-example index."""
+
 import pygame
 from rix import GameStates
 

@@ -1,5 +1,8 @@
 """Generation-safe entity and scene ownership example."""
 
+# Usage: from the repository root, run:
+#   python examples/01_entity_lifecycle/main.py
+
 from rix import Entity, Game, InvalidEntityError, Scene
 
 

@@ -1,5 +1,9 @@
 """Authoritative native character motor with corrections and replicated visuals."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/11_prediction_interpolation/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

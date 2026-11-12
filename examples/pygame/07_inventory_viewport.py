@@ -1,5 +1,8 @@
 """Read 3D into a Pygame inventory panel (slower compatibility mode)."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/07_inventory_viewport.py
+
 import pygame
 import rix
 

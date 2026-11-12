@@ -1,5 +1,9 @@
 """Finite reconnect, spam, loss, and shutdown soak for RIX networking."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/network_soak.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

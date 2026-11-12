@@ -1,5 +1,8 @@
 """A complete beginner RIX obstacle course in fewer than 70 lines."""
 
+# Usage: from the repository root, run:
+#   python examples/03_obstacle_course/beginner.py
+
 from rix import Cube, Game, Player, Sphere, Text
 
 

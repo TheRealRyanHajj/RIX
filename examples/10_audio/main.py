@@ -1,5 +1,8 @@
 """RIX WAV playback and camera-relative positional-audio example."""
 
+# Usage: from the repository root, run:
+#   python examples/10_audio/main.py
+
 from __future__ import annotations
 
 import argparse

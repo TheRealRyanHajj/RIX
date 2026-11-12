@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 01 Basic.
+
+Run from the repository root with `python examples/states/01_basic.py`. See
+`examples/states/README.md` for the state-example index."""
+
 from rix import StateMachine
 
 moving = False

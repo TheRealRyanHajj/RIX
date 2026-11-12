@@ -1,5 +1,8 @@
 """Procedural and image skybox forms."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/12_skyboxes.py
+
 from rix import Game, Skybox
 
 game = Game(graphics_preset="high")

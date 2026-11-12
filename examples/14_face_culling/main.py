@@ -1,5 +1,8 @@
 """D3D11 visual validation for back/front/none face-culling modes."""
 
+# Usage: from the repository root, run:
+#   python examples/14_face_culling/main.py
+
 from __future__ import annotations
 
 import argparse

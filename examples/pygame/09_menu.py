@@ -1,5 +1,8 @@
 """A Pygame menu layered over a live RIX scene."""
 
+# Usage: from the repository root, run:
+#   python examples/pygame/09_menu.py
+
 import pygame
 import rix
 

@@ -12,6 +12,7 @@ from ._rix import (
 from .assets import (
     AnimationChannelInfo,
     AnimationClipInfo,
+    FbxInfo,
     GltfInfo,
     ImageInfo,
     ModelCache,
@@ -24,6 +25,7 @@ from .assets import (
     TextureCache,
     load_image,
     load_gltf,
+    load_fbx,
     load_obj,
 )
 from .audio import Audio, AudioSource, Sound
@@ -163,6 +165,7 @@ __all__ = [
     "Team",
     "TeamRoster",
     "GraphicsPreset",
+    "FbxInfo",
     "GltfInfo",
     "InvalidEntityError",
     "ImageInfo",
@@ -225,6 +228,7 @@ __all__ = [
     "physics",
     "load_image",
     "load_gltf",
+    "load_fbx",
     "load_obj",
     "native_add",
 ]

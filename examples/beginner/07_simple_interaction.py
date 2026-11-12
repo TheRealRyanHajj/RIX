@@ -1,5 +1,8 @@
 """Look at the orange cube and press E to destroy it."""
 
+# Usage: from the repository root, run:
+#   python examples/beginner/07_simple_interaction.py
+
 import rix as e3
 
 

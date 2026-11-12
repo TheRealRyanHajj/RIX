@@ -78,10 +78,11 @@ struct PartBuilder final {
                                 path.string());
     }
     const std::string extension = lowercase(path.extension().string());
-    if (extension != ".obj" && extension != ".gltf" && extension != ".glb") {
+    if (extension != ".obj" && extension != ".gltf" && extension != ".glb" &&
+        extension != ".fbx") {
         throw AssetError("unsupported model format '" + path.extension().string() +
                          "' for asset: " + path.string() +
-                         " (supported: .obj, .gltf, .glb)");
+                         " (supported: .obj, .gltf, .glb, .fbx)");
     }
     std::filesystem::path canonical = std::filesystem::weakly_canonical(path, error);
     if (error) {
@@ -310,7 +311,7 @@ void ModelData::validate() const {
     if (materials.empty()) {
         throw AssetError("model must contain at least the default material");
     }
-    if (parts.empty()) {
+    if (parts.empty() && !(skeleton.has_value() && !animations.empty())) {
         throw AssetError("model contains no renderable mesh parts: " + source_path.string());
     }
     for (const ModelPart& part : parts) {
@@ -318,6 +319,15 @@ void ModelData::validate() const {
             throw AssetError("model part references an out-of-range material");
         }
         part.mesh.validate();
+        for (const Vertex& vertex : part.mesh.vertices) {
+            for (std::size_t influence = 0; influence < vertex.weights.size(); ++influence) {
+                if (vertex.weights[influence] > 0.0F &&
+                    (!skeleton.has_value() ||
+                     vertex.joints[influence] >= skeleton->joints.size())) {
+                    throw AssetError("model vertex references an out-of-range joint");
+                }
+            }
+        }
         const ModelMaterial& material = materials[part.material_index];
         const bool textured = material.diffuse_texture.has_value() ||
                               material.normal_texture.has_value() ||
@@ -470,8 +480,14 @@ std::shared_ptr<const ModelData> ModelCache::load(const std::filesystem::path& p
         return found->second;
     }
     const std::string extension = lowercase(canonical.extension().string());
-    std::shared_ptr<const ModelData> model =
-        extension == ".obj" ? load_obj(canonical) : load_gltf(canonical);
+    std::shared_ptr<const ModelData> model;
+    if (extension == ".obj") {
+        model = load_obj(canonical);
+    } else if (extension == ".fbx") {
+        model = load_fbx(canonical);
+    } else {
+        model = load_gltf(canonical);
+    }
     models_.emplace(key, model);
     return model;
 }

@@ -1,5 +1,9 @@
 """Run or query the optional self-hosted RIX room-code directory."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/signaling.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

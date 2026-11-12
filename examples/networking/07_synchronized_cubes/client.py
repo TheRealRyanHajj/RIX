@@ -1,5 +1,9 @@
 """RIX 3D client interpolating registered authoritative cube transforms."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/07_synchronized_cubes/client.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

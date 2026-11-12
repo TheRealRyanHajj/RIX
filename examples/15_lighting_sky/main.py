@@ -1,5 +1,8 @@
 """Interactive D3D11 validation for RIX skyboxes and multiple lights."""
 
+# Usage: from the repository root, run:
+#   python examples/15_lighting_sky/main.py
+
 from __future__ import annotations
 
 import argparse

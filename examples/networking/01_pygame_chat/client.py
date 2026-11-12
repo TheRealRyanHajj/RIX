@@ -1,3 +1,8 @@
+"""Client process for the adjacent RIX networking example.
+
+Run from the repository root with `python examples/networking/01_pygame_chat/client.py`.
+Check the nearby README for controls, assets, or multi-process startup instructions."""
+
 from __future__ import annotations
 
 import argparse

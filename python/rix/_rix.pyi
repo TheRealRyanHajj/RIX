@@ -96,6 +96,9 @@ _NativeAnimationInfo = tuple[str, float, list[_NativeAnimationChannel]]
 def _load_gltf_info(
     path: str,
 ) -> tuple[_NativeModelInfo, _NativeSkeletonInfo | None, list[_NativeAnimationInfo]]: ...
+def _load_fbx_info(
+    path: str,
+) -> tuple[_NativeModelInfo, _NativeSkeletonInfo | None, list[_NativeAnimationInfo]]: ...
 
 class _ModelCache:
     def __init__(self) -> None: ...
@@ -396,6 +399,36 @@ class _NativeScene:
         color: tuple[float, float, float, float],
         cull_mode: str | None = None,
     ) -> None: ...
+    def add_model_animation(
+        self, handle: EntityHandle, name: str, path: str
+    ) -> None: ...
+    def play_model_animation(
+        self,
+        handle: EntityHandle,
+        name: str,
+        loop: bool = True,
+        speed: float = 1.0,
+        blend: float = 0.0,
+        root_motion: bool = False,
+    ) -> None: ...
+    def pause_model_animation(self, handle: EntityHandle) -> None: ...
+    def resume_model_animation(self, handle: EntityHandle) -> None: ...
+    def stop_model_animation(self, handle: EntityHandle) -> None: ...
+    def model_animation_info(
+        self, handle: EntityHandle
+    ) -> tuple[
+        list[tuple[str, float]],
+        str,
+        float,
+        float,
+        float,
+        bool,
+        bool,
+        bool,
+        bool,
+        str,
+        int,
+    ]: ...
     def has_render_component(self, handle: EntityHandle) -> bool: ...
     def render_component_info(
         self, handle: EntityHandle

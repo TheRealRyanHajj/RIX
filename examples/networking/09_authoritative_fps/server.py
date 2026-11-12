@@ -1,5 +1,9 @@
 """Headless authoritative FPS-rules server."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/09_authoritative_fps/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

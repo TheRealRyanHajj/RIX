@@ -1,5 +1,8 @@
 """Two-process direct-IP RIX transport sample."""
 
+# Usage: from the repository root, run:
+#   python examples/06_two_process/main.py
+
 from __future__ import annotations
 
 import argparse

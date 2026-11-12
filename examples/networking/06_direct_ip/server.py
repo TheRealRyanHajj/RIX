@@ -1,5 +1,9 @@
 """Direct-IP Session host; expose the UDP port only when deployment is secured."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/06_direct_ip/server.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

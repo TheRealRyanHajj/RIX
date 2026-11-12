@@ -1,5 +1,9 @@
 """Discover compatible LAN hosts, then connect through the normal Session."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/05_lan_discovery/client.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

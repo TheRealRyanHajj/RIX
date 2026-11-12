@@ -1,5 +1,9 @@
 """Independent Pygame+RIX client for authoritative FPS rules."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/09_authoritative_fps/client.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse

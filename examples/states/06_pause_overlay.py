@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 06 Pause Overlay.
+
+Run from the repository root with `python examples/states/06_pause_overlay.py`. See
+`examples/states/README.md` for the state-example index."""
+
 from rix import GameStates
 
 screens = GameStates("playing")

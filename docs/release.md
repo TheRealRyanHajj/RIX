@@ -1,4 +1,4 @@
-# Release, compatibility and private distribution
+# Release, compatibility and distribution
 
 ## Versioning
 
@@ -30,9 +30,11 @@ current Session/transport/replication/state contracts documented in
 
 ## Distribution
 
-RIX is private/proprietary. Artifacts must be distributed through an
-approved private channel. Do not publish to public package indexes. Preserve
-the project license and all applicable third-party notices.
+RIX is licensed under Apache License 2.0. Before publishing an artifact, verify
+that its metadata names `Apache-2.0`, that the license and applicable third-
+party notices are included, and that only intended runtime files are present.
+Publish wheels for the supported Windows/Python combinations after the release
+checklist above passes. Keep third-party components under their own licenses.
 
 The final multiplayer/state-system test matrix, artifact hashes, security
 result, performance measurements, and limitations are recorded in

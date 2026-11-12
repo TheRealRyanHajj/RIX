@@ -1,3 +1,8 @@
+"""Illustrates state-management pattern: 09 Headless Match.
+
+Run from the repository root with `python examples/states/09_headless_match.py`. See
+`examples/states/README.md` for the state-example index."""
+
 import time
 
 from rix import StateMachine, net

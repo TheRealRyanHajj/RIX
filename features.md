@@ -923,15 +923,16 @@ last valid image during a partial/invalid save, and updates every object sharing
 the cached image after a valid save. Destroying/clearing the final scene owner
 releases the corresponding GPU handles after a safe rendered frame.
 
-Load OBJ/MTL or glTF 2.0/GLB metadata:
+Load OBJ/MTL, glTF 2.0/GLB, or FBX metadata:
 
 ```python
-from rix import ModelCache, load_gltf, load_obj
+from rix import ModelCache, load_fbx, load_gltf, load_obj
 
 obj = load_obj("assets/level.obj")
 gltf = load_gltf("assets/character.glb")
+fbx = load_fbx("assets/YBot.fbx")
 print(obj.triangle_count, obj.parts, obj.materials, obj.warnings)
-print(gltf.skeleton, gltf.animations)
+print(gltf.skeleton, gltf.animations, fbx.skeleton)
 
 models = ModelCache()
 models.load("assets/level.obj")
@@ -944,6 +945,42 @@ models.clear()
 - `SkeletonInfo(name, joints)` and `SkeletonJointInfo(name, parent, bind_position, bind_rotation, bind_scale, inverse_bind)`.
 - `AnimationClipInfo(name, duration, channels)` and `AnimationChannelInfo(joint_index, target, interpolation, times, values)`.
 - `JointPose(position, rotation, scale)` returned by `clip.sample(skeleton, seconds, loop=True)`.
+
+### FBX skeletal animation
+
+FBX and glTF share one native skeleton, clip, controller, blending, and skinning
+runtime. Playback is automatic on the scene scheduler:
+
+```python
+character = rix.Model("assets/YBot.fbx", collider=False)
+character.add_animation("Thriller", "assets/Thriller Animation.fbx")
+character.play("Thriller", loop=True, speed=1.0, blend=0.15)
+
+print(character.animation_clips)
+print(character.current_animation, character.animation_time)
+print(character.animation_duration, character.animation_state)
+print(character.animation_skinning)  # "gpu" (<=64 joints) or "cpu"
+
+character.pause_animation()
+character.resume_animation()
+character.stop_animation()
+```
+
+`play(..., speed=-1)` runs in reverse. `play(..., loop=False,
+on_complete=callback)` invokes the callback once. `root_motion=False` is the
+in-place default; explicit root motion drives the owner's horizontal X/Z
+translation and yaw while authored vertical hip motion and pitch/roll remain in
+the skeleton. It is rejected where dynamic/character/static-collider physics
+owns the transform. Each `Model` has independent time/pose while immutable
+cached data is shared.
+
+The D3D11 renderer skins position, normal, and tangent attributes and uses the
+same palette for directional/spot/point shadows. Four influences are retained.
+Rigs through 64 joints use GPU uniforms; larger rigs use bounded native CPU
+skinning once per model part per frame, shared by the main and shadow passes.
+See `docs/fbx-importing.md`, `docs/skeletal-animation.md`, and
+`docs/animation-retargeting.md` for supported FBX material/texture fallbacks,
+Mixamo attachment, Pygame usage, and compatibility limits.
 
 ## Audio
 

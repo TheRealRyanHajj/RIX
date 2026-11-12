@@ -1,5 +1,9 @@
 """Finite StateMachine update/transition microbenchmark with no pass threshold."""
 
+# Usage: from the repository root, run:
+#   python benchmarks/state_machine.py
+# This prints benchmark measurements.
+
 from __future__ import annotations
 
 import argparse

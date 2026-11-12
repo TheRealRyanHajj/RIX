@@ -1,5 +1,9 @@
 """Compare deterministic latency, jitter, and loss profiles without sockets."""
 
+# Usage: from the repository root, run:
+#   python examples/networking/12_network_conditions/main.py
+# See the nearby README for setup and startup order.
+
 from __future__ import annotations
 
 import argparse
