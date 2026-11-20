@@ -5,7 +5,7 @@ your event loop, controls, menus, sprites, and sound, then use RIX for the
 3D scene, models, lighting, and physics. You can also build a game with RIX on
 its own.
 
-RIX is designed for Windows 10 and 11 (64-bit) and Python 3.11–3.13.
+RIX is designed for Windows 10 and 11 (64-bit) and Python 3.11–3.15.
 
 ## Install
 
